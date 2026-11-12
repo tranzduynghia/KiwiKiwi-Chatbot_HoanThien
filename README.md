@@ -47,7 +47,7 @@ Bot tự tạo database `gemini_bot` cùng hai collection `sessions` và `archiv
 | `/ask prompt:` | Hỏi đáp với AI |
 | `/refresh` | Lưu trữ cuộc trò chuyện hiện tại và bắt đầu phiên mới |
 | `/session` | Xem phiên hiện tại: số lượt, lúc bắt đầu, lần chat gần nhất, thời điểm tự làm mới (chỉ mình bạn thấy) |
-| `/status` | Tình trạng bot: RAM, uptime, Gemini API, MongoDB, thống kê |
+| `/status` | Tình trạng bot: RAM, uptime, Gemini API, MongoDB, thống kê. **Chỉ các Discord ID trong `STATUS_ALLOWED_IDS` được dùng**, kết quả chỉ người gõ lệnh thấy |
 
 Option của `/ask`:
 

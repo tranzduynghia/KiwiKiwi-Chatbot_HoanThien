@@ -60,6 +60,12 @@ SESSION_MAX_TURNS = int(os.getenv("SESSION_MAX_TURNS", "500"))  # quá số lư�
 SWEEP_MINUTES = float(os.getenv("SWEEP_MINUTES", "5"))  # chu kỳ quét phiên hết hạn để lưu trữ
 MONGODB_QUOTA_MB = float(os.getenv("MONGODB_QUOTA_MB", "512"))  # dung lượng gói Atlas (hiển thị ở /status)
 
+# Chỉ các Discord ID này được dùng /status (ngăn cách bằng dấu phẩy; đặt biến môi trường để đổi)
+STATUS_ALLOWED_IDS = {
+    int(x) for x in re.split(r"[,\s]+", os.getenv("STATUS_ALLOWED_IDS", "1240503090185109536,1568530089035956284"))
+    if x.strip().isdigit()
+}
+
 FALLBACK_TEXT = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
 
 SYSTEM_PROMPT = os.getenv(
@@ -921,7 +927,10 @@ async def check_gemini_api() -> tuple[bool, float, str]:
 
 @bot.tree.command(name="status", description="Xem tình trạng bot: RAM, uptime, Gemini API, thống kê")
 async def status(interaction: discord.Interaction):
-    await interaction.response.defer(thinking=True)
+    if interaction.user.id not in STATUS_ALLOWED_IDS:
+        return await interaction.response.send_message(
+            "🔒 Bạn không có quyền dùng lệnh này.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)  # thông tin hệ thống: chỉ người dùng lệnh thấy
     (api_ok, api_ms, api_msg), db_info = await asyncio.gather(check_gemini_api(), sessions.ping())
     mem = memory_info()
     proc = psutil.Process()
@@ -988,7 +997,7 @@ async def status(interaction: discord.Interaction):
     if os.getenv("RENDER_GIT_COMMIT"):
         env_bits.append(f"commit {os.getenv('RENDER_GIT_COMMIT')[:7]}")
     emb.set_footer(text=" · ".join(env_bits) + "  |  Gemini không cung cấp API xem quota còn lại")
-    await interaction.followup.send(embed=emb)
+    await interaction.followup.send(embed=emb, ephemeral=True)
 
 
 @bot.tree.error
