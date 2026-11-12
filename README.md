@@ -57,9 +57,9 @@ Option của `/ask`:
 | `ocr` | Chỉ trích xuất chữ từ `file` |
 | `think` | Suy nghĩ sâu + hiện tóm tắt suy nghĩ |
 | `web` | Tra cứu web (Google Search grounding), kèm nguồn |
-| `model` | Chọn model; danh sách tự lấy từ Gemini API |
+| `model` | Chọn model; **bỏ trống = tự động** (xem mục 7) |
 
-Nhãn trong danh sách model: 🆓 nhiều khả năng có free tier · 🧪 preview (giới hạn chặt hơn) · 💳 thường cần billing. Đây chỉ là gợi ý của bot, Google không trả thông tin này qua API.
+Danh sách gợi ý lấy từ Gemini API, trừ các model trong `HIDDEN_MODELS`. Nhãn trong danh sách: 🆓 nhiều khả năng có free tier · 🧪 preview (giới hạn chặt hơn) · 💳 thường cần billing. Đây chỉ là gợi ý của bot, Google không trả thông tin này qua API.
 
 ## 6. Phiên chat và lưu trữ
 
@@ -93,6 +93,17 @@ Khác biệt cần nhớ:
 - Bot **không lưu file đính kèm**, chỉ lưu tên file và câu trả lời. Hỏi tiếp về file cũ chỉ được khi câu trả lời đã chứa đủ nội dung.
 - Nếu MongoDB lỗi hoặc không đặt `MONGODB_URI`, bot vẫn trả lời bình thường nhưng không có trí nhớ và không lưu trữ.
 - Nâng cấp từ bản cũ: bot tự gỡ TTL index cũ của `sessions` (index này xoá phiên hết hạn mà không lưu trữ).
+
+## 7. Model tự động và tự chuyển khi quá tải
+
+Khi bạn **không chọn `model`** (hoặc chọn `🤖 Tự động`), bot dùng chuỗi **flash-lite → flash → pro**:
+- Mỗi hạng chọn 1 model tốt nhất từ danh sách API: ưu tiên bản ổn định, rồi bản mới nhất. Tên model không thuộc ba hạng này (như `gemini-4-*`, `nano-banana`, `omni`) sẽ không vào chuỗi tự động.
+- Nếu model đang dùng **quá tải (503/500), hết lượt (429), không còn tồn tại (404) hoặc phản hồi quá lâu**, bot chuyển ngay sang model kế tiếp cho chính câu hỏi đó, và ghi chú ở chân tin nhắn.
+- Model vừa lỗi bị **tạm bỏ qua** một lúc nên các câu hỏi sau dùng luôn model kế tiếp (≈1 phút nếu quá tải, theo thời gian Google yêu cầu nếu hết lượt, 30 phút nếu hết lượt trong ngày, 1 giờ nếu model không có quota free). Hết thời gian chờ, bot tự quay lại model ưu tiên.
+- Khi bạn **chọn model cụ thể**, bot không tự chuyển model, chỉ báo lỗi.
+- `/status` hiện chuỗi hiện tại và model nào đang bị tạm bỏ qua (⏳).
+
+**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. Dùng `EXTRA_MODELS` để thêm model vào danh sách, `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
 
 ## Lưu ý
 
