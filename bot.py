@@ -645,10 +645,12 @@ class AskBot(discord.Client):
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
+            synced = await self.tree.sync(guild=guild)
+            scope = f"CHỈ server có ID {GUILD_ID} (đang đặt GUILD_ID)"
         else:
-            await self.tree.sync()
-        log.info("Đã đồng bộ slash commands")
+            synced = await self.tree.sync()
+            scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
+        log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + c.name for c in synced), scope)
 
     async def start_web(self):
         async def health(_request):
