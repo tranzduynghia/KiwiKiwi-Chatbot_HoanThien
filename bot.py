@@ -1,7 +1,10 @@
 """
 Discord bot hỏi đáp AI với Gemini API (free tier)
 - /ask    : hỏi đáp + OCR + suy nghĩ sâu + tra cứu web (tuỳ chọn)
-- /status : RAM, uptime, tình trạng Gemini API, thống kê sử dụng
+- /refresh: làm mới phiên chat + lưu trữ VĨNH VIỄN cuộc trò chuyện (kèm Discord ID) vào MongoDB
+- /session: xem thông tin phiên chat hiện tại
+- /status : RAM, uptime, tình trạng Gemini API + MongoDB, thống kê sử dụng
+- Mỗi người 1 phiên riêng trên MongoDB Atlas; sau 2 giờ không chat phiên tự được lưu trữ + làm mới
 - Có web server nhỏ (/ và /health) để Render + UptimeRobot giữ bot luôn thức
 """
 import asyncio
@@ -13,12 +16,15 @@ import platform
 import re
 import sys
 import time
+import uuid
+import weakref
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import certifi
 import discord
 import psutil
 from aiohttp import web
@@ -26,6 +32,7 @@ from discord import app_commands
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
+from pymongo import AsyncMongoClient
 
 # --------------------------------------------------------------------------
 # Cấu hình (đặt trong Environment Variables của Render)
@@ -40,6 +47,18 @@ MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "2"))  # số request Gemini ch
 MODEL_REFRESH_HOURS = float(os.getenv("MODEL_REFRESH_HOURS", "6"))
 RAM_LIMIT_MB = os.getenv("RAM_LIMIT_MB")  # tuỳ chọn: ép giới hạn RAM hiển thị ở /status
 MAX_FILE_MB = 10
+
+# --- Phiên chat (MongoDB Atlas) ---
+MONGODB_URI = os.getenv("MONGODB_URI")  # nếu bỏ trống: tắt bộ nhớ phiên
+MONGODB_DB = os.getenv("MONGODB_DB", "gemini_bot")
+SESSION_IDLE_HOURS = float(os.getenv("SESSION_IDLE_HOURS", "2"))  # không chat quá lâu -> phiên tự làm mới
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))  # số tin gần nhất giữ trong phiên (user+bot)
+MAX_HISTORY_CHARS = int(os.getenv("MAX_HISTORY_CHARS", "24000"))  # tổng ký tự lịch sử gửi kèm mỗi lần hỏi
+MAX_STORED_CHARS = 4000  # cắt mỗi tin nhắn khi lưu để tiết kiệm dung lượng/token
+SESSION_TTL = timedelta(hours=SESSION_IDLE_HOURS)
+SESSION_MAX_TURNS = int(os.getenv("SESSION_MAX_TURNS", "500"))  # quá số lượt này -> tự lưu trữ + mở phiên mới
+SWEEP_MINUTES = float(os.getenv("SWEEP_MINUTES", "5"))  # chu kỳ quét phiên hết hạn để lưu trữ
+MONGODB_QUOTA_MB = float(os.getenv("MONGODB_QUOTA_MB", "512"))  # dung lượng gói Atlas (hiển thị ở /status)
 
 FALLBACK_TEXT = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
 
@@ -195,6 +214,240 @@ class Stats:
 stats = Stats()
 cooldowns: dict[int, float] = {}
 gemini_sem = asyncio.Semaphore(MAX_CONCURRENT)
+
+# --------------------------------------------------------------------------
+# Phiên chat + lưu trữ vĩnh viễn (MongoDB Atlas)
+# - `sessions`: phiên ĐANG HOẠT ĐỘNG, mỗi người 1 document (_id = Discord user id), chỉ giữ
+#   vài chục tin gần nhất làm ngữ cảnh cho AI.
+# - `archives`: lưu trữ VĨNH VIỄN, mỗi phiên 1 document (_id = session_id) chứa TOÀN BỘ cuộc
+#   trò chuyện + `user_id` (Discord ID). Mỗi lượt hỏi đáp được ghi vào đây ngay lập tức;
+#   khi phiên kết thúc (/refresh, 2 giờ không chat, quá số lượt) chỉ đánh dấu ended_at/end_reason
+#   rồi xoá bản "đang hoạt động". KHÔNG dùng TTL index để xoá, nên không mất dữ liệu.
+# --------------------------------------------------------------------------
+_user_locks: "weakref.WeakValueDictionary[int, asyncio.Lock]" = weakref.WeakValueDictionary()
+
+
+def user_lock(uid: int) -> asyncio.Lock:
+    """Mỗi người xử lý lần lượt từng lệnh để không ghi đè lịch sử của nhau."""
+    lock = _user_locks.get(uid)
+    if lock is None:
+        lock = asyncio.Lock()
+        _user_locks[uid] = lock
+    return lock
+
+
+def _clip(text: str) -> str:
+    return text if len(text) <= MAX_STORED_CHARS else text[:MAX_STORED_CHARS] + "…"
+
+
+class SessionStore:
+    def __init__(self):
+        self.client: Optional[AsyncMongoClient] = None
+        self.col = None  # sessions
+        self.archives = None  # archives
+        self.ok = False
+        self.index_ok = False
+        self.last_error: Optional[str] = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(MONGODB_URI)
+
+    async def _run(self, make_coro, default=None):
+        """Chạy 1 thao tác MongoDB; lỗi thì ghi nhận và trả về default (bot vẫn chạy không có phiên)."""
+        if self.col is None:
+            return default
+        try:
+            result = await make_coro()
+            self.ok = True
+            self.last_error = None
+            return result
+        except Exception as e:  # noqa: BLE001
+            self.ok = False
+            self.last_error = f"{type(e).__name__}: {e}"[:200]
+            log.warning("MongoDB lỗi: %s", self.last_error)
+            return default
+
+    async def _ensure_index(self):
+        if self.index_ok:
+            return
+
+        async def work():
+            info = await self.col.index_information()
+            old = info.get("expire_at_1")
+            if old and "expireAfterSeconds" in old:
+                # Bản cũ dùng TTL index để XOÁ phiên hết hạn -> sẽ làm mất dữ liệu chưa lưu trữ.
+                await self.col.drop_index("expire_at_1")
+                log.warning("Đã gỡ TTL index cũ của sessions (phiên hết hạn giờ được lưu trữ thay vì xoá)")
+            await self.col.create_index("expire_at")
+            await self.archives.create_index([("user_id", 1), ("created_at", -1)])
+            return True
+
+        self.index_ok = bool(await self._run(work))
+
+    async def connect(self):
+        if not self.enabled:
+            log.info("Chưa đặt MONGODB_URI → tắt bộ nhớ phiên")
+            return
+        kwargs = {"serverSelectionTimeoutMS": 8000, "tz_aware": True}
+        if MONGODB_URI.startswith("mongodb+srv://"):
+            kwargs["tlsCAFile"] = certifi.where()
+        self.client = AsyncMongoClient(MONGODB_URI, **kwargs)
+        db = self.client[MONGODB_DB]
+        self.col = db["sessions"]
+        self.archives = db["archives"]
+        await self._ensure_index()
+        if self.ok:
+            log.info("Đã kết nối MongoDB (db=%s), phiên tự lưu trữ + làm mới sau %g giờ", MONGODB_DB, SESSION_IDLE_HOURS)
+
+    async def close(self):
+        if self.client is not None:
+            try:
+                await self.client.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def end_session(self, uid: int, reason: str, only_if_expired: bool = False) -> Optional[dict]:
+        """Lưu trữ (đánh dấu kết thúc) rồi gỡ phiên đang hoạt động. reason: refresh | idle_timeout | max_turns.
+        Trả về {session_id, turns} nếu đã kết thúc; None nếu không có phiên hoặc lỗi (xem self.ok)."""
+        now = datetime.now(timezone.utc)
+        flt: dict = {"_id": uid}
+        if only_if_expired:
+            flt["expire_at"] = {"$lte": now}
+        doc = await self._run(lambda: self.col.find_one(flt))
+        if not doc:
+            return None
+        sid = doc.get("session_id") or uuid.uuid4().hex
+        ended_at = doc.get("expire_at", now) if reason == "idle_timeout" else now
+        r = await self._run(lambda: self.archives.update_one(
+            {"_id": sid},
+            {"$set": {"ended_at": ended_at, "end_reason": reason},
+             # chỉ dùng khi bản lưu trữ chưa tồn tại (phiên tạo từ phiên bản cũ)
+             "$setOnInsert": {"user_id": uid, "created_at": doc.get("created_at", now),
+                              "turns": doc.get("turns", 0), "messages": doc.get("messages", [])}},
+            upsert=True))
+        if r is None:
+            return None  # lưu trữ lỗi -> giữ nguyên phiên, lần quét sau sẽ thử lại
+        r = await self._run(lambda: self.col.delete_one({"_id": uid, "session_id": doc.get("session_id")}))
+        if r is None:
+            return None
+        return {"session_id": sid, "turns": doc.get("turns", 0)}
+
+    async def load(self, uid: int) -> Optional[dict]:
+        """Trả về phiên còn hạn. Phiên đã hết hạn (hoặc quá số lượt) sẽ được lưu trữ rồi coi như chưa có."""
+        doc = await self._run(lambda: self.col.find_one({"_id": uid}))
+        if not doc:
+            return None
+        last = doc.get("last_active")
+        if last and datetime.now(timezone.utc) - last > SESSION_TTL:
+            await self.end_session(uid, "idle_timeout")
+            return None
+        if doc.get("turns", 0) >= SESSION_MAX_TURNS:
+            await self.end_session(uid, "max_turns")
+            return None
+        return doc
+
+    async def archive_expired(self) -> int:
+        """Quét các phiên đã quá hạn (người dùng không quay lại) và lưu trữ chúng."""
+        now = datetime.now(timezone.utc)
+        docs = await self._run(
+            lambda: self.col.find({"expire_at": {"$lte": now}}, {"_id": 1}).to_list(200), [])
+        count = 0
+        for d in docs or []:
+            async with user_lock(d["_id"]):
+                if await self.end_session(d["_id"], "idle_timeout", only_if_expired=True):
+                    count += 1
+        if count:
+            log.info("Đã lưu trữ %d phiên hết hạn", count)
+        return count
+
+    async def save_turn(self, uid: int, user_text: str, model_text: str,
+                        session_doc: Optional[dict], model_id: str) -> Optional[int]:
+        """Ghi 1 lượt hỏi đáp. Trả về số lượt của phiên sau khi ghi, hoặc None nếu lỗi."""
+        await self._ensure_index()
+        now = datetime.now(timezone.utc)
+        fresh = session_doc is None
+        sid = uuid.uuid4().hex if fresh else (session_doc.get("session_id") or uuid.uuid4().hex)
+        created = now if fresh else session_doc.get("created_at", now)
+
+        # 1) lưu trữ vĩnh viễn: toàn văn, gắn Discord ID
+        r = await self._run(lambda: self.archives.update_one(
+            {"_id": sid},
+            {"$push": {"messages": {"$each": [
+                {"role": "user", "text": user_text, "at": now},
+                {"role": "model", "text": model_text, "at": now, "model": model_id}]}},
+             "$set": {"last_active": now},
+             "$inc": {"turns": 1},
+             "$setOnInsert": {"user_id": uid, "created_at": created, "ended_at": None, "end_reason": None}},
+            upsert=True))
+        if r is None:
+            return None
+
+        # 2) phiên đang hoạt động: chỉ giữ ngữ cảnh gần nhất, cắt ngắn từng tin
+        expire = now + SESSION_TTL
+        ctx = [{"role": "user", "text": _clip(user_text)}, {"role": "model", "text": _clip(model_text)}]
+        if fresh:
+            turns = 1
+            doc = {"_id": uid, "session_id": sid, "messages": ctx, "turns": 1,
+                   "created_at": now, "last_active": now, "expire_at": expire}
+            r = await self._run(lambda: self.col.replace_one({"_id": uid}, doc, upsert=True))
+        else:
+            turns = session_doc.get("turns", 0) + 1
+            r = await self._run(lambda: self.col.update_one(
+                {"_id": uid},
+                {"$push": {"messages": {"$each": ctx, "$slice": -MAX_HISTORY_MESSAGES}},
+                 "$set": {"last_active": now, "expire_at": expire, "session_id": sid},
+                 "$inc": {"turns": 1},
+                 "$setOnInsert": {"created_at": created}},
+                upsert=True))
+        return turns if r is not None else None
+
+    async def active_count(self) -> Optional[int]:
+        now = datetime.now(timezone.utc)
+        return await self._run(lambda: self.col.count_documents({"expire_at": {"$gt": now}}))
+
+    async def archive_count(self) -> Optional[int]:
+        return await self._run(lambda: self.archives.estimated_document_count())
+
+    async def storage_mb(self) -> Optional[float]:
+        """Dung lượng database đã dùng (MB). Không ảnh hưởng cờ self.ok nếu lệnh bị từ chối."""
+        if self.client is None:
+            return None
+        try:
+            st = await asyncio.wait_for(self.client[MONGODB_DB].command("dbStats"), timeout=10)
+            return (st.get("storageSize", 0) + st.get("indexSize", 0)) / 1024 / 1024
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def ping(self) -> tuple[bool, float, str]:
+        if not self.enabled or self.client is None:
+            return False, 0.0, "tắt"
+        t0 = time.perf_counter()
+        try:
+            await asyncio.wait_for(self.client.admin.command("ping"), timeout=10)
+            return True, (time.perf_counter() - t0) * 1000, "OK"
+        except Exception as e:  # noqa: BLE001
+            return False, (time.perf_counter() - t0) * 1000, type(e).__name__
+
+
+sessions = SessionStore()
+
+
+def history_to_contents(doc: Optional[dict]) -> list:
+    """Đổi lịch sử đã lưu thành contents của Gemini, giới hạn theo số tin và tổng ký tự."""
+    if not doc:
+        return []
+    msgs = (doc.get("messages") or [])[-MAX_HISTORY_MESSAGES:]
+    kept, total = [], 0
+    for m in reversed(msgs):
+        total += len(m["text"])
+        if total > MAX_HISTORY_CHARS and kept:
+            break
+        kept.append(m)
+    kept.reverse()
+    while kept and kept[0]["role"] != "user":  # lịch sử phải bắt đầu bằng lượt của người dùng
+        kept.pop(0)
+    return [types.Content(role=m["role"], parts=[types.Part(text=m["text"])]) for m in kept]
 
 # --------------------------------------------------------------------------
 # Gọi Gemini
@@ -377,9 +630,12 @@ class AskBot(discord.Client):
         self.ready_at: Optional[float] = None
 
     async def setup_hook(self):
-        await self.start_web()  # mở cổng trước để Render nhận diện service đã chạy
+        await self.start_web()  # mở cổng trước để nền tảng host nhận diện service đã chạy
+        await sessions.connect()
+        await sessions.archive_expired()
         await registry.refresh()
         self.loop.create_task(self.model_refresher())
+        self.loop.create_task(self.session_sweeper())
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
@@ -409,9 +665,19 @@ class AskBot(discord.Client):
             await asyncio.sleep(MODEL_REFRESH_HOURS * 3600)
             await registry.refresh()
 
+    async def session_sweeper(self):
+        """Định kỳ lưu trữ + làm mới các phiên quá 2 giờ không chat (kể cả khi người đó không quay lại)."""
+        while not self.is_closed():
+            await asyncio.sleep(SWEEP_MINUTES * 60)
+            await sessions.archive_expired()
+
     async def on_ready(self):
         self.ready_at = self.ready_at or time.time()
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
+
+    async def close(self):
+        await sessions.close()
+        await super().close()
 
 
 bot = AskBot()
@@ -461,11 +727,20 @@ async def ask(
     # --- chọn model ---
     model_id = model or registry.default_text()
 
+    lock = user_lock(uid)  # mỗi người xử lý lần lượt để lịch sử phiên không bị ghi đè
+    await lock.acquire()
     try:
-        parts: list = []
+        user_parts: list = []
         if file:
-            parts.append(await read_attachment(file))
-        parts.append(prompt)
+            user_parts.append(await read_attachment(file))
+        user_parts.append(types.Part(text=prompt))
+
+        # --- nạp phiên của người dùng ---
+        session_doc = await sessions.load(uid) if sessions.enabled else None
+        can_save = sessions.enabled and sessions.ok
+        if sessions.enabled and not sessions.ok:
+            notes.append("Không kết nối được bộ nhớ phiên — lần trả lời này không có ngữ cảnh cũ")
+        contents = history_to_contents(session_doc) + [types.Content(role="user", parts=user_parts)]
 
         system = f"{SYSTEM_PROMPT}\nHôm nay là {datetime.now(PACIFIC):%d/%m/%Y}."
         if ocr:
@@ -473,7 +748,7 @@ async def ask(
 
         async with gemini_sem:
             resp, thinking_used = await call_gemini(
-                model_id, parts, system=system, think=think, web_search=web)
+                model_id, contents, system=system, think=think, web_search=web)
         out = parse_response(resp)
         if think and not thinking_used:
             notes.append("Model này không hỗ trợ/không trả về tóm tắt suy nghĩ")
@@ -482,11 +757,21 @@ async def ask(
             reason = f"bị chặn ({out.blocked})" if out.blocked else f"finish_reason={out.finish}"
             raise UserError(f"Model không trả về nội dung — {reason}. Hãy thử diễn đạt lại.")
 
+        # --- lưu lượt hội thoại vào phiên ---
+        turns = 0
+        if can_save:
+            stored_user = ("[OCR] " if ocr else "") + (f"[Đính kèm: {file.filename}] " if file else "") + prompt
+            turns = await sessions.save_turn(uid, stored_user, out.text, session_doc, model_id) or 0
+            if not turns:
+                notes.append("Không lưu được phiên/lưu trữ (lỗi MongoDB) — tin nhắn này sẽ không được nhớ")
+
         elapsed = time.perf_counter() - started
         meta = [f"🤖 {model_id}", f"⏱ {elapsed:.1f}s"]
         meta += [lbl for lbl, on in (("🌐 web", web), ("🧠 think", thinking_used), ("🔎 OCR", ocr)) if on]
         if out.tokens:
             meta.append(f"{out.tokens:,} tokens")
+        if turns:
+            meta.append("🆕 phiên mới" if turns == 1 else f"💬 phiên: {turns} lượt")
         footer = "-# " + " · ".join(meta)
         extras = []
         if out.queries:
@@ -526,6 +811,8 @@ async def ask(
         if not isinstance(e, UserError):
             log.exception("Lỗi /ask")
         await interaction.followup.send(explain_error(e), allowed_mentions=NO_MENTIONS)
+    finally:
+        lock.release()
 
 
 @ask.autocomplete("model")
@@ -538,6 +825,52 @@ async def model_autocomplete(interaction: discord.Interaction, current: str):
         if len(out) >= 25:
             break
     return out
+
+
+# --------------------------------------------------------------------------
+# /refresh + /session
+# --------------------------------------------------------------------------
+@bot.tree.command(name="refresh", description="Làm mới phiên chat và lưu trữ cuộc trò chuyện hiện tại")
+async def refresh(interaction: discord.Interaction):
+    if not sessions.enabled:
+        return await interaction.response.send_message("ℹ️ Bot chưa bật bộ nhớ phiên.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    uid = interaction.user.id
+    async with user_lock(uid):
+        info = await sessions.end_session(uid, "refresh")
+    if info:
+        msg = (f"🔄 Đã làm mới phiên và **lưu trữ** cuộc trò chuyện ({info['turns']} lượt, "
+               f"mã `{info['session_id'][:8]}`).\nCâu hỏi tiếp theo sẽ bắt đầu một phiên mới.")
+    elif not sessions.ok:
+        msg = "⚠️ Không kết nối được MongoDB, chưa làm mới được phiên. Hãy thử lại sau."
+    else:
+        msg = "ℹ️ Bạn chưa có phiên nào đang hoạt động, câu hỏi tiếp theo sẽ tự tạo phiên mới."
+    await interaction.followup.send(msg, ephemeral=True)
+
+
+@bot.tree.command(name="session", description="Xem thông tin phiên chat hiện tại của bạn")
+async def session_info(interaction: discord.Interaction):
+    if not sessions.enabled:
+        return await interaction.response.send_message("ℹ️ Bot chưa bật bộ nhớ phiên.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    async with user_lock(interaction.user.id):
+        doc = await sessions.load(interaction.user.id)
+    if not sessions.ok:
+        return await interaction.followup.send("⚠️ Không kết nối được MongoDB, thử lại sau.", ephemeral=True)
+    if not doc:
+        return await interaction.followup.send(
+            "ℹ️ Bạn chưa có phiên nào đang hoạt động. Dùng `/ask` để bắt đầu phiên mới.", ephemeral=True)
+    ts = lambda k: int(doc[k].timestamp())  # noqa: E731
+    sid = (doc.get("session_id") or "")[:8] or "—"
+    emb = discord.Embed(title="💬 Phiên chat của bạn", color=discord.Color.blurple())
+    emb.add_field(name="Mã phiên", value=f"`{sid}`", inline=True)
+    emb.add_field(name="Số lượt hỏi đáp", value=f"**{doc.get('turns', 0)}**", inline=True)
+    emb.add_field(name="Tin nhắn đang nhớ", value=f"**{len(doc.get('messages', []))}** / {MAX_HISTORY_MESSAGES}", inline=True)
+    emb.add_field(name="Bắt đầu", value=f"<t:{ts('created_at')}:R>", inline=True)
+    emb.add_field(name="Chat gần nhất", value=f"<t:{ts('last_active')}:R>", inline=True)
+    emb.add_field(name="Tự lưu trữ + làm mới", value=f"<t:{ts('expire_at')}:R> (nếu không chat thêm)", inline=True)
+    emb.set_footer(text="Dùng /refresh để lưu trữ và làm mới ngay")
+    await interaction.followup.send(embed=emb, ephemeral=True)
 
 
 # --------------------------------------------------------------------------
@@ -589,7 +922,7 @@ async def check_gemini_api() -> tuple[bool, float, str]:
 @bot.tree.command(name="status", description="Xem tình trạng bot: RAM, uptime, Gemini API, thống kê")
 async def status(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
-    api_ok, api_ms, api_msg = await check_gemini_api()
+    (api_ok, api_ms, api_msg), db_info = await asyncio.gather(check_gemini_api(), sessions.ping())
     mem = memory_info()
     proc = psutil.Process()
     pct = mem["used"] / mem["limit"] * 100
@@ -619,6 +952,24 @@ async def status(interaction: discord.Interaction):
         f"Model mặc định: `{registry.default_text()}`\n"
         f"Danh sách model: **{len(registry.text)}** model chat (cập nhật {cache_age})"
         + (f"\n⚠️ Lỗi tải model: {registry.last_error}" if registry.last_error else "")))
+
+    if not sessions.enabled:
+        db_text = "⚪ Chưa bật (thiếu biến `MONGODB_URI`)"
+    else:
+        db_ok, db_ms, db_msg = db_info
+        active = archived = storage = None
+        if db_ok:
+            active, archived, storage = await asyncio.gather(
+                sessions.active_count(), sessions.archive_count(), sessions.storage_mb())
+        q = lambda v: "?" if v is None else v  # noqa: E731
+        db_text = (
+            f"Trạng thái: {'🟢 **Hoạt động**' if db_ok else '🔴 **Lỗi**'} ({db_msg}) · {db_ms:.0f} ms\n"
+            f"Phiên đang hoạt động: **{q(active)}** · đã lưu trữ: **{q(archived)}** phiên\n"
+            f"Tự lưu trữ + làm mới sau **{SESSION_IDLE_HOURS:g} giờ** không chat"
+            + (f"\nDung lượng: **{storage:.1f} / {MONGODB_QUOTA_MB:g} MB** `{bar(storage / MONGODB_QUOTA_MB * 100)}`"
+               if storage is not None else "")
+            + (f"\n⚠️ Lỗi gần nhất: {sessions.last_error}" if sessions.last_error else ""))
+    emb.add_field(name="🗄️ Phiên chat & lưu trữ (MongoDB Atlas)", inline=False, value=db_text)
 
     top = ", ".join(f"`{m}` ×{n}" for m, n in stats.daily_models.most_common(4)) or "chưa có"
     rate = f"{stats.ok / stats.total * 100:.0f}%" if stats.total else "—"
