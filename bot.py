@@ -8,6 +8,7 @@ Discord bot hỏi đáp AI với Gemini API (free tier)
 - Có web server nhỏ (/ và /health) để Render + UptimeRobot giữ bot luôn thức
 """
 import asyncio
+import fnmatch
 import io
 import logging
 import mimetypes
@@ -41,7 +42,22 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PORT = int(os.getenv("PORT", "10000"))  # cổng web server /health
 GUILD_ID = os.getenv("GUILD_ID")  # tuỳ chọn: sync lệnh tức thì cho 1 server khi test
-DEFAULT_TEXT_MODEL = os.getenv("DEFAULT_TEXT_MODEL", "").strip()
+DEFAULT_TEXT_MODEL = os.getenv("DEFAULT_TEXT_MODEL", "").strip()  # tuỳ chọn: ép model đứng đầu chuỗi tự động
+
+
+def _csv_env(name: str, default: str = "") -> list[str]:
+    return [x.strip() for x in re.split(r"[,\n]+", os.getenv(name, default)) if x.strip()]
+
+
+# Model bị ẨN khỏi danh sách gợi ý của option `model` (vẫn nằm trong chuỗi tự động nếu đúng loại;
+# hỗ trợ ký tự đại diện, ví dụ gemini-4-*). Đặt HIDDEN_MODELS="" để hiện tất cả.
+HIDDEN_MODELS = _csv_env(
+    "HIDDEN_MODELS",
+    "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro,gemini-nano-banana-2.1,"
+    "gemini-omni-flash-preview,gemini-4-argon,gemini-4-carbon",
+)
+EXTRA_MODELS = _csv_env("EXTRA_MODELS")  # model thêm tay vào danh sách gợi ý
+AUTO_MODEL_CHAIN = _csv_env("AUTO_MODEL_CHAIN")  # tuỳ chọn: tự quy định thứ tự model tự động
 USER_COOLDOWN = float(os.getenv("USER_COOLDOWN", "5"))  # giây giữa 2 lần /ask của 1 người
 MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "2"))  # số request Gemini chạy song song
 MODEL_REFRESH_HOURS = float(os.getenv("MODEL_REFRESH_HOURS", "6"))
@@ -66,7 +82,7 @@ STATUS_ALLOWED_IDS = {
     if x.strip().isdigit()
 }
 
-FALLBACK_TEXT = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+FALLBACK_TEXT = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]  # lite → flash → pro
 
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -125,6 +141,29 @@ def badge_for(model_id: str) -> str:
     return "🆓"
 
 
+def tier_of(model_id: str) -> Optional[str]:
+    """Phân hạng model theo tên: lite < flash < pro. None nếu không thuộc 3 hạng này."""
+    low = model_id.lower()
+    if not low.startswith("gemini-"):
+        return None
+    if "lite" in low:
+        return "lite"
+    if "flash" in low:
+        return "flash"
+    if "pro" in low:
+        return "pro"
+    return None
+
+
+def is_stable(model_id: str) -> bool:
+    low = model_id.lower()
+    return "preview" not in low and "exp" not in low
+
+
+def is_hidden(model_id: str) -> bool:
+    return any(fnmatch.fnmatch(model_id.lower(), pat.lower()) for pat in HIDDEN_MODELS)
+
+
 @dataclass
 class ModelInfo:
     id: str
@@ -162,22 +201,32 @@ class ModelRegistry:
             self.last_error = f"{type(e).__name__}: {e}"[:200]
             log.warning("Không tải được danh sách model: %s", self.last_error)
 
-    def default_text(self) -> str:
+    def auto_chain(self) -> list[str]:
+        """Thứ tự model cho chế độ tự động: flash-lite → flash → pro (mỗi hạng chọn 1 model tốt nhất,
+        ưu tiên bản ổn định, rồi bản mới nhất). Lấy từ danh sách API, không phụ thuộc HIDDEN_MODELS."""
+        if AUTO_MODEL_CHAIN:
+            chain = list(AUTO_MODEL_CHAIN)
+        else:
+            ids = [m.id for m in self.text]
+            chain = []
+            for tier in ("lite", "flash", "pro"):
+                pool = [i for i in ids if tier_of(i) == tier]
+                if pool:
+                    chain.append(max(pool, key=lambda i: (is_stable(i), version_of(i), -len(i))))
         if DEFAULT_TEXT_MODEL:
-            return DEFAULT_TEXT_MODEL
-        ids = [m.id for m in self.text]
-        flash = [i for i in ids if "flash" in i and "lite" not in i and "latest" not in i]
-        pool = flash or ids
-        stable = [i for i in pool if "preview" not in i and "exp" not in i]
-        pool = stable or pool
-        if not pool:
-            return FALLBACK_TEXT[0]
-        return max(pool, key=lambda i: (version_of(i), -len(i)))
+            chain = [DEFAULT_TEXT_MODEL] + [m for m in chain if m != DEFAULT_TEXT_MODEL]
+        return chain or list(FALLBACK_TEXT)
+
+    def default_text(self) -> str:
+        return self.auto_chain()[0]
 
     def choices(self) -> list[ModelInfo]:
-        if self.text:
-            return self.text
-        return [ModelInfo(i, i, badge_for(i)) for i in FALLBACK_TEXT]
+        """Danh sách gợi ý cho option `model`: model từ API trừ model bị ẩn, cộng model thêm tay."""
+        base = self.text or [ModelInfo(i, i, badge_for(i)) for i in FALLBACK_TEXT]
+        out = [m for m in base if not is_hidden(m.id)]
+        have = {m.id for m in out}
+        out += [ModelInfo(i, i, badge_for(i)) for i in EXTRA_MODELS if i not in have]
+        return out
 
 
 registry = ModelRegistry()
@@ -458,6 +507,56 @@ def history_to_contents(doc: Optional[dict]) -> list:
 # --------------------------------------------------------------------------
 # Gọi Gemini
 # --------------------------------------------------------------------------
+model_cooldowns: dict[str, float] = {}  # model -> mốc time.monotonic() được dùng lại
+RETRYABLE_CODES = (404, 429, 500, 503)
+
+
+def cooldown_left(model_id: str) -> float:
+    return max(0.0, model_cooldowns.get(model_id, 0.0) - time.monotonic())
+
+
+def is_retryable(e: Exception) -> bool:
+    return isinstance(e, asyncio.TimeoutError) or getattr(e, "code", None) in RETRYABLE_CODES
+
+
+def failure_reason(e: Exception) -> str:
+    if isinstance(e, asyncio.TimeoutError):
+        return "phản hồi quá lâu"
+    code = getattr(e, "code", None)
+    return {429: "hết lượt/quota", 500: "đang quá tải", 503: "đang quá tải", 404: "không còn tồn tại"}.get(code, f"lỗi {code}")
+
+
+def cooldown_seconds(e: Exception) -> float:
+    """Model vừa lỗi sẽ bị tạm bỏ qua bao lâu."""
+    if isinstance(e, asyncio.TimeoutError):
+        return 60.0
+    code = getattr(e, "code", None)
+    low = (getattr(e, "message", "") or "").lower()
+    if code == 404:
+        return 6 * 3600.0
+    if code == 429:
+        if "limit: 0" in low:
+            return 3600.0  # model không có quota free
+        if "perday" in low or "per day" in low:
+            return 1800.0
+        m = re.search(r"retry in ([\d.]+)s", low)
+        return min(float(m.group(1)) + 1, 600.0) if m else 60.0
+    return 60.0  # 500/503
+
+
+def mark_failure(model_id: str, e: Exception):
+    if is_retryable(e):
+        model_cooldowns[model_id] = time.monotonic() + cooldown_seconds(e)
+
+
+def chain_status_text() -> str:
+    parts = []
+    for m in registry.auto_chain():
+        left = cooldown_left(m)
+        parts.append(f"`{m}`" + (f" ⏳{left:.0f}s" if left > 0 else ""))
+    return " → ".join(parts)
+
+
 def build_thinking_config(model_id: str) -> Optional[types.ThinkingConfig]:
     """Gemini 3.x dùng thinking_level, Gemini 2.5 dùng thinking_budget."""
     v = version_of(model_id)
@@ -472,7 +571,7 @@ def build_thinking_config(model_id: str) -> Optional[types.ThinkingConfig]:
 
 
 async def call_gemini(model: str, contents: list, *, system: Optional[str], think: bool,
-                      web_search: bool):
+                      web_search: bool, max_retries: int = 3):
     """Trả về (response, thinking_used). Tự retry khi 500/503 và bỏ thinking nếu model không hỗ trợ."""
     attempts: list[tuple[types.GenerateContentConfig, bool]] = []
     base: dict = {"system_instruction": system}
@@ -485,7 +584,7 @@ async def call_gemini(model: str, contents: list, *, system: Optional[str], thin
     attempts.append((types.GenerateContentConfig(**base), False))
 
     for idx, (cfg, thinking_used) in enumerate(attempts):
-        for retry in range(3):
+        for retry in range(max_retries):
             try:
                 resp = await asyncio.wait_for(
                     gemini.aio.models.generate_content(model=model, contents=contents, config=cfg),
@@ -493,7 +592,7 @@ async def call_gemini(model: str, contents: list, *, system: Optional[str], thin
                 )
                 return resp, thinking_used
             except genai_errors.APIError as e:
-                if e.code in (500, 503) and retry < 2:
+                if e.code in (500, 503) and retry < max_retries - 1:
                     await asyncio.sleep(2 * (retry + 1))
                     continue
                 if e.code == 400 and idx < len(attempts) - 1:
@@ -501,6 +600,37 @@ async def call_gemini(model: str, contents: list, *, system: Optional[str], thin
                     break
                 raise
     raise RuntimeError("Không gọi được Gemini")
+
+
+async def call_with_fallback(chain: list[str], contents: list, *, system: Optional[str],
+                             think: bool, web_search: bool):
+    """Chế độ tự động: thử lần lượt các model trong chain (bỏ qua model đang bị tạm khoá do lỗi).
+    Gặp quá tải/hết lượt/timeout thì khoá model đó một lúc và chuyển sang model kế tiếp.
+    Trả về (response, thinking_used, model_dùng, {model: lý do bị bỏ qua})."""
+    errors: dict[str, str] = {}
+    ready = [m for m in chain if cooldown_left(m) <= 0]
+    for m in chain:
+        if m not in ready:
+            errors[m] = f"đang chờ phục hồi ~{cooldown_left(m):.0f}s"
+    if not ready:  # tất cả đang bị khoá -> thử model sắp hết khoá nhất
+        ready = [min(chain, key=cooldown_left)]
+    last_exc: Optional[Exception] = None
+    for i, m in enumerate(ready):
+        is_last = i == len(ready) - 1
+        try:
+            resp, thinking_used = await call_gemini(
+                m, contents, system=system, think=think, web_search=web_search,
+                max_retries=3 if is_last else 1)  # còn model dự phòng thì chuyển ngay, không chờ retry
+            model_cooldowns.pop(m, None)
+            return resp, thinking_used, m, errors
+        except (genai_errors.APIError, asyncio.TimeoutError) as e:
+            if not is_retryable(e):
+                raise
+            mark_failure(m, e)
+            errors[m] = failure_reason(e)
+            last_exc = e
+            log.warning("Model %s lỗi (%s), thử model kế tiếp", m, errors[m])
+    raise last_exc  # type: ignore[misc]
 
 
 @dataclass
@@ -718,7 +848,7 @@ psutil.Process().cpu_percent(None)  # khởi tạo bộ đo CPU
 @app_commands.describe(
     prompt="Câu hỏi / yêu cầu của bạn",
     file="Ảnh hoặc PDF đính kèm để hỏi / OCR (tối đa 10MB)",
-    model="Chọn model Gemini (danh sách tự lấy từ API)",
+    model="Chọn model; bỏ trống = tự động (flash-lite → flash → pro, tự chuyển khi quá tải)",
     web="Tra cứu thông tin mới trên web (Google Search)",
     think="Suy nghĩ sâu và hiện tóm tắt quá trình suy nghĩ",
     ocr="Chỉ trích xuất chữ từ file đính kèm (OCR)",
@@ -752,7 +882,9 @@ async def ask(
     features = ["chat"] + [n for n, on in (("web", web), ("think", think), ("ocr", ocr), ("file", bool(file))) if on]
 
     # --- chọn model ---
-    model_id = model or registry.default_text()
+    auto = not model or model.strip().lower() == "auto"
+    chain = registry.auto_chain() if auto else [model.strip()]
+    model_id = chain[0]
 
     lock = user_lock(uid)  # mỗi người xử lý lần lượt để lịch sử phiên không bị ghi đè
     await lock.acquire()
@@ -773,10 +905,24 @@ async def ask(
         if ocr:
             system = f"{OCR_INSTRUCTION}\n\n{system}"
 
+        errors: dict[str, str] = {}
         async with gemini_sem:
-            resp, thinking_used = await call_gemini(
-                model_id, contents, system=system, think=think, web_search=web)
+            if auto:
+                resp, thinking_used, model_id, errors = await call_with_fallback(
+                    chain, contents, system=system, think=think, web_search=web)
+            else:
+                try:
+                    resp, thinking_used = await call_gemini(
+                        model_id, contents, system=system, think=think, web_search=web)
+                    model_cooldowns.pop(model_id, None)
+                except (genai_errors.APIError, asyncio.TimeoutError) as e:
+                    mark_failure(model_id, e)
+                    raise
         out = parse_response(resp)
+        if auto and model_id in chain:
+            failed = [f"`{m}` ({errors[m]})" for m in chain[:chain.index(model_id)] if m in errors]
+            if failed:
+                notes.append("Tự động chuyển model: " + ", ".join(failed) + f" → `{model_id}`")
         if think and not thinking_used:
             notes.append("Model này không hỗ trợ/không trả về tóm tắt suy nghĩ")
 
@@ -846,6 +992,8 @@ async def ask(
 async def model_autocomplete(interaction: discord.Interaction, current: str):
     cur = current.lower().strip()
     out = []
+    if not cur or any(cur in k for k in ("auto", "tự động", "tu dong")):
+        out.append(app_commands.Choice(name="🤖 Tự động (flash-lite → flash → pro)", value="auto"))
     for m in registry.choices():
         if cur in m.id.lower() or cur in m.display.lower():
             out.append(app_commands.Choice(name=f"{m.badge} {m.id}"[:100], value=m.id))
@@ -979,7 +1127,7 @@ async def status(interaction: discord.Interaction):
     cache_age = f"{fmt_duration(time.time() - registry.updated_at)} trước" if registry.updated_at else "chưa tải được"
     emb.add_field(name="🔌 Gemini API", inline=False, value=(
         f"Trạng thái: {'🟢 **Hoạt động**' if api_ok else '🔴 **Lỗi**'} ({api_msg}) · {api_ms:.0f} ms\n"
-        f"Model mặc định: `{registry.default_text()}`\n"
+        f"Model tự động: {chain_status_text()}\n"
         f"Danh sách model: **{len(registry.text)}** model chat (cập nhật {cache_age})"
         + (f"\n⚠️ Lỗi tải model: {registry.last_error}" if registry.last_error else "")))
 
