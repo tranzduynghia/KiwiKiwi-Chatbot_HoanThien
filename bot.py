@@ -96,6 +96,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
+BOT_VERSION = "2026.11.12-autochain"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -768,11 +769,10 @@ class AskBot(discord.Client):
 
     async def setup_hook(self):
         await self.start_web()  # mở cổng trước để nền tảng host nhận diện service đã chạy
-        await sessions.connect()
-        await sessions.archive_expired()
         await registry.refresh()
         self.loop.create_task(self.model_refresher())
         self.loop.create_task(self.session_sweeper())
+        self.loop.create_task(self.init_sessions())  # chạy nền: MongoDB chậm/lỗi không làm bot lên chậm
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
@@ -782,6 +782,7 @@ class AskBot(discord.Client):
             synced = await self.tree.sync()
             scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
         log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + c.name for c in synced), scope)
+        log.info("Phiên bản %s · RAM tiến trình: %s", BOT_VERSION, fmt_bytes(psutil.Process().memory_info().rss))
 
     async def start_web(self):
         async def health(_request):
@@ -803,6 +804,10 @@ class AskBot(discord.Client):
         while not self.is_closed():
             await asyncio.sleep(MODEL_REFRESH_HOURS * 3600)
             await registry.refresh()
+
+    async def init_sessions(self):
+        await sessions.connect()
+        await sessions.archive_expired()
 
     async def session_sweeper(self):
         """Định kỳ lưu trữ + làm mới các phiên quá 2 giờ không chat (kể cả khi người đó không quay lại)."""
@@ -1160,7 +1165,7 @@ async def status(interaction: discord.Interaction):
         f"Tính năng: {feat}\n"
         f"Lỗi gần nhất: {last_err}"))
 
-    env_bits = [f"Python {platform.python_version()}", f"discord.py {discord.__version__}"]
+    env_bits = [f"bản {BOT_VERSION}", f"Python {platform.python_version()}", f"discord.py {discord.__version__}"]
     if os.getenv("RENDER_SERVICE_NAME"):
         env_bits.append(f"Render: {os.getenv('RENDER_SERVICE_NAME')}")
     if os.getenv("RENDER_GIT_COMMIT"):
