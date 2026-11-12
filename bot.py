@@ -634,6 +634,7 @@ class AskBot(discord.Client):
         super().__init__(intents=discord.Intents.default())
         self.tree = app_commands.CommandTree(self)
         self.ready_at: Optional[float] = None
+        self._cleaned_guild_cmds = False
 
     async def setup_hook(self):
         await self.start_web()  # mở cổng trước để nền tảng host nhận diện service đã chạy
@@ -679,7 +680,25 @@ class AskBot(discord.Client):
             await asyncio.sleep(SWEEP_MINUTES * 60)
             await sessions.archive_expired()
 
+    async def cleanup_guild_commands(self):
+        """Xoá lệnh đăng ký riêng cho từng server (còn sót từ lúc từng đặt GUILD_ID),
+        nếu không mỗi lệnh sẽ hiện 2 lần cùng bản toàn cục. Chỉ chạy khi KHÔNG đặt GUILD_ID."""
+        if GUILD_ID:
+            return
+        for guild in list(self.guilds):
+            try:
+                if await self.tree.fetch_commands(guild=guild):
+                    self.tree.clear_commands(guild=guild)
+                    await self.tree.sync(guild=guild)  # tree riêng của server đang rỗng -> xoá hết bản riêng
+                    log.info("Đã xoá lệnh riêng còn sót ở server %s (%d)", guild.name, guild.id)
+            except discord.HTTPException as e:
+                log.warning("Không dọn được lệnh riêng ở server %s: %s", guild.id, e)
+            await asyncio.sleep(1)
+
     async def on_ready(self):
+        if not self._cleaned_guild_cmds:
+            self._cleaned_guild_cmds = True
+            self.loop.create_task(self.cleanup_guild_commands())
         self.ready_at = self.ready_at or time.time()
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
