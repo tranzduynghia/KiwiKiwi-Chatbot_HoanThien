@@ -1,5 +1,5 @@
 discord.py>=2.4.0
-google-genai>=1.51.0
+google-genai>=3.2.0,<4
 pymongo>=4.13.0
 certifi
 psutil>=5.9.8

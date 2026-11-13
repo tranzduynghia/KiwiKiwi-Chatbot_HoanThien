@@ -98,7 +98,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.13-hydrogen"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.13-xhigh"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -570,8 +570,8 @@ THINKING_BUDGETS = {"low": 1024, "medium": 8192, "high": 24576}
 
 
 def build_thinking_configs(model_id: str, level: str) -> list[tuple[str, types.ThinkingConfig]]:
-    """Danh sách (mức thực tế, config) để thử lần lượt. Một số model Gemini 3 không có mức `medium`,
-    khi đó bot thử tiếp `high`. Model đời cũ (<2.5) không hỗ trợ thinking -> danh sách rỗng."""
+    """Danh sách (mức thực tế, config) để thử lần lượt. Model không có mức `medium`/`xhigh` thì bot
+    thử tiếp `high`. Model đời cũ (<2.5) không hỗ trợ thinking -> danh sách rỗng."""
     v = version_of(model_id)
     out: list[tuple[str, types.ThinkingConfig]] = []
     try:
@@ -581,10 +581,16 @@ def build_thinking_configs(model_id: str, level: str) -> list[tuple[str, types.T
             elif v >= 2.5:
                 out.append(("auto", types.ThinkingConfig(thinking_budget=-1, include_thoughts=True)))  # -1 = tự động
         elif v >= 3:
-            for lv in ([level, "high"] if level == "medium" else [level]):
-                out.append((lv, types.ThinkingConfig(thinking_level=lv, include_thoughts=True)))
+            # mức không phải model nào cũng có (medium: một số model Pro; xhigh: mới có ở Gemini 4 Hydrogen)
+            # -> thử mức đã chọn trước, rồi `high`
+            for lv in {"medium": ["medium", "high"], "xhigh": ["xhigh", "high"]}.get(level, [level]):
+                try:
+                    out.append((lv, types.ThinkingConfig(thinking_level=lv, include_thoughts=True)))
+                except Exception as e:  # SDK cũ chưa biết mức này (vd xhigh) -> bỏ qua, dùng mức kế tiếp
+                    log.warning("SDK không nhận thinking_level=%s: %s", lv, e)
         elif v >= 2.5:
-            out.append((level, types.ThinkingConfig(thinking_budget=THINKING_BUDGETS[level], include_thoughts=True)))
+            lv = "high" if level == "xhigh" else level  # Gemini 2.5 không có xhigh
+            out.append((lv, types.ThinkingConfig(thinking_budget=THINKING_BUDGETS[lv], include_thoughts=True)))
     except Exception as e:  # SDK cũ không biết thinking_level
         log.warning("Không tạo được ThinkingConfig: %s", e)
     return out
@@ -876,7 +882,7 @@ psutil.Process().cpu_percent(None)  # khởi tạo bộ đo CPU
     file="Ảnh hoặc PDF đính kèm để hỏi / OCR (tối đa 10MB)",
     model="Chọn model; bỏ trống = tự động (flash-lite → flash → pro, tự chuyển khi quá tải)",
     web="Tra cứu thông tin mới trên web (Google Search)",
-    thinking_level="Suy nghĩ sâu: auto (model tự chọn) / low / medium / high. Bỏ trống = không bật",
+    thinking_level="Suy nghĩ sâu: auto / low / medium / high / xhigh (xhigh chỉ vài model như Hydrogen)",
     ocr="Chỉ trích xuất chữ từ file đính kèm (OCR)",
 )
 async def ask(
@@ -885,7 +891,7 @@ async def ask(
     file: Optional[discord.Attachment] = None,
     model: Optional[str] = None,
     web: bool = False,
-    thinking_level: Optional[Literal["auto", "low", "medium", "high"]] = None,
+    thinking_level: Optional[Literal["auto", "low", "medium", "high", "xhigh"]] = None,
     ocr: bool = False,
 ):
     uid = interaction.user.id
