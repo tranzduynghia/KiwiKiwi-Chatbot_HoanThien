@@ -22,7 +22,7 @@ import weakref
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 
 import certifi
@@ -98,7 +98,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.12-nopro"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.12-thinklevel"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -565,31 +565,38 @@ def chain_status_text() -> str:
     return " → ".join(parts)
 
 
-def build_thinking_config(model_id: str) -> Optional[types.ThinkingConfig]:
-    """Gemini 3.x dùng thinking_level, Gemini 2.5 dùng thinking_budget."""
+# Gemini 3.x nhận thinking_level trực tiếp; Gemini 2.5 dùng ngân sách token (thinking_budget).
+THINKING_BUDGETS = {"low": 1024, "medium": 8192, "high": 24576}
+
+
+def build_thinking_configs(model_id: str, level: str) -> list[tuple[str, types.ThinkingConfig]]:
+    """Danh sách (mức thực tế, config) để thử lần lượt. Một số model Gemini 3 không có mức `medium`,
+    khi đó bot thử tiếp `high`. Model đời cũ (<2.5) không hỗ trợ thinking -> danh sách rỗng."""
     v = version_of(model_id)
+    out: list[tuple[str, types.ThinkingConfig]] = []
     try:
         if v >= 3:
-            return types.ThinkingConfig(thinking_level="high", include_thoughts=True)
-        if v >= 2.5:
-            return types.ThinkingConfig(thinking_budget=-1, include_thoughts=True)  # -1 = tự động
+            for lv in ([level, "high"] if level == "medium" else [level]):
+                out.append((lv, types.ThinkingConfig(thinking_level=lv, include_thoughts=True)))
+        elif v >= 2.5:
+            out.append((level, types.ThinkingConfig(thinking_budget=THINKING_BUDGETS[level], include_thoughts=True)))
     except Exception as e:  # SDK cũ không biết thinking_level
         log.warning("Không tạo được ThinkingConfig: %s", e)
-    return None
+    return out
 
 
-async def call_gemini(model: str, contents: list, *, system: Optional[str], think: bool,
+async def call_gemini(model: str, contents: list, *, system: Optional[str], thinking_level: Optional[str],
                       web_search: bool, max_retries: int = 3):
-    """Trả về (response, thinking_used). Tự retry khi 500/503 và bỏ thinking nếu model không hỗ trợ."""
-    attempts: list[tuple[types.GenerateContentConfig, bool]] = []
+    """Trả về (response, mức_thinking_thực_tế hoặc None). Tự retry khi 500/503, và nếu model từ chối
+    cấu hình thinking (400) thì thử mức kế tiếp rồi bỏ thinking."""
+    attempts: list[tuple[types.GenerateContentConfig, Optional[str]]] = []
     base: dict = {"system_instruction": system}
     if web_search:
         base["tools"] = [types.Tool(google_search=types.GoogleSearch())]
-    if think:
-        tc = build_thinking_config(model)
-        if tc:
-            attempts.append((types.GenerateContentConfig(**base, thinking_config=tc), True))
-    attempts.append((types.GenerateContentConfig(**base), False))
+    if thinking_level:
+        for used_level, tc in build_thinking_configs(model, thinking_level):
+            attempts.append((types.GenerateContentConfig(**base, thinking_config=tc), used_level))
+    attempts.append((types.GenerateContentConfig(**base), None))
 
     for idx, (cfg, thinking_used) in enumerate(attempts):
         for retry in range(max_retries):
@@ -611,7 +618,7 @@ async def call_gemini(model: str, contents: list, *, system: Optional[str], thin
 
 
 async def call_with_fallback(chain: list[str], contents: list, *, system: Optional[str],
-                             think: bool, web_search: bool):
+                             thinking_level: Optional[str], web_search: bool):
     """Chế độ tự động: thử lần lượt các model trong chain (bỏ qua model đang bị tạm khoá do lỗi).
     Gặp quá tải/hết lượt/timeout thì khoá model đó một lúc và chuyển sang model kế tiếp.
     Trả về (response, thinking_used, model_dùng, {model: lý do bị bỏ qua})."""
@@ -627,7 +634,7 @@ async def call_with_fallback(chain: list[str], contents: list, *, system: Option
         is_last = i == len(ready) - 1
         try:
             resp, thinking_used = await call_gemini(
-                m, contents, system=system, think=think, web_search=web_search,
+                m, contents, system=system, thinking_level=thinking_level, web_search=web_search,
                 max_retries=3 if is_last else 1)  # còn model dự phòng thì chuyển ngay, không chờ retry
             model_cooldowns.pop(m, None)
             return resp, thinking_used, m, errors
@@ -864,7 +871,7 @@ psutil.Process().cpu_percent(None)  # khởi tạo bộ đo CPU
     file="Ảnh hoặc PDF đính kèm để hỏi / OCR (tối đa 10MB)",
     model="Chọn model; bỏ trống = tự động (flash-lite → flash → pro, tự chuyển khi quá tải)",
     web="Tra cứu thông tin mới trên web (Google Search)",
-    think="Suy nghĩ sâu và hiện tóm tắt quá trình suy nghĩ",
+    thinking_level="Mức suy nghĩ sâu: low / medium / high (kèm tóm tắt suy nghĩ). Bỏ trống = mặc định của model",
     ocr="Chỉ trích xuất chữ từ file đính kèm (OCR)",
 )
 async def ask(
@@ -873,7 +880,7 @@ async def ask(
     file: Optional[discord.Attachment] = None,
     model: Optional[str] = None,
     web: bool = False,
-    think: bool = False,
+    thinking_level: Optional[Literal["low", "medium", "high"]] = None,
     ocr: bool = False,
 ):
     uid = interaction.user.id
@@ -893,7 +900,7 @@ async def ask(
     await interaction.response.defer(thinking=True)
     started = time.perf_counter()
     notes: list[str] = []
-    features = ["chat"] + [n for n, on in (("web", web), ("think", think), ("ocr", ocr), ("file", bool(file))) if on]
+    features = ["chat"] + [n for n, on in (("web", web), ("think", bool(thinking_level)), ("ocr", ocr), ("file", bool(file))) if on]
 
     # --- chọn model ---
     auto = not model or model.strip().lower() == "auto"
@@ -923,11 +930,11 @@ async def ask(
         async with gemini_sem:
             if auto:
                 resp, thinking_used, model_id, errors = await call_with_fallback(
-                    chain, contents, system=system, think=think, web_search=web)
+                    chain, contents, system=system, thinking_level=thinking_level, web_search=web)
             else:
                 try:
                     resp, thinking_used = await call_gemini(
-                        model_id, contents, system=system, think=think, web_search=web)
+                        model_id, contents, system=system, thinking_level=thinking_level, web_search=web)
                     model_cooldowns.pop(model_id, None)
                 except (genai_errors.APIError, asyncio.TimeoutError) as e:
                     mark_failure(model_id, e)
@@ -937,8 +944,10 @@ async def ask(
             failed = [f"`{m}` ({errors[m]})" for m in chain[:chain.index(model_id)] if m in errors]
             if failed:
                 notes.append("Tự động chuyển model: " + ", ".join(failed) + f" → `{model_id}`")
-        if think and not thinking_used:
-            notes.append("Model này không hỗ trợ/không trả về tóm tắt suy nghĩ")
+        if thinking_level and not thinking_used:
+            notes.append(f"Model `{model_id}` không hỗ trợ `thinking_level` ({thinking_level}) nên đã bỏ qua")
+        elif thinking_level and thinking_used != thinking_level:
+            notes.append(f"Model `{model_id}` không có mức `{thinking_level}`, đã dùng mức `{thinking_used}`")
 
         if not out.text:
             reason = f"bị chặn ({out.blocked})" if out.blocked else f"finish_reason={out.finish}"
@@ -954,7 +963,7 @@ async def ask(
 
         elapsed = time.perf_counter() - started
         meta = [f"🤖 {model_id}", f"⏱ {elapsed:.1f}s"]
-        meta += [lbl for lbl, on in (("🌐 web", web), ("🧠 think", thinking_used), ("🔎 OCR", ocr)) if on]
+        meta += [lbl for lbl, on in (("🌐 web", web), (f"🧠 {thinking_used}", bool(thinking_used)), ("🔎 OCR", ocr)) if on]
         if out.tokens:
             meta.append(f"{out.tokens:,} tokens")
         if turns:

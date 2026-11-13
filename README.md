@@ -55,9 +55,15 @@ Option của `/ask`:
 |---|---|
 | `file` | Đính kèm ảnh/PDF để hỏi về nội dung hoặc OCR |
 | `ocr` | Chỉ trích xuất chữ từ `file` |
-| `think` | Suy nghĩ sâu + hiện tóm tắt suy nghĩ |
+| `thinking_level` | Chọn mức suy nghĩ sâu `low` / `medium` / `high` + hiện tóm tắt suy nghĩ. Bỏ trống = mặc định của model |
 | `web` | Tra cứu web (Google Search grounding), kèm nguồn |
 | `model` | Chọn model; **bỏ trống = tự động** (xem mục 7) |
+
+**Về `thinking_level`:**
+- Model Gemini 3.x nhận thẳng mức `low`/`medium`/`high`. Model Gemini 2.5 dùng ngân sách token: low = 1.024, medium = 8.192, high = 24.576.
+- Model đời cũ hơn 2.5 không hỗ trợ suy nghĩ; bot sẽ báo ở chân tin nhắn.
+- Nếu model không có mức `medium` (một số model Pro), bot tự thử `high`, và ghi chú mức thực tế đã dùng.
+- Mức cao suy nghĩ lâu hơn và tốn nhiều token hơn, dễ chạm giới hạn của gói free.
 
 Danh sách gợi ý lấy từ Gemini API, trừ các model trong `HIDDEN_MODELS`. Nhãn trong danh sách: 🆓 nhiều khả năng có free tier · 🧪 preview (giới hạn chặt hơn) · 💳 thường cần billing. Đây chỉ là gợi ý của bot, Google không trả thông tin này qua API.
 
