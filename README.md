@@ -110,7 +110,7 @@ Khi bạn **không chọn `model`** (hoặc chọn `🤖 Tự động`), bot dù
 - Khi bạn **chọn model cụ thể**, bot không tự chuyển model, chỉ báo lỗi.
 - `/status` hiện chuỗi hiện tại và model nào đang bị tạm bỏ qua (⏳).
 
-**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. Dùng `EXTRA_MODELS` để thêm model vào danh sách, `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
+**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. **Toàn bộ model Pro** (tên có `pro`) cũng bị ẩn khỏi gợi ý (đặt `HIDE_PRO_MODELS=0` để hiện lại); model Pro vẫn là bước cuối của chuỗi tự động. Dùng `EXTRA_MODELS` để thêm model vào danh sách, `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
 
 ## Lưu ý
 

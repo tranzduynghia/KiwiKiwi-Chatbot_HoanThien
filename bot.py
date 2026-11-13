@@ -57,6 +57,8 @@ HIDDEN_MODELS = _csv_env(
     "gemini-omni-flash-preview,gemini-4-argon,gemini-4-carbon",
 )
 EXTRA_MODELS = _csv_env("EXTRA_MODELS")  # model thêm tay vào danh sách gợi ý
+# Ẩn TOÀN BỘ model hạng Pro (tên có "pro") khỏi danh sách gợi ý. Đặt HIDE_PRO_MODELS=0 để hiện lại.
+HIDE_PRO_MODELS = os.getenv("HIDE_PRO_MODELS", "1").strip().lower() not in ("0", "false", "no", "")
 AUTO_MODEL_CHAIN = _csv_env("AUTO_MODEL_CHAIN")  # tuỳ chọn: tự quy định thứ tự model tự động
 USER_COOLDOWN = float(os.getenv("USER_COOLDOWN", "5"))  # giây giữa 2 lần /ask của 1 người
 MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "2"))  # số request Gemini chạy song song
@@ -96,7 +98,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.12-uidstr"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.12-nopro"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -227,7 +229,7 @@ class ModelRegistry:
     def choices(self) -> list[ModelInfo]:
         """Danh sách gợi ý cho option `model`: model từ API trừ model bị ẩn, cộng model thêm tay."""
         base = self.text or [ModelInfo(i, i, badge_for(i)) for i in FALLBACK_TEXT]
-        out = [m for m in base if not is_hidden(m.id)]
+        out = [m for m in base if not is_hidden(m.id) and not (HIDE_PRO_MODELS and tier_of(m.id) == "pro")]
         have = {m.id for m in out}
         out += [ModelInfo(i, i, badge_for(i)) for i in EXTRA_MODELS if i not in have]
         return out
