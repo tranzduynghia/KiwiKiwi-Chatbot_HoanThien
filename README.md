@@ -55,12 +55,13 @@ Option của `/ask`:
 |---|---|
 | `file` | Đính kèm ảnh/PDF để hỏi về nội dung hoặc OCR |
 | `ocr` | Chỉ trích xuất chữ từ `file` |
-| `thinking_level` | Chọn mức suy nghĩ sâu `low` / `medium` / `high` + hiện tóm tắt suy nghĩ. Bỏ trống = mặc định của model |
+| `thinking_level` | Chọn `auto` / `low` / `medium` / `high` + hiện tóm tắt suy nghĩ. Bỏ trống = không bật |
 | `web` | Tra cứu web (Google Search grounding), kèm nguồn |
 | `model` | Chọn model; **bỏ trống = tự động** (xem mục 7) |
 
 **Về `thinking_level`:**
-- Model Gemini 3.x nhận thẳng mức `low`/`medium`/`high`. Model Gemini 2.5 dùng ngân sách token: low = 1.024, medium = 8.192, high = 24.576.
+- **`auto`:** để model tự quyết định mức suy nghĩ (Gemini 3.x/4: dùng mức mặc định của model; Gemini 2.5: ngân sách động), vẫn hiện tóm tắt suy nghĩ.
+- Model Gemini 3.x và 4 nhận thẳng mức `low`/`medium`/`high`. Model Gemini 2.5 dùng ngân sách token: low = 1.024, medium = 8.192, high = 24.576.
 - Model đời cũ hơn 2.5 không hỗ trợ suy nghĩ; bot sẽ báo ở chân tin nhắn.
 - Nếu model không có mức `medium` (một số model Pro), bot tự thử `high`, và ghi chú mức thực tế đã dùng.
 - Mức cao suy nghĩ lâu hơn và tốn nhiều token hơn, dễ chạm giới hạn của gói free.
@@ -116,7 +117,7 @@ Khi bạn **không chọn `model`** (hoặc chọn `🤖 Tự động`), bot dù
 - Khi bạn **chọn model cụ thể**, bot không tự chuyển model, chỉ báo lỗi.
 - `/status` hiện chuỗi hiện tại và model nào đang bị tạm bỏ qua (⏳).
 
-**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. **Toàn bộ model Pro** (tên có `pro`) cũng bị ẩn khỏi gợi ý (đặt `HIDE_PRO_MODELS=0` để hiện lại); model Pro vẫn là bước cuối của chuỗi tự động. Dùng `EXTRA_MODELS` để thêm model vào danh sách, `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
+**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. **Toàn bộ model Pro** (tên có `pro`) cũng bị ẩn khỏi gợi ý (đặt `HIDE_PRO_MODELS=0` để hiện lại); model Pro vẫn là bước cuối của chuỗi tự động. `gemini-4-hydrogen` luôn có trong danh sách chọn (nhờ `EXTRA_MODELS`, kể cả khi API chưa liệt kê nó). Dùng `EXTRA_MODELS` để thêm model vào danh sách (đặt biến này sẽ thay danh sách mặc định, nhớ ghi cả `gemini-4-hydrogen`), `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
 
 ## Lưu ý
 

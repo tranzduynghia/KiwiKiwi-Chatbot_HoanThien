@@ -56,7 +56,7 @@ HIDDEN_MODELS = _csv_env(
     "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro,gemini-nano-banana-2.1,"
     "gemini-omni-flash-preview,gemini-4-argon,gemini-4-carbon",
 )
-EXTRA_MODELS = _csv_env("EXTRA_MODELS")  # model thêm tay vào danh sách gợi ý
+EXTRA_MODELS = _csv_env("EXTRA_MODELS", "gemini-4-hydrogen")  # model thêm tay vào gợi ý (luôn hiện, không bị ẩn)
 # Ẩn TOÀN BỘ model hạng Pro (tên có "pro") khỏi danh sách gợi ý. Đặt HIDE_PRO_MODELS=0 để hiện lại.
 HIDE_PRO_MODELS = os.getenv("HIDE_PRO_MODELS", "1").strip().lower() not in ("0", "false", "no", "")
 AUTO_MODEL_CHAIN = _csv_env("AUTO_MODEL_CHAIN")  # tuỳ chọn: tự quy định thứ tự model tự động
@@ -98,7 +98,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.12-thinklevel"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.13-hydrogen"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -575,7 +575,12 @@ def build_thinking_configs(model_id: str, level: str) -> list[tuple[str, types.T
     v = version_of(model_id)
     out: list[tuple[str, types.ThinkingConfig]] = []
     try:
-        if v >= 3:
+        if level == "auto":  # để model tự quyết định mức suy nghĩ, vẫn lấy tóm tắt suy nghĩ
+            if v >= 3:
+                out.append(("auto", types.ThinkingConfig(include_thoughts=True)))
+            elif v >= 2.5:
+                out.append(("auto", types.ThinkingConfig(thinking_budget=-1, include_thoughts=True)))  # -1 = tự động
+        elif v >= 3:
             for lv in ([level, "high"] if level == "medium" else [level]):
                 out.append((lv, types.ThinkingConfig(thinking_level=lv, include_thoughts=True)))
         elif v >= 2.5:
@@ -871,7 +876,7 @@ psutil.Process().cpu_percent(None)  # khởi tạo bộ đo CPU
     file="Ảnh hoặc PDF đính kèm để hỏi / OCR (tối đa 10MB)",
     model="Chọn model; bỏ trống = tự động (flash-lite → flash → pro, tự chuyển khi quá tải)",
     web="Tra cứu thông tin mới trên web (Google Search)",
-    thinking_level="Mức suy nghĩ sâu: low / medium / high (kèm tóm tắt suy nghĩ). Bỏ trống = mặc định của model",
+    thinking_level="Suy nghĩ sâu: auto (model tự chọn) / low / medium / high. Bỏ trống = không bật",
     ocr="Chỉ trích xuất chữ từ file đính kèm (OCR)",
 )
 async def ask(
@@ -880,7 +885,7 @@ async def ask(
     file: Optional[discord.Attachment] = None,
     model: Optional[str] = None,
     web: bool = False,
-    thinking_level: Optional[Literal["low", "medium", "high"]] = None,
+    thinking_level: Optional[Literal["auto", "low", "medium", "high"]] = None,
     ocr: bool = False,
 ):
     uid = interaction.user.id
