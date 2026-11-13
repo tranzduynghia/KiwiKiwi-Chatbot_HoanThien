@@ -121,6 +121,9 @@ Khi bạn **không chọn `model`** (hoặc chọn `🤖 Tự động`), bot dù
 
 ## Lưu ý
 
+- **Phiên bản thư viện:** `requirements.txt` không giới hạn trên, nên **mỗi lần Northflank build, pip lấy bản mới nhất** của `google-genai`, `discord.py` và `pymongo`. Dòng log khởi động ghi phiên bản đang chạy. Muốn cập nhật SDK, chỉ cần bấm **Rebuild**. Nếu một bản mới làm bot lỗi, ghim lại bằng cách sửa dòng thành `google-genai==<số phiên bản cũ>` (xem số trong log).
+- Bot ghim Gemini API ở `v1beta` (biến `GEMINI_API_VERSION`) để giữ nguyên hành vi khi SDK 3.x đổi mặc định sang `v1`.
+
 - **Dung lượng:** cluster M0 chỉ có 512MB và lưu trữ vĩnh viễn sẽ đầy dần. `/status` hiển thị dung lượng đã dùng. Khi gần đầy, hãy xuất dữ liệu cũ ra file rồi dọn bớt, hoặc nâng cấp cluster.
 - **Quyền riêng tư:** toàn bộ nội dung chat được lưu vĩnh viễn gắn với Discord ID, và người quản lý database đọc được. Hãy thông báo rõ cho thành viên server (nên có chính sách riêng tư ngắn gọn) và cân nhắc cách xử lý khi có người yêu cầu xoá dữ liệu của họ.
 - **Chỉ chạy một nơi duy nhất.** Nếu còn service cũ trên Render, hãy *Suspend/Delete* nó, vì hai bản chạy cùng một token sẽ khiến bot trả lời hai lần.

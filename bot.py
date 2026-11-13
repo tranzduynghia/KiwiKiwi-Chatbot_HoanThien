@@ -98,7 +98,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.13-xhigh"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.13-latest-sdk"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
