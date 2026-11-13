@@ -76,7 +76,8 @@ Danh sách gợi ý lấy từ Gemini API, trừ các model trong `HIDDEN_MODELS
 ```json
 {
   "_id": "a1b2c3d4...",            // mã phiên
-  "user_id": 123456789012345678,   // Discord ID
+  "user_id": 123456789012345678,   // Discord ID (int64)
+  "user_id_str": "123456789012345678", // cùng ID, dạng chữ để dễ tìm
   "created_at": "...", "last_active": "...",
   "ended_at": "...",               // null nếu phiên đang diễn ra
   "end_reason": "refresh",         // refresh | idle_timeout | max_turns
@@ -86,7 +87,13 @@ Danh sách gợi ý lấy từ Gemini API, trừ các model trong `HIDDEN_MODELS
 }
 ```
 
-Mỗi lượt hỏi đáp được ghi vào `archives` ngay lập tức (đủ toàn văn), nên bot khởi động lại giữa chừng cũng không mất dữ liệu. Tìm lịch sử một người: `db.archives.find({user_id: <Discord ID>})` (Atlas → Browse Collections → Filter `{ "user_id": 123... }`).
+Mỗi lượt hỏi đáp được ghi vào `archives` ngay lập tức (đủ toàn văn), nên bot khởi động lại giữa chừng cũng không mất dữ liệu.
+
+**Tìm lịch sử một người** (Atlas → Browse Collections → `archives` → ô Filter). Mỗi phiên có 2 trường chứa Discord ID:
+- `user_id_str`: ID dạng **chữ**, dễ tìm nhất: `{ "user_id_str": "1240503090185109536" }`
+- `user_id`: ID dạng số **int64** (Atlas hiển thị là `Long('...')`, đó chính là ID thật). Phải lọc bằng `{ "user_id": { "$numberLong": "1240503090185109536" } }`.
+
+> **Bẫy:** gõ thẳng `{ "user_id": 1240503090185109536 }` sẽ **không ra kết quả**, vì ô lọc đọc số lớn như số thực và làm tròn thành `1240503090185109504`. Phiên lưu từ bản cũ chưa có `user_id_str`, hãy dùng cách `$numberLong`.
 
 Khác biệt cần nhớ:
 - Bản lưu trữ lưu **toàn văn**; ngữ cảnh gửi cho AI thì cắt mỗi tin còn 4000 ký tự.

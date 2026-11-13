@@ -96,7 +96,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.12-autochain"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.12-uidstr"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -111,7 +111,10 @@ log = logging.getLogger("gemini-bot")
 if not DISCORD_TOKEN or not GEMINI_API_KEY:
     sys.exit("Thiếu biến môi trường DISCORD_TOKEN hoặc GEMINI_API_KEY")
 
-gemini = genai.Client(api_key=GEMINI_API_KEY)
+# google-genai 3.x đổi mặc định sang API "v1" (trước là "v1beta"); một số tính năng/model preview
+# chỉ có ở v1beta, nên ghim lại để hành vi không đổi. Đổi bằng biến GEMINI_API_VERSION nếu cần.
+GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "v1beta").strip() or "v1beta"
+gemini = genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(api_version=GEMINI_API_VERSION))
 
 
 class UserError(Exception):
@@ -337,6 +340,7 @@ class SessionStore:
                 log.warning("Đã gỡ TTL index cũ của sessions (phiên hết hạn giờ được lưu trữ thay vì xoá)")
             await self.col.create_index("expire_at")
             await self.archives.create_index([("user_id", 1), ("created_at", -1)])
+            await self.archives.create_index("user_id_str")
             return True
 
         self.index_ok = bool(await self._run(work))
@@ -379,7 +383,7 @@ class SessionStore:
             {"_id": sid},
             {"$set": {"ended_at": ended_at, "end_reason": reason},
              # chỉ dùng khi bản lưu trữ chưa tồn tại (phiên tạo từ phiên bản cũ)
-             "$setOnInsert": {"user_id": uid, "created_at": doc.get("created_at", now),
+             "$setOnInsert": {"user_id": uid, "user_id_str": str(uid), "created_at": doc.get("created_at", now),
                               "turns": doc.get("turns", 0), "messages": doc.get("messages", [])}},
             upsert=True))
         if r is None:
@@ -434,7 +438,8 @@ class SessionStore:
                 {"role": "model", "text": model_text, "at": now, "model": model_id}]}},
              "$set": {"last_active": now},
              "$inc": {"turns": 1},
-             "$setOnInsert": {"user_id": uid, "created_at": created, "ended_at": None, "end_reason": None}},
+             "$setOnInsert": {"user_id": uid, "user_id_str": str(uid), "created_at": created,
+                              "ended_at": None, "end_reason": None}},
             upsert=True))
         if r is None:
             return None
@@ -782,7 +787,9 @@ class AskBot(discord.Client):
             synced = await self.tree.sync()
             scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
         log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + c.name for c in synced), scope)
-        log.info("Phiên bản %s · RAM tiến trình: %s", BOT_VERSION, fmt_bytes(psutil.Process().memory_info().rss))
+        log.info("Phiên bản %s · google-genai %s (API %s) · discord.py %s · RAM tiến trình: %s",
+                 BOT_VERSION, getattr(genai, "__version__", "?"), GEMINI_API_VERSION, discord.__version__,
+                 fmt_bytes(psutil.Process().memory_info().rss))
 
     async def start_web(self):
         async def health(_request):
