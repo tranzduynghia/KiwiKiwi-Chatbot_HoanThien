@@ -60,6 +60,7 @@ HIDDEN_MODELS = _csv_env(
 EXTRA_MODELS = _csv_env("EXTRA_MODELS", "gemini-4-hydrogen")  # model thêm tay vào gợi ý (luôn hiện, không bị ẩn)
 # Ẩn TOÀN BỘ model hạng Pro (tên có "pro") khỏi danh sách gợi ý. Đặt HIDE_PRO_MODELS=0 để hiện lại.
 HIDE_PRO_MODELS = os.getenv("HIDE_PRO_MODELS", "1").strip().lower() not in ("0", "false", "no", "")
+AUTO_LAST_MODEL = os.getenv("AUTO_LAST_MODEL", "gemini-4-hydrogen").strip()  # bước cuối của chuỗi tự động
 AUTO_MODEL_CHAIN = _csv_env("AUTO_MODEL_CHAIN")  # tuỳ chọn: tự quy định thứ tự model tự động
 USER_COOLDOWN = float(os.getenv("USER_COOLDOWN", "5"))  # giây giữa 2 lần /ask của 1 người
 MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "2"))  # số request Gemini chạy song song
@@ -85,7 +86,7 @@ STATUS_ALLOWED_IDS = {
     if x.strip().isdigit()
 }
 
-FALLBACK_TEXT = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-2.5-pro"]  # lite → flash → pro
+FALLBACK_TEXT = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"]  # lite → flash → hydrogen
 
 SYSTEM_PROMPT = os.getenv(
     "SYSTEM_PROMPT",
@@ -99,7 +100,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.13-fresh-install"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.13-hydrogen-chain"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -212,17 +213,22 @@ class ModelRegistry:
             log.warning("Không tải được danh sách model: %s", self.last_error)
 
     def auto_chain(self) -> list[str]:
-        """Thứ tự model cho chế độ tự động: flash-lite → flash → pro (mỗi hạng chọn 1 model tốt nhất,
-        ưu tiên bản ổn định, rồi bản mới nhất). Lấy từ danh sách API, không phụ thuộc HIDDEN_MODELS."""
+        """Thứ tự model cho chế độ tự động: flash-lite → flash → hydrogen.
+        Hạng lite và flash: mỗi hạng chọn 1 model tốt nhất từ danh sách API (ưu tiên bản ổn định, rồi bản
+        mới nhất). Bước cuối là AUTO_LAST_MODEL (mặc định gemini-4-hydrogen). Không phụ thuộc HIDDEN_MODELS."""
         if AUTO_MODEL_CHAIN:
             chain = list(AUTO_MODEL_CHAIN)
+        elif not self.text:  # chưa tải được danh sách model từ API
+            chain = list(FALLBACK_TEXT)
         else:
             ids = [m.id for m in self.text]
             chain = []
-            for tier in ("lite", "flash", "pro"):
+            for tier in ("lite", "flash"):
                 pool = [i for i in ids if tier_of(i) == tier]
                 if pool:
                     chain.append(max(pool, key=lambda i: (is_stable(i), version_of(i), -len(i))))
+            if AUTO_LAST_MODEL and AUTO_LAST_MODEL not in chain:
+                chain.append(AUTO_LAST_MODEL)
         if DEFAULT_TEXT_MODEL:
             chain = [DEFAULT_TEXT_MODEL] + [m for m in chain if m != DEFAULT_TEXT_MODEL]
         return chain or list(FALLBACK_TEXT)
@@ -884,7 +890,7 @@ psutil.Process().cpu_percent(None)  # khởi tạo bộ đo CPU
 @app_commands.describe(
     prompt="Câu hỏi / yêu cầu của bạn",
     file="Ảnh hoặc PDF đính kèm để hỏi / OCR (tối đa 10MB)",
-    model="Chọn model; bỏ trống = tự động (flash-lite → flash → pro, tự chuyển khi quá tải)",
+    model="Chọn model; bỏ trống = tự động (flash-lite → flash → hydrogen, tự chuyển khi quá tải)",
     web="Tra cứu thông tin mới trên web (Google Search)",
     thinking_level="Suy nghĩ sâu: auto / low / medium / high / xhigh (xhigh chỉ vài model như Hydrogen)",
     ocr="Chỉ trích xuất chữ từ file đính kèm (OCR)",
@@ -1031,7 +1037,7 @@ async def model_autocomplete(interaction: discord.Interaction, current: str):
     cur = current.lower().strip()
     out = []
     if not cur or any(cur in k for k in ("auto", "tự động", "tu dong")):
-        out.append(app_commands.Choice(name="🤖 Tự động (flash-lite → flash → pro)", value="auto"))
+        out.append(app_commands.Choice(name="🤖 Tự động (flash-lite → flash → hydrogen)", value="auto"))
     for m in registry.choices():
         if cur in m.id.lower() or cur in m.display.lower():
             out.append(app_commands.Choice(name=f"{m.badge} {m.id}"[:100], value=m.id))

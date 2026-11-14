@@ -110,14 +110,14 @@ Khác biệt cần nhớ:
 
 ## 7. Model tự động và tự chuyển khi quá tải
 
-Khi bạn **không chọn `model`** (hoặc chọn `🤖 Tự động`), bot dùng chuỗi **flash-lite → flash → pro**:
-- Mỗi hạng chọn 1 model tốt nhất từ danh sách API: ưu tiên bản ổn định, rồi bản mới nhất. Tên model không thuộc ba hạng này (như `gemini-4-*`, `nano-banana`, `omni`) sẽ không vào chuỗi tự động.
+Khi bạn **không chọn `model`** (hoặc chọn `🤖 Tự động`), bot dùng chuỗi **flash-lite → flash → hydrogen** (`gemini-4-hydrogen`):
+- Hạng **flash-lite** và **flash**: mỗi hạng chọn 1 model tốt nhất từ danh sách API (ưu tiên bản ổn định, rồi bản mới nhất). Bước cuối là `gemini-4-hydrogen`, đổi được bằng biến `AUTO_LAST_MODEL`. Model Pro không còn nằm trong chuỗi tự động.
 - Nếu model đang dùng **quá tải (503/500), hết lượt (429), không còn tồn tại (404) hoặc phản hồi quá lâu**, bot chuyển ngay sang model kế tiếp cho chính câu hỏi đó, và ghi chú ở chân tin nhắn.
 - Model vừa lỗi bị **tạm bỏ qua** một lúc nên các câu hỏi sau dùng luôn model kế tiếp (≈1 phút nếu quá tải, theo thời gian Google yêu cầu nếu hết lượt, 30 phút nếu hết lượt trong ngày, 1 giờ nếu model không có quota free). Hết thời gian chờ, bot tự quay lại model ưu tiên.
 - Khi bạn **chọn model cụ thể**, bot không tự chuyển model, chỉ báo lỗi.
 - `/status` hiện chuỗi hiện tại và model nào đang bị tạm bỏ qua (⏳).
 
-**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. **Toàn bộ model Pro** (tên có `pro`) cũng bị ẩn khỏi gợi ý (đặt `HIDE_PRO_MODELS=0` để hiện lại); model Pro vẫn là bước cuối của chuỗi tự động. `gemini-4-hydrogen` luôn có trong danh sách chọn (nhờ `EXTRA_MODELS`, kể cả khi API chưa liệt kê nó). Dùng `EXTRA_MODELS` để thêm model vào danh sách (đặt biến này sẽ thay danh sách mặc định, nhớ ghi cả `gemini-4-hydrogen`), `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
+**Ẩn model khỏi gợi ý:** đặt `HIDDEN_MODELS` (cách nhau bằng dấu phẩy, hỗ trợ `*`). Mặc định đã ẩn các model bạn chỉ định. Ẩn chỉ ảnh hưởng danh sách gợi ý: ai gõ tay đúng tên model vẫn dùng được. **Toàn bộ model Pro** (tên có `pro`) cũng bị ẩn khỏi gợi ý (đặt `HIDE_PRO_MODELS=0` để hiện lại). `gemini-4-hydrogen` luôn có trong danh sách chọn (nhờ `EXTRA_MODELS`, kể cả khi API chưa liệt kê nó). Dùng `EXTRA_MODELS` để thêm model vào danh sách (đặt biến này sẽ thay danh sách mặc định, nhớ ghi cả `gemini-4-hydrogen`), `AUTO_MODEL_CHAIN` để tự quy định thứ tự chuỗi tự động.
 
 ## Lưu ý
 
