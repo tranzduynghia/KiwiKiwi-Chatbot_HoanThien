@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 import certifi
 import discord
 import psutil
+import pymongo
 from aiohttp import web
 from discord import app_commands
 from google import genai
@@ -98,7 +99,7 @@ OCR_INSTRUCTION = (
     "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
 )
 
-BOT_VERSION = "2026.11.13-latest-sdk"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.13-fresh-install"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
 START_TIME = time.time()
 NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
 PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
@@ -113,10 +114,13 @@ log = logging.getLogger("gemini-bot")
 if not DISCORD_TOKEN or not GEMINI_API_KEY:
     sys.exit("Thiếu biến môi trường DISCORD_TOKEN hoặc GEMINI_API_KEY")
 
-# google-genai 3.x đổi mặc định sang API "v1" (trước là "v1beta"); một số tính năng/model preview
-# chỉ có ở v1beta, nên ghim lại để hành vi không đổi. Đổi bằng biến GEMINI_API_VERSION nếu cần.
-GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "v1beta").strip() or "v1beta"
-gemini = genai.Client(api_key=GEMINI_API_KEY, http_options=types.HttpOptions(api_version=GEMINI_API_VERSION))
+# Mặc định dùng phiên bản API mặc định của SDK (google-genai 3.x: "v1").
+# Nếu một tính năng/model preview bị thiếu, đặt GEMINI_API_VERSION=v1beta để ghim lại.
+GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "").strip()
+gemini = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options=types.HttpOptions(api_version=GEMINI_API_VERSION) if GEMINI_API_VERSION else None,
+)
 
 
 class UserError(Exception):
@@ -807,9 +811,9 @@ class AskBot(discord.Client):
             synced = await self.tree.sync()
             scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
         log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + c.name for c in synced), scope)
-        log.info("Phiên bản %s · google-genai %s (API %s) · discord.py %s · RAM tiến trình: %s",
-                 BOT_VERSION, getattr(genai, "__version__", "?"), GEMINI_API_VERSION, discord.__version__,
-                 fmt_bytes(psutil.Process().memory_info().rss))
+        log.info("Phiên bản %s · google-genai %s (API %s) · discord.py %s · pymongo %s · RAM tiến trình: %s",
+                 BOT_VERSION, getattr(genai, "__version__", "?"), GEMINI_API_VERSION or "mặc định SDK",
+                 discord.__version__, pymongo.version, fmt_bytes(psutil.Process().memory_info().rss))
 
     async def start_web(self):
         async def health(_request):
