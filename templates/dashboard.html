@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KiwiKiwi Bot Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .tab-btn[data-active="true"] { background-color: rgb(79 70 229 / 0.18); color: #a5b4fc; border-color: rgb(99 102 241 / 0.45); }
+    .card { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 0.875rem; }
+    .inp { background-color: #020617; border: 1px solid #1e293b; border-radius: 0.5rem; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: #f1f5f9; width: 100%; }
+    .inp:focus { outline: none; border-color: #6366f1; }
+    .btn-primary { background-color: #4f46e5; color: #fff; font-weight: 500; padding: 0.55rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; transition: background 0.15s; cursor: pointer; }
+    .btn-primary:hover { background-color: #6366f1; }
+    .btn-ghost { background-color: #1e293b; color: #e2e8f0; font-weight: 500; padding: 0.45rem 0.85rem; border-radius: 0.5rem; font-size: 0.8125rem; transition: background 0.15s; cursor: pointer; }
+    .btn-ghost:hover { background-color: #334155; }
+    .btn-danger { background-color: rgb(225 29 72 / 0.15); color: #fda4af; border: 1px solid rgb(225 29 72 / 0.35); padding: 0.35rem 0.7rem; border-radius: 0.5rem; font-size: 0.75rem; cursor: pointer; }
+    .btn-danger:hover { background-color: rgb(225 29 72 / 0.28); }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100">
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-slate-950/90 backdrop-blur border-b border-slate-800">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <span class="text-xl">🤖</span>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="font-semibold text-base tracking-tight">KiwiKiwi Bot Dashboard</h1>
+            <span id="hdr-status-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">Đang tải...</span>
+          </div>
+          <p id="hdr-updated" class="text-[11px] text-slate-500">MongoDB Atlas Real-Time Config</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 text-xs bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full">
+          {% if user.avatar_url %}
+          <img src="{{ user.avatar_url }}" alt="" class="w-5 h-5 rounded-full" />
+          {% endif %}
+          <span class="font-medium text-slate-200">{{ user.display_name }}</span>
+          <span class="px-1.5 py-0.5 rounded text-[10px] {{ 'bg-indigo-500/20 text-indigo-300' if user.is_admin else 'bg-slate-800 text-slate-400' }}">
+            {{ 'Admin' if user.is_admin else 'Operator' }}
+          </span>
+        </div>
+        <a href="/auth/logout" class="btn-ghost text-xs">Đăng xuất</a>
+      </div>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="max-w-6xl mx-auto px-4 pb-2.5 flex flex-wrap gap-1.5">
+      <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="status" data-active="true">📊 Trạng thái Bot</button>
+      <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="ask">⚙️ Cấu hình /ask</button>
+      <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="prompt">💬 System Instruction</button>
+      <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="models">✨ Model Gemini</button>
+      <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="perms">🔐 Phân quyền &amp; Admin</button>
+    </div>
+  </header>
+
+  <!-- Toast -->
+  <div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm px-4 py-3 rounded-xl text-sm shadow-xl border"></div>
+
+  <main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
+    <!-- ==================== TAB 1: BOT STATUS ==================== -->
+    <section id="tab-status" class="tab-panel space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Giám sát trạng thái Bot</h2>
+          <p class="text-xs text-slate-400">Thông số hoạt động trực tiếp từ tiến trình bot hiện tại</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="inline-flex items-center gap-2 text-xs text-slate-400 mr-2 cursor-pointer">
+            <input id="auto-refresh-toggle" type="checkbox" checked class="accent-indigo-500" />
+            Tự làm mới (5s)
+          </label>
+          <button id="btn-check-gemini" class="btn-ghost">🔌 Kiểm tra Gemini API</button>
+          <button id="btn-refresh-status" class="btn-primary">↻ Làm mới</button>
+        </div>
+      </div>
+
+      <!-- KPI Cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card p-4">
+          <div class="text-xs text-slate-400">Trạng thái &amp; Ping</div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="st-online" class="text-lg font-semibold">—</span>
+            <span id="st-ping" class="text-sm font-mono text-indigo-300">— ms</span>
+          </div>
+          <div id="st-botname" class="text-xs text-slate-500 mt-1 truncate">—</div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-slate-400">Uptime &amp; Server</div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="st-uptime" class="text-lg font-semibold font-mono">—</span>
+            <span id="st-guilds" class="text-sm text-emerald-300">— server</span>
+          </div>
+          <div id="st-version" class="text-xs text-slate-500 mt-1 truncate">—</div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-slate-400">RAM Container</div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="st-ram" class="text-base font-semibold font-mono">—</span>
+            <span id="st-ram-pct" class="text-xs text-slate-300">—%</span>
+          </div>
+          <div class="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+            <div id="st-ram-bar" class="h-full bg-indigo-500 transition-all" style="width:0%"></div>
+          </div>
+          <div id="st-ram-rss" class="text-[11px] text-slate-500 mt-1">Tiến trình: —</div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-slate-400">CPU &amp; Luồng</div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <span id="st-cpu" class="text-lg font-semibold font-mono">—%</span>
+            <span id="st-threads" class="text-xs text-slate-400">— luồng</span>
+          </div>
+          <div id="st-requests-brief" class="text-xs text-slate-500 mt-1">Request hôm nay: —</div>
+        </div>
+      </div>
+
+      <!-- Gemini + MongoDB -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="card p-5 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-medium text-sm">🔌 Gemini API &amp; Chuỗi Auto</h3>
+            <div class="flex gap-1.5">
+              <button id="btn-refresh-models-st" class="btn-ghost text-xs">Tải lại Model</button>
+              <button id="btn-clear-cd" class="btn-ghost text-xs">Xóa Cooldown</button>
+            </div>
+          </div>
+          <div id="st-gemini-check" class="text-xs text-slate-400">Bấm "Kiểm tra Gemini API" để đo độ trễ trực tiếp.</div>
+          <div>
+            <div class="text-xs text-slate-400 mb-1.5">Chuỗi Auto đang áp dụng:</div>
+            <div id="st-auto-chain" class="flex flex-wrap items-center gap-1.5 text-xs"></div>
+          </div>
+          <div id="st-gemini-meta" class="text-xs text-slate-500">—</div>
+        </div>
+
+        <div class="card p-5 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="font-medium text-sm">🗄️ MongoDB Atlas</h3>
+            <span id="st-db-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">—</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-center">
+            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+              <div class="text-[11px] text-slate-400">Ping</div>
+              <div id="st-db-ms" class="text-sm font-mono font-semibold mt-0.5">—</div>
+            </div>
+            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+              <div class="text-[11px] text-slate-400">Phiên hoạt động</div>
+              <div id="st-db-active" class="text-sm font-mono font-semibold mt-0.5">—</div>
+            </div>
+            <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+              <div class="text-[11px] text-slate-400">Đã lưu trữ</div>
+              <div id="st-db-archived" class="text-sm font-mono font-semibold mt-0.5">—</div>
+            </div>
+          </div>
+          <div>
+            <div class="flex justify-between text-xs text-slate-400 mb-1">
+              <span>Dung lượng sử dụng</span>
+              <span id="st-db-storage">—</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              <div id="st-db-bar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Usage stats + Guilds -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="card p-5 space-y-2.5">
+          <h3 class="font-medium text-sm">📈 Thống kê sử dụng</h3>
+          <div id="st-usage-summary" class="text-xs text-slate-300">—</div>
+          <div id="st-usage-models" class="text-xs text-slate-400">—</div>
+          <div id="st-usage-features" class="text-xs text-slate-400">—</div>
+          <div id="st-usage-err" class="text-xs text-rose-300/90"></div>
+        </div>
+        <div class="card p-5 space-y-2.5">
+          <h3 class="font-medium text-sm">🏠 Danh sách Server Discord</h3>
+          <div id="st-guild-list" class="max-h-40 overflow-y-auto divide-y divide-slate-800/80 text-xs"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 2: /ASK & SESSION CONFIG ==================== -->
+    <section id="tab-ask" class="tab-panel hidden space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Cấu hình lệnh /ask &amp; Phiên chat</h2>
+          <p class="text-xs text-slate-400">Mọi thông số lưu trực tiếp vào MongoDB Atlas và áp dụng ngay không cần restart bot</p>
+        </div>
+        <button id="btn-save-ask" class="btn-primary">💾 Lưu cấu hình /ask</button>
+      </div>
+
+      <form id="form-ask" class="space-y-5">
+        <div class="card p-5 space-y-4">
+          <h3 class="font-medium text-sm text-indigo-300">Tốc độ, Giới hạn &amp; Mặc định lệnh /ask</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Cooldown mỗi người (giây)</label>
+              <input id="ask-cooldown" type="number" step="0.5" min="0" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Request song song tối đa</label>
+              <input id="ask-concurrent" type="number" min="1" max="50" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Dung lượng file tối đa (MB)</label>
+              <input id="ask-max-file-mb" type="number" step="0.5" min="1" max="50" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Timeout gọi Gemini (giây)</label>
+              <input id="ask-timeout" type="number" min="15" max="600" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Số lần thử lại khi 500/503</label>
+              <input id="ask-retries" type="number" min="1" max="10" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Mức Thinking mặc định</label>
+              <select id="ask-default-thinking" class="inp">
+                <option value="">Tắt (bỏ trống)</option>
+                <option value="auto">auto</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Giới hạn ký tự mỗi tin (chunk)</label>
+              <input id="ask-chunk-limit" type="number" min="500" max="1950" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Số tin tối đa trước khi gửi file .md</label>
+              <input id="ask-max-chunks" type="number" min="1" max="20" class="inp" />
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-slate-800">
+            <div class="text-xs text-slate-400 mb-2">Ngân sách token Thinking cho Gemini 2.5 (low / medium / high)</div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label class="block text-[11px] text-slate-500 mb-1">Low (tokens)</label>
+                <input id="ask-tb-low" type="number" min="128" class="inp" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-500 mb-1">Medium (tokens)</label>
+                <input id="ask-tb-medium" type="number" min="256" class="inp" />
+              </div>
+              <div>
+                <label class="block text-[11px] text-slate-500 mb-1">High (tokens)</label>
+                <input id="ask-tb-high" type="number" min="512" class="inp" />
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-file" type="checkbox" class="accent-indigo-500" /> Cho phép đính kèm ảnh/PDF</label>
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-ocr" type="checkbox" class="accent-indigo-500" /> Cho phép OCR</label>
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-web" type="checkbox" class="accent-indigo-500" /> Cho phép tra cứu Web</label>
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-thinking" type="checkbox" class="accent-indigo-500" /> Cho phép Thinking</label>
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-default-web" type="checkbox" class="accent-indigo-500" /> Mặc định bật Web Search</label>
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-show-thoughts" type="checkbox" class="accent-indigo-500" /> Hiện Embed tóm tắt suy nghĩ</label>
+            <label class="flex items-center gap-2 cursor-pointer"><input id="ask-show-sources" type="checkbox" class="accent-indigo-500" /> Hiện link nguồn Google Search</label>
+          </div>
+        </div>
+
+        <div class="card p-5 space-y-4">
+          <h3 class="font-medium text-sm text-indigo-300">Cấu hình Phiên chat &amp; Hệ thống (MongoDB)</h3>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Hết hạn phiên sau (giờ)</label>
+              <input id="sess-idle-hours" type="number" step="0.5" min="0.1" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Số tin nhắn nhớ tối đa</label>
+              <input id="sess-max-msgs" type="number" min="2" max="200" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Tổng ký tự lịch sử tối đa</label>
+              <input id="sess-max-chars" type="number" min="1000" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Cắt ngắn mỗi tin lưu (ký tự)</label>
+              <input id="sess-stored-chars" type="number" min="500" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Số lượt tối đa mỗi phiên</label>
+              <input id="sess-max-turns" type="number" min="1" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Chu kỳ quét lưu trữ (phút)</label>
+              <input id="sess-sweep-mins" type="number" step="0.5" min="1" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Quota MongoDB Atlas (MB)</label>
+              <input id="sess-quota-mb" type="number" min="1" class="inp" />
+            </div>
+            <div>
+              <label class="block text-xs text-slate-400 mb-1">Ép giới hạn RAM /status (MB, trống = tự đo)</label>
+              <input id="sess-ram-limit" type="number" min="0" placeholder="Tự động" class="inp" />
+            </div>
+          </div>
+        </div>
+      </form>
+    </section>
+
+    <!-- ==================== TAB 3: SYSTEM INSTRUCTION ==================== -->
+    <section id="tab-prompt" class="tab-panel hidden space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">System Instruction của Chatbot</h2>
+          <p class="text-xs text-slate-400">Chỉnh tính cách, quy tắc trả lời và hướng dẫn OCR theo thời gian thực</p>
+        </div>
+        <button id="btn-save-prompt" class="btn-primary">💾 Lưu System Instruction</button>
+      </div>
+
+      <div class="card p-5 space-y-4">
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-medium text-slate-300">System Instruction chính (Chatbot)</label>
+            <div class="flex items-center gap-3">
+              <span id="prompt-char-count" class="text-[11px] text-slate-500">0 ký tự</span>
+              <button type="button" id="btn-reset-sys-prompt" class="text-[11px] text-indigo-400 hover:underline">Khôi phục mặc định</button>
+            </div>
+          </div>
+          <textarea id="inp-system-prompt" rows="7" class="inp font-sans leading-relaxed"></textarea>
+        </div>
+
+        <label class="inline-flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+          <input id="inp-append-date" type="checkbox" class="accent-indigo-500" />
+          Tự động nối dòng <code>Hôm nay là dd/mm/YYYY.</code> vào cuối System Instruction
+        </label>
+
+        <div class="pt-3 border-t border-slate-800">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-medium text-slate-300">OCR Instruction (dùng khi bật <code>ocr=True</code>)</label>
+            <button type="button" id="btn-reset-ocr-prompt" class="text-[11px] text-indigo-400 hover:underline">Khôi phục mặc định</button>
+          </div>
+          <textarea id="inp-ocr-prompt" rows="4" class="inp font-sans leading-relaxed"></textarea>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 4: GEMINI MODELS ==================== -->
+    <section id="tab-models" class="tab-panel hidden space-y-5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 class="text-lg font-semibold">Cấu hình Model Gemini</h2>
+          <p class="text-xs text-slate-400">Quản lý tên hiển thị, tag 🆓 Free / 🧪 Preview / 💳 Paid, ẩn model và chuỗi chuyển tự động (Auto)</p>
+        </div>
+        <div class="flex gap-2">
+          <button id="btn-refresh-models-tab" class="btn-ghost">↻ Tải lại từ Gemini API</button>
+          <button id="btn-save-models" class="btn-primary">💾 Lưu cấu hình Model</button>
+        </div>
+      </div>
+
+      <!-- Auto Chain Builder -->
+      <div class="card p-5 space-y-4">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="font-medium text-sm text-indigo-300">Chuỗi chuyển model tự động (Auto Chain)</h3>
+            <p class="text-xs text-slate-400">Khi người dùng để trống option <code>model</code> hoặc chọn Auto, bot sẽ thử lần lượt theo thứ tự này. Nếu để trống danh sách, bot tự chọn <code>flash-lite → flash → Auto Last Model</code>.</p>
+          </div>
+        </div>
+
+        <div id="auto-chain-list" class="space-y-2"></div>
+
+        <div class="flex flex-wrap gap-2 items-center">
+          <select id="auto-chain-select" class="inp max-w-xs"></select>
+          <input id="auto-chain-custom" type="text" placeholder="Hoặc nhập tên model ID tùy chỉnh..." class="inp max-w-xs" />
+          <button type="button" id="btn-add-auto-chain" class="btn-ghost">+ Thêm vào chuỗi Auto</button>
+          <button type="button" id="btn-clear-auto-chain" class="btn-danger">Xóa chuỗi (dùng tự động mặc định)</button>
+        </div>
+
+        <div class="pt-3 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Ép model đứng đầu chuỗi (Default)</label>
+            <input id="mod-default-text" type="text" placeholder="Bỏ trống = theo chuỗi" class="inp" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Model bước cuối mặc định (Auto Last)</label>
+            <input id="mod-auto-last" type="text" placeholder="gemini-4-hydrogen" class="inp" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Chu kỳ tải lại danh sách API (giờ)</label>
+            <input id="mod-refresh-hours" type="number" step="0.5" min="0.25" class="inp" />
+          </div>
+          <div class="flex items-end pb-1.5">
+            <label class="inline-flex items-center gap-2 text-sm cursor-pointer">
+              <input id="mod-hide-pro" type="checkbox" class="accent-indigo-500" />
+              Ẩn toàn bộ model hạng Pro
+            </label>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Extra Models (thêm tay vào gợi ý, cách nhau dấu phẩy)</label>
+            <input id="mod-extra" type="text" placeholder="gemini-4-hydrogen" class="inp" />
+          </div>
+          <div>
+            <label class="block text-xs text-slate-400 mb-1">Hidden Patterns (ẩn theo wildcard *, cách nhau dấu phẩy)</label>
+            <input id="mod-hidden-patterns" type="text" placeholder="gemini-2.5-pro, gemini-4-argon" class="inp" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Per-Model Table -->
+      <div class="card p-5 space-y-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="font-medium text-sm text-indigo-300">Danh sách Model Gemini (Tên hiển thị · Tag Free · Ẩn/Hiện)</h3>
+            <p class="text-xs text-slate-400">Chỉnh trực tiếp tên hiển thị, tag (🆓 / 🧪 / 💳 hoặc tag riêng) và trạng thái ẩn cho từng model</p>
+          </div>
+          <input id="mod-search" type="text" placeholder="Lọc model..." class="inp max-w-xs" />
+        </div>
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2 pr-3">Model ID</th>
+                <th class="py-2 pr-3">Tên hiển thị tùy chỉnh</th>
+                <th class="py-2 pr-3">Tag / Free</th>
+                <th class="py-2 pr-3 text-center">Ẩn khỏi /ask</th>
+                <th class="py-2 text-right">Chuỗi Auto</th>
+              </tr>
+            </thead>
+            <tbody id="models-tbody" class="divide-y divide-slate-800/70"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 5: PERMISSIONS & ADMIN ==================== -->
+    <section id="tab-perms" class="tab-panel hidden space-y-5">
+      <div>
+        <h2 class="text-lg font-semibold">Phân quyền Discord &amp; Tài khoản Quản trị</h2>
+        <p class="text-xs text-slate-400">Quy định Discord User ID nào là Admin, được dùng <code>/status</code> trên Discord, và được vào Dashboard quản lý</p>
+      </div>
+
+      {% if not user.is_admin %}
+      <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+        ℹ️ Bạn đang đăng nhập với quyền <strong>Operator</strong> (chỉ xem). Chỉ tài khoản <strong>Admin</strong> mới có thể thêm/sửa/xóa quyền.
+      </div>
+      {% endif %}
+
+      <!-- Discord User IDs -->
+      <div class="card p-5 space-y-4">
+        <h3 class="font-medium text-sm text-indigo-300">Phân quyền theo Discord User ID</h3>
+
+        {% if user.is_admin %}
+        <form id="form-add-discord-perm" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
+          <div class="sm:col-span-3">
+            <label class="block text-[11px] text-slate-400 mb-1">Discord User ID</label>
+            <input id="dp-uid" type="text" required placeholder="1240503090185109536" class="inp font-mono" />
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block text-[11px] text-slate-400 mb-1">Tên gợi nhớ</label>
+            <input id="dp-label" type="text" placeholder="VD: Chủ bot / Mod" class="inp" />
+          </div>
+          <div class="sm:col-span-4 flex flex-wrap gap-3 pb-2 text-xs">
+            <label class="inline-flex items-center gap-1.5 cursor-pointer">
+              <input id="dp-admin" type="checkbox" class="accent-indigo-500" /> Admin
+            </label>
+            <label class="inline-flex items-center gap-1.5 cursor-pointer">
+              <input id="dp-dash" type="checkbox" class="accent-indigo-500" /> Vào Dashboard
+            </label>
+            <label class="inline-flex items-center gap-1.5 cursor-pointer">
+              <input id="dp-status" type="checkbox" checked class="accent-indigo-500" /> Dùng /status
+            </label>
+          </div>
+          <div class="sm:col-span-2">
+            <button type="submit" class="btn-primary w-full">+ Thêm / Lưu</button>
+          </div>
+        </form>
+        {% endif %}
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2 pr-3">Discord User ID</th>
+                <th class="py-2 pr-3">Ghi chú</th>
+                <th class="py-2 pr-3 text-center">Admin toàn quyền</th>
+                <th class="py-2 pr-3 text-center">Vào Dashboard</th>
+                <th class="py-2 pr-3 text-center">Dùng /status</th>
+                <th class="py-2 text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="discord-perms-tbody" class="divide-y divide-slate-800/70"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Traditional Username/Password Accounts -->
+      <div class="card p-5 space-y-4">
+        <h3 class="font-medium text-sm text-indigo-300">Tài khoản đăng nhập Dashboard (Username &amp; Mật khẩu)</h3>
+
+        {% if user.is_admin %}
+        <form id="form-add-user" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
+          <div class="sm:col-span-3">
+            <label class="block text-[11px] text-slate-400 mb-1">Tên đăng nhập</label>
+            <input id="nu-username" type="text" required placeholder="admin2" class="inp" />
+          </div>
+          <div class="sm:col-span-4">
+            <label class="block text-[11px] text-slate-400 mb-1">Mật khẩu (tối thiểu 6 ký tự)</label>
+            <input id="nu-password" type="password" required minlength="6" placeholder="••••••••" class="inp" />
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block text-[11px] text-slate-400 mb-1">Vai trò</label>
+            <select id="nu-role" class="inp">
+              <option value="admin">Admin (toàn quyền)</option>
+              <option value="operator">Operator (chỉ cấu hình)</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <button type="submit" class="btn-primary w-full">+ Tạo tài khoản</button>
+          </div>
+        </form>
+        {% endif %}
+
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-slate-800 text-slate-400">
+                <th class="py-2 pr-3">Tên đăng nhập</th>
+                <th class="py-2 pr-3">Vai trò</th>
+                <th class="py-2 pr-3">Đăng nhập gần nhất</th>
+                <th class="py-2 text-right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody" class="divide-y divide-slate-800/70"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const DEFAULT_SYSTEM_PROMPT = {{ default_system_prompt | tojson }};
+    const DEFAULT_OCR_INSTRUCTION = {{ default_ocr_instruction | tojson }};
+    const IS_ADMIN = {{ 'true' if user.is_admin else 'false' }};
+
+    let currentConfig = null;
+    let currentModelsRuntime = null;
+    let autoChainState = [];
+    let overridesState = {};
+    let statusTimer = null;
+
+    // ---------- Helpers ----------
+    function showToast(msg, ok = true) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.className = `fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl text-sm shadow-xl border ${
+        ok ? "bg-emerald-950/95 border-emerald-500/40 text-emerald-200" : "bg-rose-950/95 border-rose-500/40 text-rose-200"
+      }`;
+      el.classList.remove("hidden");
+      clearTimeout(el._t);
+      el._t = setTimeout(() => el.classList.add("hidden"), 3500);
+    }
+
+    async function api(url, opts = {}) {
+      const res = await fetch(url, {
+        headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+        ...opts,
+      });
+      if (res.status === 401) {
+        window.location.href = "/login";
+        throw new Error("Phiên đăng nhập đã hết hạn.");
+      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || `Lỗi HTTP ${res.status}`);
+      return data;
+    }
+
+    function esc(s) {
+      return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+
+    // ---------- Tabs ----------
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.tab;
+        document.querySelectorAll(".tab-btn").forEach((b) => (b.dataset.active = String(b === btn)));
+        document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("hidden", p.id !== `tab-${target}`));
+        if (target === "perms") loadPermissions();
+      });
+    });
+
+    // ---------- Tab 1: Status ----------
+    async function loadStatus(checkGemini = false) {
+      try {
+        const d = await api(`/api/status${checkGemini ? "?check_gemini=1" : ""}`);
+        const online = d.bot.online;
+        const badge = document.getElementById("hdr-status-badge");
+        badge.textContent = online ? "● Online" : "● Offline";
+        badge.className = `text-[11px] px-2 py-0.5 rounded-full ${
+          online ? "bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" : "bg-rose-500/15 text-rose-300 border border-rose-500/30"
+        }`;
+
+        document.getElementById("st-online").innerHTML = online
+          ? '<span class="text-emerald-400">Online</span>'
+          : '<span class="text-rose-400">Offline</span>';
+        document.getElementById("st-ping").textContent = d.bot.ping_ms !== null ? `${d.bot.ping_ms} ms` : "—";
+        document.getElementById("st-botname").textContent = d.bot.username || "—";
+        document.getElementById("st-uptime").textContent = d.bot.uptime_human || "0s";
+        document.getElementById("st-guilds").textContent = `${d.bot.guild_count} server`;
+        document.getElementById("st-version").textContent = `v${d.bot.version} · py ${d.bot.python_version}`;
+
+        const r = d.resources;
+        document.getElementById("st-ram").textContent = `${r.ram_used_mb} / ${r.ram_limit_mb} MB`;
+        document.getElementById("st-ram-pct").textContent = `${r.ram_percent}%`;
+        const ramBar = document.getElementById("st-ram-bar");
+        ramBar.style.width = `${Math.min(100, r.ram_percent)}%`;
+        ramBar.className = `h-full transition-all ${r.ram_percent > 85 ? "bg-rose-500" : r.ram_percent > 65 ? "bg-amber-500" : "bg-indigo-500"}`;
+        document.getElementById("st-ram-rss").textContent = `Tiến trình bot: ${r.ram_rss_mb} MB`;
+
+        document.getElementById("st-cpu").textContent = `${r.cpu_percent}%`;
+        document.getElementById("st-threads").textContent = `${r.threads} luồng`;
+        document.getElementById("st-requests-brief").textContent = `Hôm nay: ${d.stats.today_total} req · Tổng: ${d.stats.total}`;
+
+        // Gemini
+        if (d.gemini.check) {
+          const gc = d.gemini.check;
+          document.getElementById("st-gemini-check").innerHTML = gc.ok
+            ? `<span class="text-emerald-400">🟢 Kết nối OK</span> · ${gc.latency_ms} ms`
+            : `<span class="text-rose-400">🔴 Lỗi (${esc(gc.message)})</span> · ${gc.latency_ms} ms`;
+        }
+        const chainEl = document.getElementById("st-auto-chain");
+        chainEl.innerHTML = d.gemini.auto_chain
+          .map((item, idx) => {
+            const cd = item.cooldown_left > 0 ? ` <span class="text-amber-300">⏳${Math.ceil(item.cooldown_left)}s</span>` : "";
+            const arrow = idx < d.gemini.auto_chain.length - 1 ? '<span class="text-slate-600">→</span>' : "";
+            return `<span class="px-2 py-1 rounded bg-slate-950 border border-slate-800 font-mono">${esc(item.id)}${cd}</span>${arrow}`;
+          })
+          .join("");
+        document.getElementById("st-gemini-meta").textContent =
+          `Đã phát hiện ${d.gemini.discovered_count} model chat` + (d.gemini.last_error ? ` · ⚠️ ${d.gemini.last_error}` : "");
+
+        // MongoDB
+        const db = d.mongodb;
+        const dbBadge = document.getElementById("st-db-badge");
+        dbBadge.textContent = !db.enabled ? "Chưa bật" : db.ok ? "🟢 Hoạt động" : "🔴 Lỗi";
+        dbBadge.className = `text-xs px-2 py-0.5 rounded-full ${
+          !db.enabled ? "bg-slate-800 text-slate-400" : db.ok ? "bg-emerald-500/15 text-emerald-300" : "bg-rose-500/15 text-rose-300"
+        }`;
+        document.getElementById("st-db-ms").textContent = db.ok ? `${db.latency_ms} ms` : "—";
+        document.getElementById("st-db-active").textContent = db.active_sessions ?? "—";
+        document.getElementById("st-db-archived").textContent = db.archived_sessions ?? "—";
+        if (db.storage_mb !== null) {
+          const pct = Math.min(100, (db.storage_mb / db.quota_mb) * 100);
+          document.getElementById("st-db-storage").textContent = `${db.storage_mb} / ${db.quota_mb} MB (${pct.toFixed(1)}%)`;
+          document.getElementById("st-db-bar").style.width = `${pct}%`;
+        } else {
+          document.getElementById("st-db-storage").textContent = "—";
+        }
+
+        // Stats
+        const st = d.stats;
+        document.getElementById("st-usage-summary").textContent =
+          `Tổng request: ${st.total} · Thành công: ${st.success_rate !== null ? st.success_rate + "%" : "—"} · Lỗi: ${st.errors} · Hôm nay (Pacific): ${st.today_total}`;
+        const dm = Object.entries(st.daily_models || {}).map(([k, v]) => `${k} (×${v})`).join(", ") || "Chưa có";
+        document.getElementById("st-usage-models").textContent = `Model dùng hôm nay: ${dm}`;
+        const ft = Object.entries(st.features || {}).map(([k, v]) => `${k}: ${v}`).join(" · ") || "—";
+        document.getElementById("st-usage-features").textContent = `Tính năng: ${ft}`;
+        document.getElementById("st-usage-err").textContent = st.last_error ? `⚠️ Lỗi gần nhất: ${st.last_error.message}` : "";
+
+        // Guilds
+        const gl = document.getElementById("st-guild-list");
+        gl.innerHTML = d.bot.guilds.length
+          ? d.bot.guilds.map((g) => `<div class="py-1.5 flex justify-between"><span class="text-slate-200">${esc(g.name)}</span><span class="text-slate-500 font-mono">${g.member_count} tv</span></div>`).join("")
+          : '<div class="py-2 text-slate-500">Chưa tham gia server nào hoặc bot đang khởi động.</div>';
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    document.getElementById("btn-refresh-status").addEventListener("click", () => loadStatus(false));
+    document.getElementById("btn-check-gemini").addEventListener("click", () => loadStatus(true));
+    document.getElementById("btn-clear-cd").addEventListener("click", async () => {
+      try {
+        const res = await api("/api/models/clear-cooldowns", { method: "POST" });
+        showToast(`Đã xóa cooldown của ${res.cleared} model.`);
+        loadStatus(false);
+      } catch (e) { showToast(e.message, false); }
+    });
+    document.getElementById("auto-refresh-toggle").addEventListener("change", (e) => {
+      clearInterval(statusTimer);
+      if (e.target.checked) statusTimer = setInterval(() => loadStatus(false), 5000);
+    });
+
+    // ---------- Load Full Config ----------
+    async function loadConfig() {
+      try {
+        const data = await api("/api/config");
+        currentConfig = data.config;
+        currentModelsRuntime = data.models_runtime;
+
+        document.getElementById("hdr-updated").textContent =
+          `Cập nhật lúc: ${new Date(currentConfig.updated_at).toLocaleString("vi-VN")} bởi ${currentConfig.updated_by || "system"}`;
+
+        // Fill /ask
+        const a = currentConfig.ask || {};
+        const s = currentConfig.session || {};
+        document.getElementById("ask-cooldown").value = a.user_cooldown ?? 5;
+        document.getElementById("ask-concurrent").value = a.max_concurrent ?? 2;
+        document.getElementById("ask-max-file-mb").value = a.max_file_mb ?? 10;
+        document.getElementById("ask-timeout").value = a.gemini_timeout_seconds ?? 170;
+        document.getElementById("ask-retries").value = a.max_retries ?? 3;
+        document.getElementById("ask-default-thinking").value = a.default_thinking_level || "";
+        document.getElementById("ask-chunk-limit").value = a.chunk_char_limit ?? 1900;
+        document.getElementById("ask-max-chunks").value = a.max_reply_chunks ?? 6;
+        document.getElementById("ask-tb-low").value = a.thinking_budgets?.low ?? 1024;
+        document.getElementById("ask-tb-medium").value = a.thinking_budgets?.medium ?? 8192;
+        document.getElementById("ask-tb-high").value = a.thinking_budgets?.high ?? 24576;
+        document.getElementById("ask-allow-file").checked = a.allow_file !== false;
+        document.getElementById("ask-allow-ocr").checked = a.allow_ocr !== false;
+        document.getElementById("ask-allow-web").checked = a.allow_web_search !== false;
+        document.getElementById("ask-allow-thinking").checked = a.allow_thinking !== false;
+        document.getElementById("ask-default-web").checked = Boolean(a.default_web_search);
+        document.getElementById("ask-show-thoughts").checked = a.show_thoughts_embed !== false;
+        document.getElementById("ask-show-sources").checked = a.show_sources !== false;
+
+        document.getElementById("sess-idle-hours").value = s.session_idle_hours ?? 2;
+        document.getElementById("sess-max-msgs").value = s.max_history_messages ?? 20;
+        document.getElementById("sess-max-chars").value = s.max_history_chars ?? 24000;
+        document.getElementById("sess-stored-chars").value = s.max_stored_chars ?? 4000;
+        document.getElementById("sess-max-turns").value = s.session_max_turns ?? 500;
+        document.getElementById("sess-sweep-mins").value = s.sweep_minutes ?? 5;
+        document.getElementById("sess-quota-mb").value = s.mongodb_quota_mb ?? 512;
+        document.getElementById("sess-ram-limit").value = s.ram_limit_mb ?? "";
+
+        // Fill System Prompt
+        document.getElementById("inp-system-prompt").value = currentConfig.system_prompt || "";
+        document.getElementById("inp-ocr-prompt").value = currentConfig.ocr_instruction || "";
+        document.getElementById("inp-append-date").checked = currentConfig.append_current_date !== false;
+        updatePromptCount();
+
+        // Fill Models
+        const m = currentConfig.models || {};
+        autoChainState = [...(m.auto_model_chain || [])];
+        overridesState = JSON.parse(JSON.stringify(m.overrides || {}));
+        document.getElementById("mod-default-text").value = m.default_text_model || "";
+        document.getElementById("mod-auto-last").value = m.auto_last_model || "";
+        document.getElementById("mod-refresh-hours").value = m.model_refresh_hours ?? 6;
+        document.getElementById("mod-hide-pro").checked = m.hide_pro_models !== false;
+        document.getElementById("mod-extra").value = (m.extra_models || []).join(", ");
+        document.getElementById("mod-hidden-patterns").value = (m.hidden_models || []).join(", ");
+
+        renderAutoChain();
+        renderModelsTable();
+      } catch (e) {
+        showToast("Không tải được cấu hình: " + e.message, false);
+      }
+    }
+
+    // ---------- Save /ask ----------
+    document.getElementById("btn-save-ask").addEventListener("click", async () => {
+      try {
+        const ramVal = document.getElementById("sess-ram-limit").value.trim();
+        const payload = {
+          ask: {
+            user_cooldown: Number(document.getElementById("ask-cooldown").value),
+            max_concurrent: Number(document.getElementById("ask-concurrent").value),
+            max_file_mb: Number(document.getElementById("ask-max-file-mb").value),
+            gemini_timeout_seconds: Number(document.getElementById("ask-timeout").value),
+            max_retries: Number(document.getElementById("ask-retries").value),
+            default_thinking_level: document.getElementById("ask-default-thinking").value,
+            chunk_char_limit: Number(document.getElementById("ask-chunk-limit").value),
+            max_reply_chunks: Number(document.getElementById("ask-max-chunks").value),
+            thinking_budgets: {
+              low: Number(document.getElementById("ask-tb-low").value),
+              medium: Number(document.getElementById("ask-tb-medium").value),
+              high: Number(document.getElementById("ask-tb-high").value),
+            },
+            allow_file: document.getElementById("ask-allow-file").checked,
+            allow_ocr: document.getElementById("ask-allow-ocr").checked,
+            allow_web_search: document.getElementById("ask-allow-web").checked,
+            allow_thinking: document.getElementById("ask-allow-thinking").checked,
+            default_web_search: document.getElementById("ask-default-web").checked,
+            show_thoughts_embed: document.getElementById("ask-show-thoughts").checked,
+            show_sources: document.getElementById("ask-show-sources").checked,
+          },
+          session: {
+            session_idle_hours: Number(document.getElementById("sess-idle-hours").value),
+            max_history_messages: Number(document.getElementById("sess-max-msgs").value),
+            max_history_chars: Number(document.getElementById("sess-max-chars").value),
+            max_stored_chars: Number(document.getElementById("sess-stored-chars").value),
+            session_max_turns: Number(document.getElementById("sess-max-turns").value),
+            sweep_minutes: Number(document.getElementById("sess-sweep-mins").value),
+            mongodb_quota_mb: Number(document.getElementById("sess-quota-mb").value),
+            ram_limit_mb: ramVal ? Number(ramVal) : null,
+          },
+        };
+        await api("/api/config/ask", { method: "PUT", body: JSON.stringify(payload) });
+        showToast("✅ Đã lưu cấu hình /ask & phiên chat (áp dụng ngay)!");
+        loadConfig();
+      } catch (e) { showToast(e.message, false); }
+    });
+
+    // ---------- System Instruction ----------
+    function updatePromptCount() {
+      const len = document.getElementById("inp-system-prompt").value.length;
+      document.getElementById("prompt-char-count").textContent = `${len} ký tự`;
+    }
+    document.getElementById("inp-system-prompt").addEventListener("input", updatePromptCount);
+    document.getElementById("btn-reset-sys-prompt").addEventListener("click", () => {
+      document.getElementById("inp-system-prompt").value = DEFAULT_SYSTEM_PROMPT;
+      updatePromptCount();
+    });
+    document.getElementById("btn-reset-ocr-prompt").addEventListener("click", () => {
+      document.getElementById("inp-ocr-prompt").value = DEFAULT_OCR_INSTRUCTION;
+    });
+    document.getElementById("btn-save-prompt").addEventListener("click", async () => {
+      try {
+        await api("/api/config/prompt", {
+          method: "PUT",
+          body: JSON.stringify({
+            system_prompt: document.getElementById("inp-system-prompt").value,
+            ocr_instruction: document.getElementById("inp-ocr-prompt").value,
+            append_current_date: document.getElementById("inp-append-date").checked,
+          }),
+        });
+        showToast("✅ Đã lưu System Instruction (áp dụng ngay)!");
+        loadConfig();
+      } catch (e) { showToast(e.message, false); }
+    });
+
+    // ---------- Models Management ----------
+    function renderAutoChain() {
+      const box = document.getElementById("auto-chain-list");
+      const sel = document.getElementById("auto-chain-select");
+      const allModels = currentModelsRuntime?.all_models || [];
+      sel.innerHTML = '<option value="">-- Chọn model từ danh sách --</option>' +
+        allModels.map((m) => `<option value="${esc(m.id)}">${esc(m.badge)} ${esc(m.id)}</option>`).join("");
+
+      if (!autoChainState.length) {
+        const eff = (currentModelsRuntime?.auto_chain || []).join(" → ");
+        box.innerHTML = `<div class="text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-3">
+          Đang dùng chế độ tự chọn mặc định: <span class="font-mono text-indigo-300">${esc(eff)}</span>
+        </div>`;
+        return;
+      }
+      box.innerHTML = autoChainState
+        .map((mid, i) => `
+          <div class="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs">
+            <div class="flex items-center gap-2">
+              <span class="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-mono">${i + 1}</span>
+              <span class="font-mono text-slate-100">${esc(mid)}</span>
+            </div>
+            <div class="flex items-center gap-1">
+              <button type="button" onclick="moveAuto(${i}, -1)" class="btn-ghost px-2 py-1">↑</button>
+              <button type="button" onclick="moveAuto(${i}, 1)" class="btn-ghost px-2 py-1">↓</button>
+              <button type="button" onclick="removeAuto(${i})" class="btn-danger px-2 py-1">×</button>
+            </div>
+          </div>
+        `).join("");
+    }
+
+    window.moveAuto = (i, dir) => {
+      const j = i + dir;
+      if (j < 0 || j >= autoChainState.length) return;
+      [autoChainState[i], autoChainState[j]] = [autoChainState[j], autoChainState[i]];
+      renderAutoChain();
+    };
+    window.removeAuto = (i) => {
+      autoChainState.splice(i, 1);
+      renderAutoChain();
+    };
+    window.addToAuto = (mid) => {
+      if (!mid || autoChainState.includes(mid)) return;
+      autoChainState.push(mid);
+      renderAutoChain();
+    };
+
+    document.getElementById("btn-add-auto-chain").addEventListener("click", () => {
+      const custom = document.getElementById("auto-chain-custom").value.trim();
+      const chosen = custom || document.getElementById("auto-chain-select").value;
+      if (!chosen) return;
+      window.addToAuto(chosen);
+      document.getElementById("auto-chain-custom").value = "";
+    });
+    document.getElementById("btn-clear-auto-chain").addEventListener("click", () => {
+      autoChainState = [];
+      renderAutoChain();
+    });
+
+    function renderModelsTable() {
+      const q = (document.getElementById("mod-search").value || "").trim().toLowerCase();
+      const tbody = document.getElementById("models-tbody");
+      const allModels = (currentModelsRuntime?.all_models || []).filter(
+        (m) => !q || m.id.toLowerCase().includes(q) || (m.display_name || "").toLowerCase().includes(q)
+      );
+
+      tbody.innerHTML = allModels.map((m) => {
+        const ov = overridesState[m.id] || {};
+        const disp = ov.display_name ?? (m.display_name !== m.api_display ? m.display_name : "");
+        const tag = ov.tag ?? (ov.is_free === true ? "🆓" : ov.is_free === false ? "💳" : "");
+        const hiddenChecked = ov.hidden !== undefined ? Boolean(ov.hidden) : Boolean(m.hidden);
+        return `
+          <tr data-mid="${esc(m.id)}" class="hover:bg-slate-900/60">
+            <td class="py-2.5 pr-3">
+              <div class="font-mono text-slate-100">${esc(m.id)}</div>
+              <div class="text-[11px] text-slate-500">Mặc định: ${esc(m.default_badge)} · ${esc(m.source)}</div>
+            </td>
+            <td class="py-2.5 pr-3">
+              <input type="text" value="${esc(disp)}" placeholder="${esc(m.api_display)}"
+                onchange="setOverride('${esc(m.id)}','display_name',this.value)" class="inp py-1.5 text-xs" />
+            </td>
+            <td class="py-2.5 pr-3">
+              <div class="flex gap-1">
+                <select onchange="setTagPreset('${esc(m.id)}', this.value, this.nextElementSibling)" class="inp py-1.5 text-xs w-28">
+                  <option value="" ${!tag ? "selected" : ""}>Tự động (${esc(m.default_badge)})</option>
+                  <option value="🆓" ${tag === "🆓" ? "selected" : ""}>🆓 Free</option>
+                  <option value="🧪" ${tag === "🧪" ? "selected" : ""}>🧪 Preview</option>
+                  <option value="💳" ${tag === "💳" ? "selected" : ""}>💳 Paid</option>
+                  <option value="__custom" ${tag && !["🆓","🧪","💳"].includes(tag) ? "selected" : ""}>Tùy chỉnh</option>
+                </select>
+                <input type="text" value="${esc(tag)}" placeholder="Tag"
+                  onchange="setOverride('${esc(m.id)}','tag',this.value)" class="inp py-1.5 text-xs w-16 text-center" />
+              </div>
+            </td>
+            <td class="py-2.5 pr-3 text-center">
+              <input type="checkbox" ${hiddenChecked ? "checked" : ""}
+                onchange="setOverride('${esc(m.id)}','hidden',this.checked)" class="accent-rose-500 w-4 h-4 cursor-pointer" />
+            </td>
+            <td class="py-2.5 text-right">
+              <button type="button" onclick="addToAuto('${esc(m.id)}')" class="btn-ghost text-[11px]">+ Auto</button>
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    window.setOverride = (mid, key, val) => {
+      if (!overridesState[mid]) overridesState[mid] = {};
+      if (key === "hidden") {
+        overridesState[mid].hidden = Boolean(val);
+      } else {
+        const s = String(val || "").trim();
+        if (s) overridesState[mid][key] = s;
+        else delete overridesState[mid][key];
+      }
+      if (key === "tag") {
+        if (val === "🆓") overridesState[mid].is_free = true;
+        else if (val === "💳") overridesState[mid].is_free = false;
+        else delete overridesState[mid].is_free;
+      }
+    };
+    window.setTagPreset = (mid, val, inputEl) => {
+      if (val === "__custom") { inputEl.focus(); return; }
+      inputEl.value = val;
+      window.setOverride(mid, "tag", val);
+    };
+    document.getElementById("mod-search").addEventListener("input", renderModelsTable);
+
+    async function refreshModelsFromApi() {
+      try {
+        showToast("Đang tải lại danh sách model từ Gemini API...");
+        await api("/api/models/refresh", { method: "POST" });
+        await loadConfig();
+        await loadStatus(false);
+        showToast("✅ Đã cập nhật danh sách model từ Gemini API!");
+      } catch (e) { showToast(e.message, false); }
+    }
+    document.getElementById("btn-refresh-models-tab").addEventListener("click", refreshModelsFromApi);
+    document.getElementById("btn-refresh-models-st").addEventListener("click", refreshModelsFromApi);
+
+    document.getElementById("btn-save-models").addEventListener("click", async () => {
+      try {
+        const splitCsv = (v) => v.split(/[,\n]+/).map((x) => x.trim()).filter(Boolean);
+        const payload = {
+          default_text_model: document.getElementById("mod-default-text").value.trim(),
+          auto_model_chain: autoChainState,
+          auto_last_model: document.getElementById("mod-auto-last").value.trim(),
+          fallback_text: currentConfig?.models?.fallback_text || ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"],
+          hidden_models: splitCsv(document.getElementById("mod-hidden-patterns").value),
+          hide_pro_models: document.getElementById("mod-hide-pro").checked,
+          extra_models: splitCsv(document.getElementById("mod-extra").value),
+          model_refresh_hours: Number(document.getElementById("mod-refresh-hours").value),
+          overrides: overridesState,
+        };
+        await api("/api/config/models", { method: "PUT", body: JSON.stringify(payload) });
+        showToast("✅ Đã lưu cấu hình Model Gemini (áp dụng ngay)!");
+        await loadConfig();
+        await loadStatus(false);
+      } catch (e) { showToast(e.message, false); }
+    });
+
+    // ---------- Tab 5: Permissions & Users ----------
+    const dpAdminEl = document.getElementById("dp-admin");
+    if (dpAdminEl) {
+      dpAdminEl.addEventListener("change", (e) => {
+        if (e.target.checked) {
+          document.getElementById("dp-dash").checked = true;
+          document.getElementById("dp-status").checked = true;
+        }
+      });
+    }
+
+    async function loadPermissions() {
+      try {
+        const [dp, us] = await Promise.all([
+          api("/api/permissions/discord"),
+          api("/api/permissions/users"),
+        ]);
+        const dBody = document.getElementById("discord-perms-tbody");
+        dBody.innerHTML = dp.items.length
+          ? dp.items.map((item) => `
+            <tr>
+              <td class="py-2.5 pr-3 font-mono text-slate-100">${esc(item.user_id)}</td>
+              <td class="py-2.5 pr-3 text-slate-300">${esc(item.label || "—")}</td>
+              <td class="py-2.5 pr-3 text-center">
+                <input type="checkbox" ${item.is_admin ? "checked" : ""} ${IS_ADMIN ? "" : "disabled"}
+                  onchange="toggleDiscordPerm('${esc(item.user_id)}','${esc(item.label)}',this.checked,${Boolean(item.can_dashboard)},${Boolean(item.can_status)})"
+                  class="accent-indigo-500 w-4 h-4" />
+              </td>
+              <td class="py-2.5 pr-3 text-center">
+                <input type="checkbox" ${item.can_dashboard || item.is_admin ? "checked" : ""} ${IS_ADMIN && !item.is_admin ? "" : "disabled"}
+                  onchange="toggleDiscordPerm('${esc(item.user_id)}','${esc(item.label)}',${Boolean(item.is_admin)},this.checked,${Boolean(item.can_status)})"
+                  class="accent-indigo-500 w-4 h-4" />
+              </td>
+              <td class="py-2.5 pr-3 text-center">
+                <input type="checkbox" ${item.can_status || item.is_admin ? "checked" : ""} ${IS_ADMIN && !item.is_admin ? "" : "disabled"}
+                  onchange="toggleDiscordPerm('${esc(item.user_id)}','${esc(item.label)}',${Boolean(item.is_admin)},${Boolean(item.can_dashboard)},this.checked)"
+                  class="accent-indigo-500 w-4 h-4" />
+              </td>
+              <td class="py-2.5 text-right">
+                ${IS_ADMIN ? `<button type="button" onclick="deleteDiscordPerm('${esc(item.user_id)}')" class="btn-danger">Xóa</button>` : "—"}
+              </td>
+            </tr>
+          `).join("")
+          : '<tr><td colspan="6" class="py-3 text-slate-500 text-center">Chưa có Discord User ID nào.</td></tr>';
+
+        const uBody = document.getElementById("users-tbody");
+        uBody.innerHTML = us.items.length
+          ? us.items.map((u) => `
+            <tr>
+              <td class="py-2.5 pr-3 font-medium text-slate-100">${esc(u.username)}</td>
+              <td class="py-2.5 pr-3"><span class="px-2 py-0.5 rounded text-[11px] ${u.role === "admin" ? "bg-indigo-500/20 text-indigo-300" : "bg-slate-800 text-slate-400"}">${esc(u.role)}</span></td>
+              <td class="py-2.5 pr-3 text-slate-400">${u.last_login_at ? new Date(u.last_login_at).toLocaleString("vi-VN") : "Chưa đăng nhập"}</td>
+              <td class="py-2.5 text-right space-x-1.5">
+                ${IS_ADMIN ? `
+                  <button type="button" onclick="changeUserPass('${esc(u.username)}')" class="btn-ghost text-[11px]">Đổi MK</button>
+                  <button type="button" onclick="deleteUser('${esc(u.username)}')" class="btn-danger">Xóa</button>
+                ` : "—"}
+              </td>
+            </tr>
+          `).join("")
+          : '<tr><td colspan="4" class="py-3 text-slate-500 text-center">Chưa có tài khoản mật khẩu nào.</td></tr>';
+      } catch (e) { showToast(e.message, false); }
+    }
+
+    window.toggleDiscordPerm = async (uid, label, isAdmin, canDash, canStatus) => {
+      try {
+        await api("/api/permissions/discord", {
+          method: "POST",
+          body: JSON.stringify({ user_id: uid, label, is_admin: isAdmin, can_dashboard: canDash, can_status: canStatus }),
+        });
+        showToast(`✅ Đã cập nhật quyền cho Discord ID ${uid}.`);
+        loadPermissions();
+      } catch (e) { showToast(e.message, false); loadPermissions(); }
+    };
+
+    window.deleteDiscordPerm = async (uid) => {
+      if (!confirm(`Xóa quyền của Discord User ID ${uid}?`)) return;
+      try {
+        await api(`/api/permissions/discord/${encodeURIComponent(uid)}`, { method: "DELETE" });
+        showToast(`Đã xóa Discord ID ${uid}.`);
+        loadPermissions();
+      } catch (e) { showToast(e.message, false); }
+    };
+
+    const formAddDp = document.getElementById("form-add-discord-perm");
+    if (formAddDp) {
+      formAddDp.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          await api("/api/permissions/discord", {
+            method: "POST",
+            body: JSON.stringify({
+              user_id: document.getElementById("dp-uid").value.trim(),
+              label: document.getElementById("dp-label").value.trim(),
+              is_admin: document.getElementById("dp-admin").checked,
+              can_dashboard: document.getElementById("dp-dash").checked,
+              can_status: document.getElementById("dp-status").checked,
+            }),
+          });
+          formAddDp.reset();
+          document.getElementById("dp-status").checked = true;
+          showToast("✅ Đã lưu phân quyền Discord ID!");
+          loadPermissions();
+        } catch (err) { showToast(err.message, false); }
+      });
+    }
+
+    const formAddUser = document.getElementById("form-add-user");
+    if (formAddUser) {
+      formAddUser.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          await api("/api/permissions/users", {
+            method: "POST",
+            body: JSON.stringify({
+              username: document.getElementById("nu-username").value.trim(),
+              password: document.getElementById("nu-password").value,
+              role: document.getElementById("nu-role").value,
+            }),
+          });
+          formAddUser.reset();
+          showToast("✅ Đã tạo tài khoản Dashboard mới!");
+          loadPermissions();
+        } catch (err) { showToast(err.message, false); }
+      });
+    }
+
+    window.changeUserPass = async (uname) => {
+      const pw = prompt(`Nhập mật khẩu mới cho '${uname}' (tối thiểu 6 ký tự):`);
+      if (!pw) return;
+      try {
+        await api(`/api/permissions/users/${encodeURIComponent(uname)}/password`, {
+          method: "PUT",
+          body: JSON.stringify({ password: pw }),
+        });
+        showToast(`🔑 Đã đổi mật khẩu cho ${uname}.`);
+      } catch (e) { showToast(e.message, false); }
+    };
+
+    window.deleteUser = async (uname) => {
+      if (!confirm(`Xóa tài khoản '${uname}'?`)) return;
+      try {
+        await api(`/api/permissions/users/${encodeURIComponent(uname)}`, { method: "DELETE" });
+        showToast(`Đã xóa tài khoản ${uname}.`);
+        loadPermissions();
+      } catch (e) { showToast(e.message, false); }
+    };
+
+    // ---------- Init ----------
+    loadStatus(false);
+    loadConfig();
+    statusTimer = setInterval(() => loadStatus(false), 5000);
+  </script>
+</body>
+</html>
