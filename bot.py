@@ -1,14 +1,13 @@
 """
-Discord bot hỏi đáp AI với Gemini API (free tier)
+Discord bot hỏi đáp AI với Gemini API + Web Dashboard quản trị thời gian thực (MongoDB Atlas)
 - /ask    : hỏi đáp + OCR + suy nghĩ sâu + tra cứu web (tuỳ chọn)
 - /refresh: làm mới phiên chat + lưu trữ VĨNH VIỄN cuộc trò chuyện (kèm Discord ID) vào MongoDB
 - /session: xem thông tin phiên chat hiện tại
-- /status : RAM, uptime, tình trạng Gemini API + MongoDB, thống kê sử dụng
-- Mỗi người 1 phiên riêng trên MongoDB Atlas; sau 2 giờ không chat phiên tự được lưu trữ + làm mới
-- Có web server nhỏ (/ và /health) để Render + UptimeRobot giữ bot luôn thức
+- /status : RAM, uptime, tình trạng Gemini API + MongoDB, thống kê sử dụng (phân quyền động từ MongoDB)
+- Toàn bộ cấu hình động lưu trên MongoDB Atlas (`bot_config`, `discord_permissions`, `dashboard_users`)
+- Web Dashboard tối giản (FastAPI + Uvicorn) chạy chung tiến trình bot trên cổng PORT (kèm /health)
 """
 import asyncio
-import fnmatch
 import io
 import logging
 import mimetypes
@@ -29,81 +28,31 @@ import certifi
 import discord
 import psutil
 import pymongo
-from aiohttp import web
+import uvicorn
 from discord import app_commands
 from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 from pymongo import AsyncMongoClient
 
+from config_store import ConfigStore, DynamicSemaphore
+from dashboard import create_dashboard_app
+
 # --------------------------------------------------------------------------
-# Cấu hình (đặt trong Environment Variables của Render)
+# Biến môi trường cốt lõi (khởi động tiến trình)
 # --------------------------------------------------------------------------
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-PORT = int(os.getenv("PORT", "10000"))  # cổng web server /health
-GUILD_ID = os.getenv("GUILD_ID")  # tuỳ chọn: sync lệnh tức thì cho 1 server khi test
-DEFAULT_TEXT_MODEL = os.getenv("DEFAULT_TEXT_MODEL", "").strip()  # tuỳ chọn: ép model đứng đầu chuỗi tự động
-
-
-def _csv_env(name: str, default: str = "") -> list[str]:
-    return [x.strip() for x in re.split(r"[,\n]+", os.getenv(name, default)) if x.strip()]
-
-
-# Model bị ẨN khỏi danh sách gợi ý của option `model` (vẫn nằm trong chuỗi tự động nếu đúng loại;
-# hỗ trợ ký tự đại diện, ví dụ gemini-4-*). Đặt HIDDEN_MODELS="" để hiện tất cả.
-HIDDEN_MODELS = _csv_env(
-    "HIDDEN_MODELS",
-    "gemini-2.5-flash,gemini-2.5-flash-lite,gemini-2.5-pro,gemini-nano-banana-2.1,"
-    "gemini-omni-flash-preview,gemini-4-argon,gemini-4-carbon",
-)
-EXTRA_MODELS = _csv_env("EXTRA_MODELS", "gemini-4-hydrogen")  # model thêm tay vào gợi ý (luôn hiện, không bị ẩn)
-# Ẩn TOÀN BỘ model hạng Pro (tên có "pro") khỏi danh sách gợi ý. Đặt HIDE_PRO_MODELS=0 để hiện lại.
-HIDE_PRO_MODELS = os.getenv("HIDE_PRO_MODELS", "1").strip().lower() not in ("0", "false", "no", "")
-AUTO_LAST_MODEL = os.getenv("AUTO_LAST_MODEL", "gemini-4-hydrogen").strip()  # bước cuối của chuỗi tự động
-AUTO_MODEL_CHAIN = _csv_env("AUTO_MODEL_CHAIN")  # tuỳ chọn: tự quy định thứ tự model tự động
-USER_COOLDOWN = float(os.getenv("USER_COOLDOWN", "5"))  # giây giữa 2 lần /ask của 1 người
-MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT", "2"))  # số request Gemini chạy song song
-MODEL_REFRESH_HOURS = float(os.getenv("MODEL_REFRESH_HOURS", "6"))
-RAM_LIMIT_MB = os.getenv("RAM_LIMIT_MB")  # tuỳ chọn: ép giới hạn RAM hiển thị ở /status
-MAX_FILE_MB = 10
-
-# --- Phiên chat (MongoDB Atlas) ---
-MONGODB_URI = os.getenv("MONGODB_URI")  # nếu bỏ trống: tắt bộ nhớ phiên
+PORT = int(os.getenv("PORT", "10000"))
+GUILD_ID = os.getenv("GUILD_ID")
+MONGODB_URI = os.getenv("MONGODB_URI")
 MONGODB_DB = os.getenv("MONGODB_DB", "gemini_bot")
-SESSION_IDLE_HOURS = float(os.getenv("SESSION_IDLE_HOURS", "2"))  # không chat quá lâu -> phiên tự làm mới
-MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))  # số tin gần nhất giữ trong phiên (user+bot)
-MAX_HISTORY_CHARS = int(os.getenv("MAX_HISTORY_CHARS", "24000"))  # tổng ký tự lịch sử gửi kèm mỗi lần hỏi
-MAX_STORED_CHARS = 4000  # cắt mỗi tin nhắn khi lưu để tiết kiệm dung lượng/token
-SESSION_TTL = timedelta(hours=SESSION_IDLE_HOURS)
-SESSION_MAX_TURNS = int(os.getenv("SESSION_MAX_TURNS", "500"))  # quá số lượt này -> tự lưu trữ + mở phiên mới
-SWEEP_MINUTES = float(os.getenv("SWEEP_MINUTES", "5"))  # chu kỳ quét phiên hết hạn để lưu trữ
-MONGODB_QUOTA_MB = float(os.getenv("MONGODB_QUOTA_MB", "512"))  # dung lượng gói Atlas (hiển thị ở /status)
+GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "").strip()
 
-# Chỉ các Discord ID này được dùng /status (ngăn cách bằng dấu phẩy; đặt biến môi trường để đổi)
-STATUS_ALLOWED_IDS = {
-    int(x) for x in re.split(r"[,\s]+", os.getenv("STATUS_ALLOWED_IDS", "1240503090185109536,1568530089035956284"))
-    if x.strip().isdigit()
-}
-
-FALLBACK_TEXT = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"]  # lite → flash → hydrogen
-
-SYSTEM_PROMPT = os.getenv(
-    "SYSTEM_PROMPT",
-    "Bạn là trợ lý AI trong Discord. Trả lời bằng đúng ngôn ngữ người dùng đang dùng "
-    "(mặc định tiếng Việt), rõ ràng, súc tích. Dùng Markdown của Discord "
-    "(in đậm, danh sách, code block); KHÔNG dùng bảng Markdown vì Discord không hiển thị được.",
-)
-OCR_INSTRUCTION = (
-    "Bạn là công cụ OCR. Hãy chép lại CHÍNH XÁC toàn bộ chữ có trong tệp đính kèm, giữ nguyên "
-    "thứ tự và bố cục (dùng danh sách/code block nếu cần, bảng thì trình bày dạng dòng chữ). "
-    "Không tự thêm bình luận. Nếu người dùng có yêu cầu thêm, hãy làm sau khi chép xong."
-)
-
-BOT_VERSION = "2026.11.13-hydrogen-chain"  # đổi mỗi lần sửa code để biết Northflank đang chạy bản nào
+BOT_VERSION = "2026.11.24-dashboard-atlas"
 START_TIME = time.time()
-NO_MENTIONS = discord.AllowedMentions.none()  # chặn @everyone/@role do AI sinh ra
-PACIFIC = ZoneInfo("America/Los_Angeles")  # quota Gemini reset lúc nửa đêm giờ Pacific
+NO_MENTIONS = discord.AllowedMentions.none()
+PACIFIC = ZoneInfo("America/Los_Angeles")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,13 +64,13 @@ log = logging.getLogger("gemini-bot")
 if not DISCORD_TOKEN or not GEMINI_API_KEY:
     sys.exit("Thiếu biến môi trường DISCORD_TOKEN hoặc GEMINI_API_KEY")
 
-# Mặc định dùng phiên bản API mặc định của SDK (google-genai 3.x: "v1").
-# Nếu một tính năng/model preview bị thiếu, đặt GEMINI_API_VERSION=v1beta để ghim lại.
-GEMINI_API_VERSION = os.getenv("GEMINI_API_VERSION", "").strip()
 gemini = genai.Client(
     api_key=GEMINI_API_KEY,
     http_options=types.HttpOptions(api_version=GEMINI_API_VERSION) if GEMINI_API_VERSION else None,
 )
+
+# Kho cấu hình động & phân quyền dùng chung giữa Bot và Web Dashboard
+config_store = ConfigStore(cache_ttl=5.0)
 
 
 class UserError(Exception):
@@ -129,7 +78,7 @@ class UserError(Exception):
 
 
 # --------------------------------------------------------------------------
-# Danh sách model: tự động lấy từ Gemini API (models.list)
+# Danh sách model: tự động lấy từ Gemini API + cấu hình động từ MongoDB Atlas
 # --------------------------------------------------------------------------
 NON_CHAT_KEYWORDS = (
     "embedding", "aqa", "tts", "live", "audio", "imagen", "veo", "lyria",
@@ -142,8 +91,8 @@ def version_of(model_id: str) -> float:
     return float(m.group(1)) if m else 0.0
 
 
-def badge_for(model_id: str) -> str:
-    """Gợi ý (heuristic) - Google không trả về thông tin free/paid qua API."""
+def default_badge_for(model_id: str) -> str:
+    """Gợi ý mặc định (heuristic) khi chưa cấu hình tag riêng trên Dashboard."""
     low = model_id.lower()
     if "pro" in low and version_of(low) >= 3:
         return "💳"
@@ -152,8 +101,26 @@ def badge_for(model_id: str) -> str:
     return "🆓"
 
 
+def badge_for(model_id: str) -> str:
+    """Ưu tiên tag/is_free cấu hình trên MongoDB Dashboard, fallback sang heuristic."""
+    ov = config_store.model_override(model_id)
+    if ov.get("tag"):
+        return str(ov["tag"])
+    if ov.get("is_free") is True:
+        return "🆓"
+    if ov.get("is_free") is False:
+        return "💳"
+    return default_badge_for(model_id)
+
+
+def display_name_for(model_id: str, api_display: str = "") -> str:
+    ov = config_store.model_override(model_id)
+    if ov.get("display_name"):
+        return str(ov["display_name"])
+    return api_display or model_id
+
+
 def tier_of(model_id: str) -> Optional[str]:
-    """Phân hạng model theo tên: lite < flash < pro. None nếu không thuộc 3 hạng này."""
     low = model_id.lower()
     if not low.startswith("gemini-"):
         return None
@@ -169,10 +136,6 @@ def tier_of(model_id: str) -> Optional[str]:
 def is_stable(model_id: str) -> bool:
     low = model_id.lower()
     return "preview" not in low and "exp" not in low
-
-
-def is_hidden(model_id: str) -> bool:
-    return any(fnmatch.fnmatch(model_id.lower(), pat.lower()) for pat in HIDDEN_MODELS)
 
 
 @dataclass
@@ -199,27 +162,30 @@ class ModelRegistry:
                 low = mid.lower()
                 if not mid.startswith("gemini") or any(k in low for k in NON_CHAT_KEYWORDS):
                     continue
-                info = ModelInfo(mid, m.display_name or mid, badge_for(mid))
+                info = ModelInfo(mid, m.display_name or mid, default_badge_for(mid))
                 text.append(info)
-            key = lambda i: (-version_of(i.id), i.id)  # noqa: E731
-            text.sort(key=key)
+            text.sort(key=lambda i: (-version_of(i.id), i.id))
             if text:
                 self.text = text
                 self.updated_at = time.time()
                 self.last_error = None
                 log.info("Đã tải %d model chat", len(text))
-        except Exception as e:  # giữ cache cũ nếu lỗi
+        except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"[:200]
             log.warning("Không tải được danh sách model: %s", self.last_error)
 
     def auto_chain(self) -> list[str]:
-        """Thứ tự model cho chế độ tự động: flash-lite → flash → hydrogen.
-        Hạng lite và flash: mỗi hạng chọn 1 model tốt nhất từ danh sách API (ưu tiên bản ổn định, rồi bản
-        mới nhất). Bước cuối là AUTO_LAST_MODEL (mặc định gemini-4-hydrogen). Không phụ thuộc HIDDEN_MODELS."""
-        if AUTO_MODEL_CHAIN:
-            chain = list(AUTO_MODEL_CHAIN)
-        elif not self.text:  # chưa tải được danh sách model từ API
-            chain = list(FALLBACK_TEXT)
+        """Thứ tự model cho chế độ tự động đọc trực tiếp từ cấu hình động MongoDB."""
+        mcfg = config_store.models_cfg()
+        auto_model_chain = mcfg.get("auto_model_chain") or []
+        fallback_text = mcfg.get("fallback_text") or ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"]
+        auto_last = (mcfg.get("auto_last_model") or "").strip()
+        default_text_model = (mcfg.get("default_text_model") or "").strip()
+
+        if auto_model_chain:
+            chain = list(auto_model_chain)
+        elif not self.text:
+            chain = list(fallback_text)
         else:
             ids = [m.id for m in self.text]
             chain = []
@@ -227,28 +193,99 @@ class ModelRegistry:
                 pool = [i for i in ids if tier_of(i) == tier]
                 if pool:
                     chain.append(max(pool, key=lambda i: (is_stable(i), version_of(i), -len(i))))
-            if AUTO_LAST_MODEL and AUTO_LAST_MODEL not in chain:
-                chain.append(AUTO_LAST_MODEL)
-        if DEFAULT_TEXT_MODEL:
-            chain = [DEFAULT_TEXT_MODEL] + [m for m in chain if m != DEFAULT_TEXT_MODEL]
-        return chain or list(FALLBACK_TEXT)
+            if auto_last and auto_last not in chain:
+                chain.append(auto_last)
+
+        if default_text_model:
+            chain = [default_text_model] + [m for m in chain if m != default_text_model]
+        return chain or list(fallback_text)
 
     def default_text(self) -> str:
         return self.auto_chain()[0]
 
+    def all_known_models(self) -> list[dict]:
+        """Danh sách toàn bộ model (từ API + extra_models + overrides) phục vụ bảng cấu hình trên Dashboard."""
+        mcfg = config_store.models_cfg()
+        hide_pro = bool(mcfg.get("hide_pro_models", True))
+        extra_models = mcfg.get("extra_models") or []
+        fallback_text = mcfg.get("fallback_text") or ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"]
+        overrides = mcfg.get("overrides") or {}
+        auto_chain_list = self.auto_chain()
+
+        base_map: dict[str, tuple[str, str]] = {}
+        for m in self.text:
+            base_map[m.id] = (m.display, "api")
+        if not base_map:
+            for mid in fallback_text:
+                base_map[mid] = (mid, "fallback")
+        for mid in extra_models:
+            if mid not in base_map:
+                base_map[mid] = (mid, "extra")
+        for mid in overrides:
+            if mid not in base_map:
+                base_map[mid] = (mid, "override")
+
+        out = []
+        for mid, (api_disp, source) in base_map.items():
+            ov = config_store.model_override(mid)
+            is_extra = mid in extra_models
+            hidden_by_rule = config_store.is_model_hidden(mid) or (hide_pro and tier_of(mid) == "pro")
+            # Model trong extra_models chỉ ẩn nếu admin bật explicit hidden=True trong overrides
+            if is_extra and ov.get("hidden") is None:
+                effective_hidden = False
+            else:
+                effective_hidden = hidden_by_rule
+            out.append({
+                "id": mid,
+                "api_display": api_disp,
+                "display_name": display_name_for(mid, api_disp),
+                "badge": badge_for(mid),
+                "default_badge": default_badge_for(mid),
+                "source": source,
+                "is_extra": is_extra,
+                "tier": tier_of(mid) or "other",
+                "hidden": effective_hidden,
+                "in_auto_chain": mid in auto_chain_list,
+                "cooldown_left": round(cooldown_left(mid), 1),
+                "override": ov,
+            })
+        out.sort(key=lambda x: (x["hidden"], -version_of(x["id"]), x["id"]))
+        return out
+
     def choices(self) -> list[ModelInfo]:
-        """Danh sách gợi ý cho option `model`: model từ API trừ model bị ẩn, cộng model thêm tay."""
-        base = self.text or [ModelInfo(i, i, badge_for(i)) for i in FALLBACK_TEXT]
-        out = [m for m in base if not is_hidden(m.id) and not (HIDE_PRO_MODELS and tier_of(m.id) == "pro")]
+        """Danh sách gợi ý cho option `model` trên Discord (đọc trực tiếp từ cấu hình động)."""
+        mcfg = config_store.models_cfg()
+        hide_pro = bool(mcfg.get("hide_pro_models", True))
+        extra_models = mcfg.get("extra_models") or []
+        fallback_text = mcfg.get("fallback_text") or ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"]
+
+        base = self.text or [ModelInfo(i, i, default_badge_for(i)) for i in fallback_text]
+        out: list[ModelInfo] = []
+        for m in base:
+            ov = config_store.model_override(m.id)
+            if ov.get("hidden") is True:
+                continue
+            if ov.get("hidden") is not False:
+                if config_store.is_model_hidden(m.id) or (hide_pro and tier_of(m.id) == "pro"):
+                    continue
+            out.append(ModelInfo(m.id, display_name_for(m.id, m.display), badge_for(m.id)))
+
         have = {m.id for m in out}
-        out += [ModelInfo(i, i, badge_for(i)) for i in EXTRA_MODELS if i not in have]
+        for mid in extra_models:
+            if mid in have:
+                continue
+            ov = config_store.model_override(mid)
+            if ov.get("hidden") is True:
+                continue
+            out.append(ModelInfo(mid, display_name_for(mid, mid), badge_for(mid)))
         return out
 
 
 registry = ModelRegistry()
 
+
 # --------------------------------------------------------------------------
-# Thống kê sử dụng (chỉ tính request đi qua bot này)
+# Thống kê sử dụng
 # --------------------------------------------------------------------------
 class Stats:
     def __init__(self):
@@ -284,22 +321,17 @@ class Stats:
 
 stats = Stats()
 cooldowns: dict[int, float] = {}
-gemini_sem = asyncio.Semaphore(MAX_CONCURRENT)
+gemini_sem = DynamicSemaphore(lambda: config_store.ask_cfg().get("max_concurrent", 2))
+config_store.on_update(lambda _cfg: gemini_sem.notify_limit_changed())
+
 
 # --------------------------------------------------------------------------
 # Phiên chat + lưu trữ vĩnh viễn (MongoDB Atlas)
-# - `sessions`: phiên ĐANG HOẠT ĐỘNG, mỗi người 1 document (_id = Discord user id), chỉ giữ
-#   vài chục tin gần nhất làm ngữ cảnh cho AI.
-# - `archives`: lưu trữ VĨNH VIỄN, mỗi phiên 1 document (_id = session_id) chứa TOÀN BỘ cuộc
-#   trò chuyện + `user_id` (Discord ID). Mỗi lượt hỏi đáp được ghi vào đây ngay lập tức;
-#   khi phiên kết thúc (/refresh, 2 giờ không chat, quá số lượt) chỉ đánh dấu ended_at/end_reason
-#   rồi xoá bản "đang hoạt động". KHÔNG dùng TTL index để xoá, nên không mất dữ liệu.
 # --------------------------------------------------------------------------
 _user_locks: "weakref.WeakValueDictionary[int, asyncio.Lock]" = weakref.WeakValueDictionary()
 
 
 def user_lock(uid: int) -> asyncio.Lock:
-    """Mỗi người xử lý lần lượt từng lệnh để không ghi đè lịch sử của nhau."""
     lock = _user_locks.get(uid)
     if lock is None:
         lock = asyncio.Lock()
@@ -308,14 +340,15 @@ def user_lock(uid: int) -> asyncio.Lock:
 
 
 def _clip(text: str) -> str:
-    return text if len(text) <= MAX_STORED_CHARS else text[:MAX_STORED_CHARS] + "…"
+    limit = int(config_store.session_cfg().get("max_stored_chars", 4000))
+    return text if len(text) <= limit else text[:limit] + "…"
 
 
 class SessionStore:
     def __init__(self):
         self.client: Optional[AsyncMongoClient] = None
-        self.col = None  # sessions
-        self.archives = None  # archives
+        self.col = None
+        self.archives = None
         self.ok = False
         self.index_ok = False
         self.last_error: Optional[str] = None
@@ -325,7 +358,6 @@ class SessionStore:
         return bool(MONGODB_URI)
 
     async def _run(self, make_coro, default=None):
-        """Chạy 1 thao tác MongoDB; lỗi thì ghi nhận và trả về default (bot vẫn chạy không có phiên)."""
         if self.col is None:
             return default
         try:
@@ -333,7 +365,7 @@ class SessionStore:
             self.ok = True
             self.last_error = None
             return result
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.ok = False
             self.last_error = f"{type(e).__name__}: {e}"[:200]
             log.warning("MongoDB lỗi: %s", self.last_error)
@@ -347,9 +379,8 @@ class SessionStore:
             info = await self.col.index_information()
             old = info.get("expire_at_1")
             if old and "expireAfterSeconds" in old:
-                # Bản cũ dùng TTL index để XOÁ phiên hết hạn -> sẽ làm mất dữ liệu chưa lưu trữ.
                 await self.col.drop_index("expire_at_1")
-                log.warning("Đã gỡ TTL index cũ của sessions (phiên hết hạn giờ được lưu trữ thay vì xoá)")
+                log.warning("Đã gỡ TTL index cũ của sessions")
             await self.col.create_index("expire_at")
             await self.archives.create_index([("user_id", 1), ("created_at", -1)])
             await self.archives.create_index("user_id_str")
@@ -359,7 +390,7 @@ class SessionStore:
 
     async def connect(self):
         if not self.enabled:
-            log.info("Chưa đặt MONGODB_URI → tắt bộ nhớ phiên")
+            log.warning("Chưa đặt MONGODB_URI → tắt bộ nhớ phiên & lưu cấu hình động trên MongoDB Atlas")
             return
         kwargs = {"serverSelectionTimeoutMS": 8000, "tz_aware": True}
         if MONGODB_URI.startswith("mongodb+srv://"):
@@ -369,19 +400,19 @@ class SessionStore:
         self.col = db["sessions"]
         self.archives = db["archives"]
         await self._ensure_index()
+        await config_store.attach_db(db)
         if self.ok:
-            log.info("Đã kết nối MongoDB (db=%s), phiên tự lưu trữ + làm mới sau %g giờ", MONGODB_DB, SESSION_IDLE_HOURS)
+            idle_h = config_store.session_cfg().get("session_idle_hours", 2)
+            log.info("Đã kết nối MongoDB Atlas (db=%s), phiên tự lưu trữ sau %g giờ", MONGODB_DB, idle_h)
 
     async def close(self):
         if self.client is not None:
             try:
                 await self.client.close()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass
 
     async def end_session(self, uid: int, reason: str, only_if_expired: bool = False) -> Optional[dict]:
-        """Lưu trữ (đánh dấu kết thúc) rồi gỡ phiên đang hoạt động. reason: refresh | idle_timeout | max_turns.
-        Trả về {session_id, turns} nếu đã kết thúc; None nếu không có phiên hoặc lỗi (xem self.ok)."""
         now = datetime.now(timezone.utc)
         flt: dict = {"_id": uid}
         if only_if_expired:
@@ -394,33 +425,33 @@ class SessionStore:
         r = await self._run(lambda: self.archives.update_one(
             {"_id": sid},
             {"$set": {"ended_at": ended_at, "end_reason": reason},
-             # chỉ dùng khi bản lưu trữ chưa tồn tại (phiên tạo từ phiên bản cũ)
              "$setOnInsert": {"user_id": uid, "user_id_str": str(uid), "created_at": doc.get("created_at", now),
                               "turns": doc.get("turns", 0), "messages": doc.get("messages", [])}},
             upsert=True))
         if r is None:
-            return None  # lưu trữ lỗi -> giữ nguyên phiên, lần quét sau sẽ thử lại
+            return None
         r = await self._run(lambda: self.col.delete_one({"_id": uid, "session_id": doc.get("session_id")}))
         if r is None:
             return None
         return {"session_id": sid, "turns": doc.get("turns", 0)}
 
     async def load(self, uid: int) -> Optional[dict]:
-        """Trả về phiên còn hạn. Phiên đã hết hạn (hoặc quá số lượt) sẽ được lưu trữ rồi coi như chưa có."""
         doc = await self._run(lambda: self.col.find_one({"_id": uid}))
         if not doc:
             return None
+        scfg = config_store.session_cfg()
+        ttl = timedelta(hours=float(scfg.get("session_idle_hours", 2.0)))
+        max_turns = int(scfg.get("session_max_turns", 500))
         last = doc.get("last_active")
-        if last and datetime.now(timezone.utc) - last > SESSION_TTL:
+        if last and datetime.now(timezone.utc) - last > ttl:
             await self.end_session(uid, "idle_timeout")
             return None
-        if doc.get("turns", 0) >= SESSION_MAX_TURNS:
+        if doc.get("turns", 0) >= max_turns:
             await self.end_session(uid, "max_turns")
             return None
         return doc
 
     async def archive_expired(self) -> int:
-        """Quét các phiên đã quá hạn (người dùng không quay lại) và lưu trữ chúng."""
         now = datetime.now(timezone.utc)
         docs = await self._run(
             lambda: self.col.find({"expire_at": {"$lte": now}}, {"_id": 1}).to_list(200), [])
@@ -435,14 +466,16 @@ class SessionStore:
 
     async def save_turn(self, uid: int, user_text: str, model_text: str,
                         session_doc: Optional[dict], model_id: str) -> Optional[int]:
-        """Ghi 1 lượt hỏi đáp. Trả về số lượt của phiên sau khi ghi, hoặc None nếu lỗi."""
         await self._ensure_index()
+        scfg = config_store.session_cfg()
+        ttl = timedelta(hours=float(scfg.get("session_idle_hours", 2.0)))
+        max_hist_msgs = int(scfg.get("max_history_messages", 20))
+
         now = datetime.now(timezone.utc)
         fresh = session_doc is None
         sid = uuid.uuid4().hex if fresh else (session_doc.get("session_id") or uuid.uuid4().hex)
         created = now if fresh else session_doc.get("created_at", now)
 
-        # 1) lưu trữ vĩnh viễn: toàn văn, gắn Discord ID
         r = await self._run(lambda: self.archives.update_one(
             {"_id": sid},
             {"$push": {"messages": {"$each": [
@@ -456,8 +489,7 @@ class SessionStore:
         if r is None:
             return None
 
-        # 2) phiên đang hoạt động: chỉ giữ ngữ cảnh gần nhất, cắt ngắn từng tin
-        expire = now + SESSION_TTL
+        expire = now + ttl
         ctx = [{"role": "user", "text": _clip(user_text)}, {"role": "model", "text": _clip(model_text)}]
         if fresh:
             turns = 1
@@ -468,7 +500,7 @@ class SessionStore:
             turns = session_doc.get("turns", 0) + 1
             r = await self._run(lambda: self.col.update_one(
                 {"_id": uid},
-                {"$push": {"messages": {"$each": ctx, "$slice": -MAX_HISTORY_MESSAGES}},
+                {"$push": {"messages": {"$each": ctx, "$slice": -max_hist_msgs}},
                  "$set": {"last_active": now, "expire_at": expire, "session_id": sid},
                  "$inc": {"turns": 1},
                  "$setOnInsert": {"created_at": created}},
@@ -483,13 +515,12 @@ class SessionStore:
         return await self._run(lambda: self.archives.estimated_document_count())
 
     async def storage_mb(self) -> Optional[float]:
-        """Dung lượng database đã dùng (MB). Không ảnh hưởng cờ self.ok nếu lệnh bị từ chối."""
         if self.client is None:
             return None
         try:
             st = await asyncio.wait_for(self.client[MONGODB_DB].command("dbStats"), timeout=10)
             return (st.get("storageSize", 0) + st.get("indexSize", 0)) / 1024 / 1024
-        except Exception:  # noqa: BLE001
+        except Exception:
             return None
 
     async def ping(self) -> tuple[bool, float, str]:
@@ -499,7 +530,7 @@ class SessionStore:
         try:
             await asyncio.wait_for(self.client.admin.command("ping"), timeout=10)
             return True, (time.perf_counter() - t0) * 1000, "OK"
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return False, (time.perf_counter() - t0) * 1000, type(e).__name__
 
 
@@ -507,25 +538,29 @@ sessions = SessionStore()
 
 
 def history_to_contents(doc: Optional[dict]) -> list:
-    """Đổi lịch sử đã lưu thành contents của Gemini, giới hạn theo số tin và tổng ký tự."""
     if not doc:
         return []
-    msgs = (doc.get("messages") or [])[-MAX_HISTORY_MESSAGES:]
+    scfg = config_store.session_cfg()
+    max_hist_msgs = int(scfg.get("max_history_messages", 20))
+    max_hist_chars = int(scfg.get("max_history_chars", 24000))
+
+    msgs = (doc.get("messages") or [])[-max_hist_msgs:]
     kept, total = [], 0
     for m in reversed(msgs):
         total += len(m["text"])
-        if total > MAX_HISTORY_CHARS and kept:
+        if total > max_hist_chars and kept:
             break
         kept.append(m)
     kept.reverse()
-    while kept and kept[0]["role"] != "user":  # lịch sử phải bắt đầu bằng lượt của người dùng
+    while kept and kept[0]["role"] != "user":
         kept.pop(0)
     return [types.Content(role=m["role"], parts=[types.Part(text=m["text"])]) for m in kept]
+
 
 # --------------------------------------------------------------------------
 # Gọi Gemini
 # --------------------------------------------------------------------------
-model_cooldowns: dict[str, float] = {}  # model -> mốc time.monotonic() được dùng lại
+model_cooldowns: dict[str, float] = {}
 RETRYABLE_CODES = (404, 429, 500, 503)
 
 
@@ -545,7 +580,6 @@ def failure_reason(e: Exception) -> str:
 
 
 def cooldown_seconds(e: Exception) -> float:
-    """Model vừa lỗi sẽ bị tạm bỏ qua bao lâu."""
     if isinstance(e, asyncio.TimeoutError):
         return 60.0
     code = getattr(e, "code", None)
@@ -554,12 +588,12 @@ def cooldown_seconds(e: Exception) -> float:
         return 6 * 3600.0
     if code == 429:
         if "limit: 0" in low:
-            return 3600.0  # model không có quota free
+            return 3600.0
         if "perday" in low or "per day" in low:
             return 1800.0
         m = re.search(r"retry in ([\d.]+)s", low)
         return min(float(m.group(1)) + 1, 600.0) if m else 60.0
-    return 60.0  # 500/503
+    return 60.0
 
 
 def mark_failure(model_id: str, e: Exception):
@@ -575,41 +609,36 @@ def chain_status_text() -> str:
     return " → ".join(parts)
 
 
-# Gemini 3.x nhận thinking_level trực tiếp; Gemini 2.5 dùng ngân sách token (thinking_budget).
-THINKING_BUDGETS = {"low": 1024, "medium": 8192, "high": 24576}
-
-
 def build_thinking_configs(model_id: str, level: str) -> list[tuple[str, types.ThinkingConfig]]:
-    """Danh sách (mức thực tế, config) để thử lần lượt. Model không có mức `medium`/`xhigh` thì bot
-    thử tiếp `high`. Model đời cũ (<2.5) không hỗ trợ thinking -> danh sách rỗng."""
+    budgets = config_store.ask_cfg().get("thinking_budgets") or {"low": 1024, "medium": 8192, "high": 24576}
     v = version_of(model_id)
     out: list[tuple[str, types.ThinkingConfig]] = []
     try:
-        if level == "auto":  # để model tự quyết định mức suy nghĩ, vẫn lấy tóm tắt suy nghĩ
+        if level == "auto":
             if v >= 3:
                 out.append(("auto", types.ThinkingConfig(include_thoughts=True)))
             elif v >= 2.5:
-                out.append(("auto", types.ThinkingConfig(thinking_budget=-1, include_thoughts=True)))  # -1 = tự động
+                out.append(("auto", types.ThinkingConfig(thinking_budget=-1, include_thoughts=True)))
         elif v >= 3:
-            # mức không phải model nào cũng có (medium: một số model Pro; xhigh: mới có ở Gemini 4 Hydrogen)
-            # -> thử mức đã chọn trước, rồi `high`
             for lv in {"medium": ["medium", "high"], "xhigh": ["xhigh", "high"]}.get(level, [level]):
                 try:
                     out.append((lv, types.ThinkingConfig(thinking_level=lv, include_thoughts=True)))
-                except Exception as e:  # SDK cũ chưa biết mức này (vd xhigh) -> bỏ qua, dùng mức kế tiếp
+                except Exception as e:
                     log.warning("SDK không nhận thinking_level=%s: %s", lv, e)
         elif v >= 2.5:
-            lv = "high" if level == "xhigh" else level  # Gemini 2.5 không có xhigh
-            out.append((lv, types.ThinkingConfig(thinking_budget=THINKING_BUDGETS[lv], include_thoughts=True)))
-    except Exception as e:  # SDK cũ không biết thinking_level
+            lv = "high" if level == "xhigh" else level
+            out.append((lv, types.ThinkingConfig(thinking_budget=int(budgets.get(lv, 8192)), include_thoughts=True)))
+    except Exception as e:
         log.warning("Không tạo được ThinkingConfig: %s", e)
     return out
 
 
 async def call_gemini(model: str, contents: list, *, system: Optional[str], thinking_level: Optional[str],
-                      web_search: bool, max_retries: int = 3):
-    """Trả về (response, mức_thinking_thực_tế hoặc None). Tự retry khi 500/503, và nếu model từ chối
-    cấu hình thinking (400) thì thử mức kế tiếp rồi bỏ thinking."""
+                      web_search: bool, max_retries: Optional[int] = None, timeout_sec: Optional[float] = None):
+    acfg = config_store.ask_cfg()
+    retries = max_retries if max_retries is not None else int(acfg.get("max_retries", 3))
+    timeout = timeout_sec if timeout_sec is not None else float(acfg.get("gemini_timeout_seconds", 170.0))
+
     attempts: list[tuple[types.GenerateContentConfig, Optional[str]]] = []
     base: dict = {"system_instruction": system}
     if web_search:
@@ -620,15 +649,15 @@ async def call_gemini(model: str, contents: list, *, system: Optional[str], thin
     attempts.append((types.GenerateContentConfig(**base), None))
 
     for idx, (cfg, thinking_used) in enumerate(attempts):
-        for retry in range(max_retries):
+        for retry in range(retries):
             try:
                 resp = await asyncio.wait_for(
                     gemini.aio.models.generate_content(model=model, contents=contents, config=cfg),
-                    timeout=170,
+                    timeout=timeout,
                 )
                 return resp, thinking_used
             except genai_errors.APIError as e:
-                if e.code in (500, 503) and retry < max_retries - 1:
+                if e.code in (500, 503) and retry < retries - 1:
                     await asyncio.sleep(2 * (retry + 1))
                     continue
                 if e.code == 400 and idx < len(attempts) - 1:
@@ -640,15 +669,14 @@ async def call_gemini(model: str, contents: list, *, system: Optional[str], thin
 
 async def call_with_fallback(chain: list[str], contents: list, *, system: Optional[str],
                              thinking_level: Optional[str], web_search: bool):
-    """Chế độ tự động: thử lần lượt các model trong chain (bỏ qua model đang bị tạm khoá do lỗi).
-    Gặp quá tải/hết lượt/timeout thì khoá model đó một lúc và chuyển sang model kế tiếp.
-    Trả về (response, thinking_used, model_dùng, {model: lý do bị bỏ qua})."""
+    acfg = config_store.ask_cfg()
+    max_retries = int(acfg.get("max_retries", 3))
     errors: dict[str, str] = {}
     ready = [m for m in chain if cooldown_left(m) <= 0]
     for m in chain:
         if m not in ready:
             errors[m] = f"đang chờ phục hồi ~{cooldown_left(m):.0f}s"
-    if not ready:  # tất cả đang bị khoá -> thử model sắp hết khoá nhất
+    if not ready:
         ready = [min(chain, key=cooldown_left)]
     last_exc: Optional[Exception] = None
     for i, m in enumerate(ready):
@@ -656,7 +684,7 @@ async def call_with_fallback(chain: list[str], contents: list, *, system: Option
         try:
             resp, thinking_used = await call_gemini(
                 m, contents, system=system, thinking_level=thinking_level, web_search=web_search,
-                max_retries=3 if is_last else 1)  # còn model dự phòng thì chuyển ngay, không chờ retry
+                max_retries=max_retries if is_last else 1)
             model_cooldowns.pop(m, None)
             return resp, thinking_used, m, errors
         except (genai_errors.APIError, asyncio.TimeoutError) as e:
@@ -711,8 +739,9 @@ def parse_response(resp) -> Parsed:
 
 
 async def read_attachment(att: discord.Attachment) -> types.Part:
-    if att.size > MAX_FILE_MB * 1024 * 1024:
-        raise UserError(f"File quá lớn (tối đa {MAX_FILE_MB}MB).")
+    max_file_mb = float(config_store.ask_cfg().get("max_file_mb", 10.0))
+    if att.size > max_file_mb * 1024 * 1024:
+        raise UserError(f"File quá lớn (tối đa {max_file_mb:g}MB).")
     mime = (att.content_type or "").split(";")[0] or mimetypes.guess_type(att.filename)[0] or ""
     if not (mime.startswith("image/") or mime == "application/pdf"):
         raise UserError("Chỉ hỗ trợ file ảnh (png/jpg/webp...) hoặc PDF.")
@@ -745,10 +774,9 @@ def explain_error(e: Exception) -> str:
 
 
 # --------------------------------------------------------------------------
-# Tiện ích gửi tin nhắn Discord
+# Tiện ích gửi tin nhắn Discord & đo tài nguyên
 # --------------------------------------------------------------------------
 def chunk_text(text: str, limit: int = 1900) -> list[str]:
-    """Cắt theo dòng, giữ nguyên code block khi bị cắt giữa chừng."""
     chunks: list[str] = []
     reopen = False
     while len(text) > limit:
@@ -770,7 +798,6 @@ def chunk_text(text: str, limit: int = 1900) -> list[str]:
 
 
 def clean_title(title: str) -> str:
-    """Bỏ ký tự làm hỏng link Markdown và cắt ngắn tiêu đề nguồn."""
     return re.sub(r"[\[\]\n]", "", title)[:40]
 
 
@@ -792,8 +819,51 @@ def bar(pct: float, width: int = 10) -> str:
     return "█" * filled + "░" * (width - filled) + f" {pct:.0f}%"
 
 
+def memory_info() -> dict:
+    proc = psutil.Process()
+    rss = proc.memory_info().rss
+    used = limit = None
+    for used_p, limit_p in (
+        ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory.max"),
+        ("/sys/fs/cgroup/memory/memory.usage_in_bytes", "/sys/fs/cgroup/memory/memory.limit_in_bytes"),
+    ):
+        try:
+            with open(used_p) as f:
+                u = int(f.read().strip())
+            with open(limit_p) as f:
+                raw = f.read().strip()
+            lim = None if raw == "max" else int(raw)
+            if lim and lim > 1 << 45:
+                lim = None
+            used, limit = u, lim
+            break
+        except Exception:
+            continue
+    ram_limit_mb = config_store.session_cfg().get("ram_limit_mb")
+    if ram_limit_mb:
+        limit = int(ram_limit_mb) * 1024 * 1024
+    if used is None:
+        vm = psutil.virtual_memory()
+        used = vm.total - vm.available
+        limit = limit or vm.total
+    limit = limit or psutil.virtual_memory().total
+    return {"rss": rss, "used": used, "limit": limit}
+
+
+async def check_gemini_api() -> tuple[bool, float, str]:
+    model = registry.default_text()
+    t0 = time.perf_counter()
+    try:
+        await asyncio.wait_for(gemini.aio.models.get(model=model), timeout=10)
+        return True, (time.perf_counter() - t0) * 1000, "OK"
+    except genai_errors.APIError as e:
+        return False, (time.perf_counter() - t0) * 1000, f"{e.code} {(e.message or '')[:80]}"
+    except Exception as e:
+        return False, (time.perf_counter() - t0) * 1000, type(e).__name__
+
+
 # --------------------------------------------------------------------------
-# Bot + web server giữ sống
+# Bot + Web Dashboard tích hợp chung tiến trình
 # --------------------------------------------------------------------------
 class AskBot(discord.Client):
     def __init__(self):
@@ -801,13 +871,107 @@ class AskBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.ready_at: Optional[float] = None
         self._cleaned_guild_cmds = False
+        self._web_server: Optional[uvicorn.Server] = None
+        self._web_task: Optional[asyncio.Task] = None
+
+    async def build_status_snapshot(self, check_gemini: bool = False) -> dict:
+        mem = memory_info()
+        proc = psutil.Process()
+        ram_pct = round(mem["used"] / mem["limit"] * 100, 1) if mem["limit"] else 0.0
+        uptime_sec = int(time.time() - START_TIME)
+
+        db_ok, db_ms, db_msg = await sessions.ping()
+        active = archived = storage = None
+        if db_ok:
+            active, archived, storage = await asyncio.gather(
+                sessions.active_count(), sessions.archive_count(), sessions.storage_mb()
+            )
+        quota_mb = float(config_store.session_cfg().get("mongodb_quota_mb", 512.0))
+
+        gemini_check = None
+        if check_gemini:
+            g_ok, g_ms, g_msg = await check_gemini_api()
+            gemini_check = {"ok": g_ok, "latency_ms": round(g_ms, 1), "message": g_msg}
+
+        chain_items = [
+            {"id": m, "display": display_name_for(m), "cooldown_left": round(cooldown_left(m), 1)}
+            for m in registry.auto_chain()
+        ]
+        guilds_list = [
+            {"id": str(g.id), "name": g.name, "member_count": g.member_count or 0}
+            for g in sorted(self.guilds, key=lambda x: x.name.lower())
+        ]
+        stats._roll_day()
+        return {
+            "bot": {
+                "online": self.is_ready(),
+                "username": str(self.user) if self.user else "Đang khởi động...",
+                "bot_id": str(self.user.id) if self.user else "",
+                "ping_ms": round(self.latency * 1000, 1) if self.is_ready() else None,
+                "uptime_seconds": uptime_sec,
+                "uptime_human": fmt_duration(uptime_sec),
+                "ready_at": int(self.ready_at) if self.ready_at else None,
+                "guild_count": len(self.guilds),
+                "guilds": guilds_list,
+                "version": BOT_VERSION,
+                "python_version": platform.python_version(),
+                "discord_py_version": discord.__version__,
+            },
+            "resources": {
+                "ram_used_mb": round(mem["used"] / 1024 / 1024, 1),
+                "ram_limit_mb": round(mem["limit"] / 1024 / 1024, 1),
+                "ram_rss_mb": round(mem["rss"] / 1024 / 1024, 1),
+                "ram_percent": ram_pct,
+                "cpu_percent": round(proc.cpu_percent(None), 1),
+                "threads": proc.num_threads(),
+            },
+            "gemini": {
+                "discovered_count": len(registry.text),
+                "updated_at": int(registry.updated_at) if registry.updated_at else None,
+                "last_error": registry.last_error,
+                "auto_chain": chain_items,
+                "check": gemini_check,
+            },
+            "mongodb": {
+                "enabled": sessions.enabled,
+                "ok": db_ok,
+                "latency_ms": round(db_ms, 1),
+                "message": db_msg,
+                "active_sessions": active,
+                "archived_sessions": archived,
+                "storage_mb": round(storage, 2) if storage is not None else None,
+                "quota_mb": quota_mb,
+                "last_error": sessions.last_error,
+            },
+            "stats": {
+                "total": stats.total,
+                "ok": stats.ok,
+                "errors": stats.errors,
+                "success_rate": round(stats.ok / stats.total * 100, 1) if stats.total else None,
+                "today_total": stats.today_total(),
+                "daily_models": dict(stats.daily_models.most_common(10)),
+                "features": dict(stats.features.most_common()),
+                "last_error": (
+                    {"at": int(stats.last_error[0]), "message": stats.last_error[1]}
+                    if stats.last_error else None
+                ),
+            },
+        }
+
+    async def build_models_snapshot(self) -> dict:
+        return {
+            "all_models": registry.all_known_models(),
+            "auto_chain": registry.auto_chain(),
+            "updated_at": int(registry.updated_at) if registry.updated_at else None,
+            "last_error": registry.last_error,
+        }
 
     async def setup_hook(self):
-        await self.start_web()  # mở cổng trước để nền tảng host nhận diện service đã chạy
+        await self.start_web()  # mở cổng sớm để nền tảng host (Northflank/Render) nhận diện service
+        await self.init_sessions()  # kết nối MongoDB + nạp cấu hình động trước khi sync & chạy
         await registry.refresh()
         self.loop.create_task(self.model_refresher())
         self.loop.create_task(self.session_sweeper())
-        self.loop.create_task(self.init_sessions())  # chạy nền: MongoDB chậm/lỗi không làm bot lên chậm
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
@@ -817,29 +981,44 @@ class AskBot(discord.Client):
             synced = await self.tree.sync()
             scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
         log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + c.name for c in synced), scope)
-        log.info("Phiên bản %s · google-genai %s (API %s) · discord.py %s · pymongo %s · RAM tiến trình: %s",
-                 BOT_VERSION, getattr(genai, "__version__", "?"), GEMINI_API_VERSION or "mặc định SDK",
-                 discord.__version__, pymongo.version, fmt_bytes(psutil.Process().memory_info().rss))
+        log.info(
+            "Phiên bản %s · google-genai %s (API %s) · discord.py %s · pymongo %s · RAM tiến trình: %s",
+            BOT_VERSION, getattr(genai, "__version__", "?"), GEMINI_API_VERSION or "mặc định SDK",
+            discord.__version__, pymongo.version, fmt_bytes(psutil.Process().memory_info().rss),
+        )
 
     async def start_web(self):
-        async def health(_request):
-            return web.json_response({
-                "status": "ok",
-                "discord_ready": self.is_ready(),
-                "uptime_seconds": int(time.time() - START_TIME),
-            })
+        def _clear_cooldowns() -> int:
+            n = len(model_cooldowns)
+            model_cooldowns.clear()
+            return n
 
-        app = web.Application()
-        app.router.add_get("/", health)  # tự hỗ trợ cả HEAD (UptimeRobot)
-        app.router.add_get("/health", health)
-        runner = web.AppRunner(app)
-        await runner.setup()
-        await web.TCPSite(runner, "0.0.0.0", PORT).start()
-        log.info("Web server chạy ở cổng %d", PORT)
+        web_app = create_dashboard_app(
+            config_store=config_store,
+            get_status_snapshot=self.build_status_snapshot,
+            get_models_snapshot=self.build_models_snapshot,
+            refresh_models_fn=registry.refresh,
+            clear_cooldowns_fn=_clear_cooldowns,
+            is_bot_ready_fn=self.is_ready,
+            get_uptime_fn=lambda: time.time() - START_TIME,
+        )
+        uv_cfg = uvicorn.Config(
+            web_app,
+            host="0.0.0.0",
+            port=PORT,
+            log_level="warning",
+            access_log=False,
+        )
+        server = uvicorn.Server(uv_cfg)
+        server.install_signal_handlers = lambda: None  # để discord.py quản lý tín hiệu dừng tiến trình
+        self._web_server = server
+        self._web_task = self.loop.create_task(server.serve())
+        log.info("Web Dashboard + /health chạy tại cổng %d", PORT)
 
     async def model_refresher(self):
         while not self.is_closed():
-            await asyncio.sleep(MODEL_REFRESH_HOURS * 3600)
+            hours = max(0.25, float(config_store.models_cfg().get("model_refresh_hours", 6.0)))
+            await asyncio.sleep(hours * 3600)
             await registry.refresh()
 
     async def init_sessions(self):
@@ -847,21 +1026,19 @@ class AskBot(discord.Client):
         await sessions.archive_expired()
 
     async def session_sweeper(self):
-        """Định kỳ lưu trữ + làm mới các phiên quá 2 giờ không chat (kể cả khi người đó không quay lại)."""
         while not self.is_closed():
-            await asyncio.sleep(SWEEP_MINUTES * 60)
+            mins = max(1.0, float(config_store.session_cfg().get("sweep_minutes", 5.0)))
+            await asyncio.sleep(mins * 60)
             await sessions.archive_expired()
 
     async def cleanup_guild_commands(self):
-        """Xoá lệnh đăng ký riêng cho từng server (còn sót từ lúc từng đặt GUILD_ID),
-        nếu không mỗi lệnh sẽ hiện 2 lần cùng bản toàn cục. Chỉ chạy khi KHÔNG đặt GUILD_ID."""
         if GUILD_ID:
             return
         for guild in list(self.guilds):
             try:
                 if await self.tree.fetch_commands(guild=guild):
                     self.tree.clear_commands(guild=guild)
-                    await self.tree.sync(guild=guild)  # tree riêng của server đang rỗng -> xoá hết bản riêng
+                    await self.tree.sync(guild=guild)
                     log.info("Đã xoá lệnh riêng còn sót ở server %s (%d)", guild.name, guild.id)
             except discord.HTTPException as e:
                 log.warning("Không dọn được lệnh riêng ở server %s: %s", guild.id, e)
@@ -875,24 +1052,31 @@ class AskBot(discord.Client):
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self):
+        if self._web_server is not None:
+            self._web_server.should_exit = True
+        if self._web_task is not None:
+            try:
+                await asyncio.wait_for(self._web_task, timeout=5)
+            except Exception:
+                pass
         await sessions.close()
         await super().close()
 
 
 bot = AskBot()
-psutil.Process().cpu_percent(None)  # khởi tạo bộ đo CPU
+psutil.Process().cpu_percent(None)
 
 
 # --------------------------------------------------------------------------
-# /ask
+# /ask (đọc toàn bộ cấu hình động từ MongoDB Atlas theo thời gian thực)
 # --------------------------------------------------------------------------
 @bot.tree.command(name="ask", description="Hỏi AI Gemini: OCR, suy nghĩ sâu, tra cứu web")
 @app_commands.describe(
     prompt="Câu hỏi / yêu cầu của bạn",
-    file="Ảnh hoặc PDF đính kèm để hỏi / OCR (tối đa 10MB)",
-    model="Chọn model; bỏ trống = tự động (flash-lite → flash → hydrogen, tự chuyển khi quá tải)",
+    file="Ảnh hoặc PDF đính kèm để hỏi / OCR",
+    model="Chọn model; bỏ trống = tự động (theo chuỗi cấu hình trên Dashboard)",
     web="Tra cứu thông tin mới trên web (Google Search)",
-    thinking_level="Suy nghĩ sâu: auto / low / medium / high / xhigh (xhigh chỉ vài model như Hydrogen)",
+    thinking_level="Suy nghĩ sâu: auto / low / medium / high / xhigh",
     ocr="Chỉ trích xuất chữ từ file đính kèm (OCR)",
 )
 async def ask(
@@ -900,19 +1084,41 @@ async def ask(
     prompt: app_commands.Range[str, 1, 4000],
     file: Optional[discord.Attachment] = None,
     model: Optional[str] = None,
-    web: bool = False,
+    web: Optional[bool] = None,
     thinking_level: Optional[Literal["auto", "low", "medium", "high", "xhigh"]] = None,
     ocr: bool = False,
 ):
+    cfg = await config_store.get_config()
+    acfg = cfg.get("ask", {})
+
     uid = interaction.user.id
     now = time.monotonic()
-    wait = USER_COOLDOWN - (now - cooldowns.get(uid, -1e9))
+    user_cooldown = float(acfg.get("user_cooldown", 5.0))
+    wait = user_cooldown - (now - cooldowns.get(uid, -1e9))
     if wait > 0:
         return await interaction.response.send_message(
             f"⏳ Chậm lại chút nhé, thử lại sau {wait:.0f}s.", ephemeral=True)
+
+    # Kiểm tra các công tắc tính năng cấu hình trên Dashboard
+    use_web = bool(acfg.get("default_web_search", False)) if web is None else bool(web)
+    eff_thinking = thinking_level if thinking_level is not None else (acfg.get("default_thinking_level") or None)
+
+    if file and not acfg.get("allow_file", True):
+        return await interaction.response.send_message("🚫 Tính năng đính kèm ảnh/PDF hiện đang tắt.", ephemeral=True)
+    if ocr and not acfg.get("allow_ocr", True):
+        return await interaction.response.send_message("🚫 Tính năng OCR hiện đang tắt.", ephemeral=True)
     if ocr and not file:
         return await interaction.response.send_message(
             "❌ OCR cần đính kèm file ảnh/PDF vào option `file`.", ephemeral=True)
+    if use_web and not acfg.get("allow_web_search", True):
+        if web is True:
+            return await interaction.response.send_message("🚫 Tính năng tra cứu web hiện đang tắt.", ephemeral=True)
+        use_web = False
+    if eff_thinking and not acfg.get("allow_thinking", True):
+        if thinking_level is not None:
+            return await interaction.response.send_message("🚫 Tính năng suy nghĩ sâu hiện đang tắt.", ephemeral=True)
+        eff_thinking = None
+
     cooldowns[uid] = now
     if len(cooldowns) > 2000:
         for k in [k for k, v in cooldowns.items() if now - v > 3600]:
@@ -921,14 +1127,16 @@ async def ask(
     await interaction.response.defer(thinking=True)
     started = time.perf_counter()
     notes: list[str] = []
-    features = ["chat"] + [n for n, on in (("web", web), ("think", bool(thinking_level)), ("ocr", ocr), ("file", bool(file))) if on]
+    features = ["chat"] + [
+        n for n, on in (("web", use_web), ("think", bool(eff_thinking)), ("ocr", ocr), ("file", bool(file))) if on
+    ]
 
     # --- chọn model ---
     auto = not model or model.strip().lower() == "auto"
     chain = registry.auto_chain() if auto else [model.strip()]
     model_id = chain[0]
 
-    lock = user_lock(uid)  # mỗi người xử lý lần lượt để lịch sử phiên không bị ghi đè
+    lock = user_lock(uid)
     await lock.acquire()
     try:
         user_parts: list = []
@@ -943,19 +1151,25 @@ async def ask(
             notes.append("Không kết nối được bộ nhớ phiên — lần trả lời này không có ngữ cảnh cũ")
         contents = history_to_contents(session_doc) + [types.Content(role="user", parts=user_parts)]
 
-        system = f"{SYSTEM_PROMPT}\nHôm nay là {datetime.now(PACIFIC):%d/%m/%Y}."
+        # --- system instruction động từ MongoDB ---
+        system_prompt = cfg.get("system_prompt") or ""
+        if cfg.get("append_current_date", True):
+            system = f"{system_prompt}\nHôm nay là {datetime.now(PACIFIC):%d/%m/%Y}."
+        else:
+            system = system_prompt
         if ocr:
-            system = f"{OCR_INSTRUCTION}\n\n{system}"
+            ocr_ins = cfg.get("ocr_instruction") or ""
+            system = f"{ocr_ins}\n\n{system}"
 
         errors: dict[str, str] = {}
         async with gemini_sem:
             if auto:
                 resp, thinking_used, model_id, errors = await call_with_fallback(
-                    chain, contents, system=system, thinking_level=thinking_level, web_search=web)
+                    chain, contents, system=system, thinking_level=eff_thinking, web_search=use_web)
             else:
                 try:
                     resp, thinking_used = await call_gemini(
-                        model_id, contents, system=system, thinking_level=thinking_level, web_search=web)
+                        model_id, contents, system=system, thinking_level=eff_thinking, web_search=use_web)
                     model_cooldowns.pop(model_id, None)
                 except (genai_errors.APIError, asyncio.TimeoutError) as e:
                     mark_failure(model_id, e)
@@ -965,10 +1179,10 @@ async def ask(
             failed = [f"`{m}` ({errors[m]})" for m in chain[:chain.index(model_id)] if m in errors]
             if failed:
                 notes.append("Tự động chuyển model: " + ", ".join(failed) + f" → `{model_id}`")
-        if thinking_level and not thinking_used:
-            notes.append(f"Model `{model_id}` không hỗ trợ `thinking_level` ({thinking_level}) nên đã bỏ qua")
-        elif thinking_level and thinking_used != thinking_level:
-            notes.append(f"Model `{model_id}` không có mức `{thinking_level}`, đã dùng mức `{thinking_used}`")
+        if eff_thinking and not thinking_used:
+            notes.append(f"Model `{model_id}` không hỗ trợ `thinking_level` ({eff_thinking}) nên đã bỏ qua")
+        elif eff_thinking and thinking_used != eff_thinking:
+            notes.append(f"Model `{model_id}` không có mức `{eff_thinking}`, đã dùng mức `{thinking_used}`")
 
         if not out.text:
             reason = f"bị chặn ({out.blocked})" if out.blocked else f"finish_reason={out.finish}"
@@ -983,32 +1197,38 @@ async def ask(
                 notes.append("Không lưu được phiên/lưu trữ (lỗi MongoDB) — tin nhắn này sẽ không được nhớ")
 
         elapsed = time.perf_counter() - started
-        meta = [f"🤖 {model_id}", f"⏱ {elapsed:.1f}s"]
-        meta += [lbl for lbl, on in (("🌐 web", web), (f"🧠 {thinking_used}", bool(thinking_used)), ("🔎 OCR", ocr)) if on]
+        model_label = display_name_for(model_id)
+        meta = [f"🤖 {model_label}", f"⏱ {elapsed:.1f}s"]
+        meta += [lbl for lbl, on in (("🌐 web", use_web), (f"🧠 {thinking_used}", bool(thinking_used)), ("🔎 OCR", ocr)) if on]
         if out.tokens:
             meta.append(f"{out.tokens:,} tokens")
         if turns:
             meta.append("🆕 phiên mới" if turns == 1 else f"💬 phiên: {turns} lượt")
         footer = "-# " + " · ".join(meta)
         extras = []
-        if out.queries:
-            extras.append("-# 🔎 Đã tìm: " + "; ".join(q[:60] for q in out.queries[:3]))
-        if out.sources:
-            links = " · ".join(f"[{clean_title(t)}](<{u}>)" for t, u in out.sources[:4])
-            extras.append("-# 📚 Nguồn: " + links)
+        if acfg.get("show_sources", True):
+            if out.queries:
+                extras.append("-# 🔎 Đã tìm: " + "; ".join(q[:60] for q in out.queries[:3]))
+            if out.sources:
+                links = " · ".join(f"[{clean_title(t)}](<{u}>)" for t, u in out.sources[:4])
+                extras.append("-# 📚 Nguồn: " + links)
         extras += [f"-# ⚠️ {n}" for n in notes]
         tail = "\n".join([footer] + extras)
 
         # --- gửi kết quả ---
-        if out.thoughts:
-            emb = discord.Embed(title="🧠 Tóm tắt quá trình suy nghĩ",
-                                description=out.thoughts[:3500] + ("…" if len(out.thoughts) > 3500 else ""),
-                                color=discord.Color.dark_grey())
+        if out.thoughts and acfg.get("show_thoughts_embed", True):
+            emb = discord.Embed(
+                title="🧠 Tóm tắt quá trình suy nghĩ",
+                description=out.thoughts[:3500] + ("…" if len(out.thoughts) > 3500 else ""),
+                color=discord.Color.dark_grey(),
+            )
             await interaction.followup.send(embed=emb, allowed_mentions=NO_MENTIONS)
 
+        chunk_limit = int(acfg.get("chunk_char_limit", 1900))
+        max_chunks = int(acfg.get("max_reply_chunks", 6))
         files = []
-        chunks = chunk_text(out.text)
-        if len(chunks) > 6:  # quá dài -> gửi dạng file
+        chunks = chunk_text(out.text, limit=chunk_limit)
+        if len(chunks) > max_chunks:
             files.append(discord.File(io.BytesIO(out.text.encode()), filename="answer.md"))
             chunks = [chunks[0] + "\n…\n*(Câu trả lời dài — xem đầy đủ trong file `answer.md`)*"]
         if chunks and len(chunks[-1]) + len(tail) + 1 <= 2000:
@@ -1023,7 +1243,7 @@ async def ask(
 
         stats.record(model_id, True, features)
 
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         stats.record(model_id, False, features, f"{type(e).__name__}: {e}"[:200])
         if not isinstance(e, UserError):
             log.exception("Lỗi /ask")
@@ -1034,13 +1254,16 @@ async def ask(
 
 @ask.autocomplete("model")
 async def model_autocomplete(interaction: discord.Interaction, current: str):
+    await config_store.get_config()
     cur = current.lower().strip()
     out = []
     if not cur or any(cur in k for k in ("auto", "tự động", "tu dong")):
-        out.append(app_commands.Choice(name="🤖 Tự động (flash-lite → flash → hydrogen)", value="auto"))
+        chain_preview = " → ".join(registry.auto_chain()[:3])
+        out.append(app_commands.Choice(name=f"🤖 Tự động ({chain_preview})"[:100], value="auto"))
     for m in registry.choices():
         if cur in m.id.lower() or cur in m.display.lower():
-            out.append(app_commands.Choice(name=f"{m.badge} {m.id}"[:100], value=m.id))
+            label = f"{m.badge} {m.display}" if m.display != m.id else f"{m.badge} {m.id}"
+            out.append(app_commands.Choice(name=label[:100], value=m.id))
         if len(out) >= 25:
             break
     return out
@@ -1072,6 +1295,8 @@ async def session_info(interaction: discord.Interaction):
     if not sessions.enabled:
         return await interaction.response.send_message("ℹ️ Bot chưa bật bộ nhớ phiên.", ephemeral=True)
     await interaction.response.defer(ephemeral=True, thinking=True)
+    await config_store.get_config()
+    max_hist_msgs = int(config_store.session_cfg().get("max_history_messages", 20))
     async with user_lock(interaction.user.id):
         doc = await sessions.load(interaction.user.id)
     if not sessions.ok:
@@ -1084,7 +1309,7 @@ async def session_info(interaction: discord.Interaction):
     emb = discord.Embed(title="💬 Phiên chat của bạn", color=discord.Color.blurple())
     emb.add_field(name="Mã phiên", value=f"`{sid}`", inline=True)
     emb.add_field(name="Số lượt hỏi đáp", value=f"**{doc.get('turns', 0)}**", inline=True)
-    emb.add_field(name="Tin nhắn đang nhớ", value=f"**{len(doc.get('messages', []))}** / {MAX_HISTORY_MESSAGES}", inline=True)
+    emb.add_field(name="Tin nhắn đang nhớ", value=f"**{len(doc.get('messages', []))}** / {max_hist_msgs}", inline=True)
     emb.add_field(name="Bắt đầu", value=f"<t:{ts('created_at')}:R>", inline=True)
     emb.add_field(name="Chat gần nhất", value=f"<t:{ts('last_active')}:R>", inline=True)
     emb.add_field(name="Tự lưu trữ + làm mới", value=f"<t:{ts('expire_at')}:R> (nếu không chat thêm)", inline=True)
@@ -1093,57 +1318,20 @@ async def session_info(interaction: discord.Interaction):
 
 
 # --------------------------------------------------------------------------
-# /status
+# /status (kiểm tra quyền trực tiếp từ MongoDB Atlas)
 # --------------------------------------------------------------------------
-def memory_info() -> dict:
-    proc = psutil.Process()
-    rss = proc.memory_info().rss
-    used = limit = None
-    for used_p, limit_p in (
-        ("/sys/fs/cgroup/memory.current", "/sys/fs/cgroup/memory.max"),  # cgroup v2
-        ("/sys/fs/cgroup/memory/memory.usage_in_bytes", "/sys/fs/cgroup/memory/memory.limit_in_bytes"),  # v1
-    ):
-        try:
-            with open(used_p) as f:
-                u = int(f.read().strip())
-            with open(limit_p) as f:
-                raw = f.read().strip()
-            lim = None if raw == "max" else int(raw)
-            if lim and lim > 1 << 45:  # "không giới hạn"
-                lim = None
-            used, limit = u, lim
-            break
-        except Exception:  # noqa: BLE001
-            continue
-    if RAM_LIMIT_MB:
-        limit = int(RAM_LIMIT_MB) * 1024 * 1024
-    if used is None:
-        vm = psutil.virtual_memory()
-        used = vm.total - vm.available
-        limit = limit or vm.total
-    limit = limit or psutil.virtual_memory().total
-    return {"rss": rss, "used": used, "limit": limit}
-
-
-async def check_gemini_api() -> tuple[bool, float, str]:
-    """Gọi models.get (không tốn quota sinh nội dung) để kiểm tra key + kết nối."""
-    model = registry.default_text()
-    t0 = time.perf_counter()
-    try:
-        await asyncio.wait_for(gemini.aio.models.get(model=model), timeout=10)
-        return True, (time.perf_counter() - t0) * 1000, "OK"
-    except genai_errors.APIError as e:
-        return False, (time.perf_counter() - t0) * 1000, f"{e.code} {(e.message or '')[:80]}"
-    except Exception as e:  # noqa: BLE001
-        return False, (time.perf_counter() - t0) * 1000, type(e).__name__
-
-
 @bot.tree.command(name="status", description="Xem tình trạng bot: RAM, uptime, Gemini API, thống kê")
 async def status(interaction: discord.Interaction):
-    if interaction.user.id not in STATUS_ALLOWED_IDS:
+    allowed = await config_store.can_use_status(interaction.user.id)
+    if not allowed:
         return await interaction.response.send_message(
             "🔒 Bạn không có quyền dùng lệnh này.", ephemeral=True)
-    await interaction.response.defer(ephemeral=True, thinking=True)  # thông tin hệ thống: chỉ người dùng lệnh thấy
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    await config_store.get_config()
+    scfg = config_store.session_cfg()
+    idle_hours = float(scfg.get("session_idle_hours", 2.0))
+    quota_mb = float(scfg.get("mongodb_quota_mb", 512.0))
+
     (api_ok, api_ms, api_msg), db_info = await asyncio.gather(check_gemini_api(), sessions.ping())
     mem = memory_info()
     proc = psutil.Process()
@@ -1187,8 +1375,8 @@ async def status(interaction: discord.Interaction):
         db_text = (
             f"Trạng thái: {'🟢 **Hoạt động**' if db_ok else '🔴 **Lỗi**'} ({db_msg}) · {db_ms:.0f} ms\n"
             f"Phiên đang hoạt động: **{q(active)}** · đã lưu trữ: **{q(archived)}** phiên\n"
-            f"Tự lưu trữ + làm mới sau **{SESSION_IDLE_HOURS:g} giờ** không chat"
-            + (f"\nDung lượng: **{storage:.1f} / {MONGODB_QUOTA_MB:g} MB** `{bar(storage / MONGODB_QUOTA_MB * 100)}`"
+            f"Tự lưu trữ + làm mới sau **{idle_hours:g} giờ** không chat"
+            + (f"\nDung lượng: **{storage:.1f} / {quota_mb:g} MB** `{bar(storage / quota_mb * 100)}`"
                if storage is not None else "")
             + (f"\n⚠️ Lỗi gần nhất: {sessions.last_error}" if sessions.last_error else ""))
     emb.add_field(name="🗄️ Phiên chat & lưu trữ (MongoDB Atlas)", inline=False, value=db_text)

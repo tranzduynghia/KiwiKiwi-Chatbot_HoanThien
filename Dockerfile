@@ -7,12 +7,6 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# ---------------------------------------------------------------------------
-# Luôn cài lại thư viện MỚI NHẤT mỗi lần build, kể cả khi Northflank bật cache:
-#  (1) Tải thông tin phát hành từ PyPI. Khi một thư viện ra bản mới, nội dung này đổi nên
-#      lớp cache bên dưới (bước cài thư viện) tự bị vô hiệu và chạy lại.
-#  (2) CACHE_BUST: đổi giá trị Build argument này (bất kỳ chuỗi nào) để ép cài lại thủ công.
-# ---------------------------------------------------------------------------
 ARG CACHE_BUST=0
 ADD https://pypi.org/pypi/google-genai/json /tmp/pypi-google-genai.json
 ADD https://pypi.org/pypi/discord.py/json /tmp/pypi-discord.json
@@ -22,12 +16,12 @@ COPY requirements.txt .
 RUN echo "cache-bust: ${CACHE_BUST}" \
  && pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir --upgrade --upgrade-strategy eager --force-reinstall -r requirements.txt \
- && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|aiohttp|pydantic)==" || true) \
+ && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|fastapi|uvicorn|httpx|pydantic)==" || true) \
  && rm -f /tmp/pypi-*.json
 
-COPY bot.py .
+COPY bot.py config_store.py dashboard.py init_admin.py ./
+COPY templates/ ./templates/
 
-# chạy bằng user thường, không dùng root
 RUN useradd --create-home botuser
 USER botuser
 
