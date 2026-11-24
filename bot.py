@@ -942,6 +942,7 @@ class AskBot(discord.Client):
                 "storage_mb": round(storage, 2) if storage is not None else None,
                 "quota_mb": quota_mb,
                 "last_error": sessions.last_error,
+                "sync": config_store.sync_status(),
             },
             "stats": {
                 "total": stats.total,
@@ -972,6 +973,7 @@ class AskBot(discord.Client):
         await registry.refresh()
         self.loop.create_task(self.model_refresher())
         self.loop.create_task(self.session_sweeper())
+        self.loop.create_task(self.config_sync_worker())
         if GUILD_ID:
             guild = discord.Object(id=int(GUILD_ID))
             self.tree.copy_global_to(guild=guild)
@@ -1024,6 +1026,18 @@ class AskBot(discord.Client):
     async def init_sessions(self):
         await sessions.connect()
         await sessions.archive_expired()
+
+    async def config_sync_worker(self):
+        """Kiểm tra MongoDB Atlas liên tục mỗi 5 giây: tự kết nối lại nếu đứt và xả bộ đệm RAM lên Atlas rồi giải phóng."""
+        while not self.is_closed():
+            await asyncio.sleep(5)
+            try:
+                if sessions.enabled and not config_store.connected:
+                    await sessions.connect()
+                if config_store.connected and config_store.pending_count > 0:
+                    await config_store.flush_pending()
+            except Exception as e:
+                log.warning("Lỗi vòng lặp đồng bộ bộ đệm RAM -> MongoDB Atlas: %s", e)
 
     async def session_sweeper(self):
         while not self.is_closed():

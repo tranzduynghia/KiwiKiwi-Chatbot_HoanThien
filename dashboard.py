@@ -150,6 +150,11 @@ def create_dashboard_app(
         except (BadSignature, SignatureExpired):
             return None
 
+    def _actor_label(user: dict[str, Any]) -> tuple[str, str]:
+        if user.get("auth_type") == "discord":
+            return f"{user.get('display_name') or user.get('username')} (discord:{user.get('discord_id')})", "discord"
+        return str(user.get("username") or "dashboard"), "password"
+
     async def get_current_user(request: Request) -> Optional[dict[str, Any]]:
         sess = _decode_session(request.cookies.get(SESSION_COOKIE_NAME))
         if not sess:
@@ -239,11 +244,6 @@ def create_dashboard_app(
     # ------------------------------------------------------------------
     @app.post("/auth/login")
     async def auth_login(payload: LoginPayload, request: Request):
-        if not config_store.connected:
-            raise HTTPException(
-                status_code=503,
-                detail="Bot chưa kết nối MongoDB Atlas (MONGODB_URI), không thể xác thực tài khoản.",
-            )
         user = await config_store.authenticate_user(payload.username, payload.password)
         if not user:
             raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu.")
@@ -480,23 +480,31 @@ def create_dashboard_app(
             "ram_limit_mb": ram_limit,
         }
 
+        actor, actor_type = _actor_label(user)
         updated = await config_store.update_config(
             {"ask": clean_ask, "session": clean_session},
-            updated_by=user.get("username", "dashboard"),
+            updated_by=actor,
+            actor_type=actor_type,
+            section="ask",
+            summary="Cập nhật cấu hình /ask & phiên chat",
         )
-        return {"ok": True, "config": updated}
+        return {"ok": True, "config": updated, "sync": config_store.sync_status()}
 
     @app.put("/api/config/prompt")
     async def api_update_prompt_config(payload: PromptConfigPayload, user: dict[str, Any] = Depends(require_user)):
+        actor, actor_type = _actor_label(user)
         updated = await config_store.update_config(
             {
                 "system_prompt": payload.system_prompt.strip(),
                 "ocr_instruction": payload.ocr_instruction.strip(),
                 "append_current_date": bool(payload.append_current_date),
             },
-            updated_by=user.get("username", "dashboard"),
+            updated_by=actor,
+            actor_type=actor_type,
+            section="prompt",
+            summary="Cập nhật System Instruction / OCR Instruction",
         )
-        return {"ok": True, "config": updated}
+        return {"ok": True, "config": updated, "sync": config_store.sync_status()}
 
     @app.put("/api/config/models")
     async def api_update_models_config(payload: ModelsConfigPayload, user: dict[str, Any] = Depends(require_user)):
@@ -530,11 +538,15 @@ def create_dashboard_app(
             "overrides": clean_overrides,
         }
 
+        actor, actor_type = _actor_label(user)
         updated = await config_store.update_config(
             {"models": clean_models},
-            updated_by=user.get("username", "dashboard"),
+            updated_by=actor,
+            actor_type=actor_type,
+            section="models",
+            summary="Cập nhật cấu hình Model Gemini",
         )
-        return {"ok": True, "config": updated, "models_runtime": await get_models_snapshot()}
+        return {"ok": True, "config": updated, "models_runtime": await get_models_snapshot(), "sync": config_store.sync_status()}
 
     # ------------------------------------------------------------------
     # API Phân quyền Discord & Tài khoản Dashboard (chỉ Admin)
@@ -546,14 +558,17 @@ def create_dashboard_app(
     @app.post("/api/permissions/discord")
     async def api_upsert_discord_perm(payload: DiscordPermPayload, admin: dict[str, Any] = Depends(require_admin)):
         try:
+            actor, actor_type = _actor_label(admin)
             doc = await config_store.upsert_discord_permission(
                 payload.user_id,
                 label=payload.label,
                 is_admin=payload.is_admin,
                 can_dashboard=payload.can_dashboard,
                 can_status=payload.can_status,
+                actor=actor,
+                actor_type=actor_type,
             )
-            return {"ok": True, "item": doc}
+            return {"ok": True, "item": doc, "sync": config_store.sync_status()}
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -561,7 +576,8 @@ def create_dashboard_app(
     async def api_delete_discord_perm(user_id: str, admin: dict[str, Any] = Depends(require_admin)):
         if admin.get("auth_type") == "discord" and str(admin.get("discord_id")) == str(user_id):
             raise HTTPException(status_code=400, detail="Không thể tự xóa quyền của chính bạn đang đăng nhập.")
-        deleted = await config_store.delete_discord_permission(user_id)
+        actor, actor_type = _actor_label(admin)
+        deleted = await config_store.delete_discord_permission(user_id, actor=actor, actor_type=actor_type)
         if not deleted:
             raise HTTPException(status_code=404, detail="Không tìm thấy Discord User ID này.")
         return {"ok": True}
@@ -573,8 +589,11 @@ def create_dashboard_app(
     @app.post("/api/permissions/users")
     async def api_create_user(payload: CreateUserPayload, admin: dict[str, Any] = Depends(require_admin)):
         try:
-            created = await config_store.create_dashboard_user(payload.username, payload.password, role=payload.role)
-            return {"ok": True, "item": created}
+            actor, actor_type = _actor_label(admin)
+            created = await config_store.create_dashboard_user(
+                payload.username, payload.password, role=payload.role, actor=actor, actor_type=actor_type
+            )
+            return {"ok": True, "item": created, "sync": config_store.sync_status()}
         except (ValueError, RuntimeError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -585,7 +604,10 @@ def create_dashboard_app(
         admin: dict[str, Any] = Depends(require_admin),
     ):
         try:
-            ok = await config_store.update_dashboard_user_password(username, payload.password)
+            actor, actor_type = _actor_label(admin)
+            ok = await config_store.update_dashboard_user_password(
+                username, payload.password, actor=actor, actor_type=actor_type
+            )
             if not ok:
                 raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
             return {"ok": True}
@@ -604,9 +626,18 @@ def create_dashboard_app(
             d_perms = await config_store.list_discord_permissions()
             if not any(p.get("is_admin") for p in d_perms):
                 raise HTTPException(status_code=400, detail="Không thể xóa tài khoản Admin cuối cùng.")
-        deleted = await config_store.delete_dashboard_user(uname)
+        actor, actor_type = _actor_label(admin)
+        deleted = await config_store.delete_dashboard_user(uname, actor=actor, actor_type=actor_type)
         if not deleted:
             raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
         return {"ok": True}
+
+    @app.get("/api/audit-logs")
+    async def api_audit_logs(
+        limit: int = Query(default=100, ge=1, le=300),
+        section: Optional[str] = Query(default=None),
+        user: dict[str, Any] = Depends(require_user),
+    ):
+        return {"items": await config_store.list_audit_logs(limit=limit, section=section)}
 
     return app
