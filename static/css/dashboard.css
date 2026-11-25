@@ -357,14 +357,22 @@ body.sidebar-collapsed .ox-main-wrapper {
    Biểu tượng hình thoi đặc trưng Oxfin (Diamond KPI Badges)
    ========================================================================== */
 
+/* Lưới 6 thẻ KPI tự động co giãn số cột (không cắt chữ khi phóng to hoặc thu hẹp) */
+.ox-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
 .ox-kpi-card {
   background-color: var(--ox-surface);
   border: 1px solid var(--ox-border);
   border-radius: 10px;
-  padding: 16px 14px;
+  padding: 12px 11px;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 11px;
+  min-width: 0;
   transition: border-color 0.18s ease, background-color 0.18s ease;
 }
 
@@ -373,16 +381,39 @@ body.sidebar-collapsed .ox-main-wrapper {
   background-color: var(--ox-surface-hover);
 }
 
+.ox-kpi-content {
+  min-width: 0;
+  flex: 1;
+}
+
+.ox-kpi-value {
+  font-size: clamp(0.875rem, 1.05vw, 1.05rem);
+  font-weight: 700;
+  line-height: 1.2;
+  color: #ffffff;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.ox-kpi-label {
+  font-size: clamp(0.68rem, 0.8vw, 0.75rem);
+  line-height: 1.25;
+  color: var(--ox-text-muted);
+  margin-top: 2px;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
 .ox-diamond {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
   transform: rotate(45deg);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  margin: 4px;
+  margin: 3px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 
