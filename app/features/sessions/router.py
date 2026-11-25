@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.features.sessions.discord_lookup import DiscordUserLookupService
 from app.features.sessions.repository import SessionRepository
@@ -14,7 +14,7 @@ def create_sessions_router(
     get_bot: Callable[[], Any],
     auth_deps: Any,
 ) -> APIRouter:
-    """Tạo router cho `/api/sessions/filters` và `/api/sessions/search`."""
+    """Tạo router cho `/api/sessions/filters`, `/api/sessions/search` và `/api/sessions/{chat_id}`."""
     router = APIRouter(tags=["sessions"])
     lookup = DiscordUserLookupService()
 
@@ -68,5 +68,21 @@ def create_sessions_router(
             "limit": limit,
             "db_connected": session_repo.archives_col is not None and session_repo.ok,
         }
+
+    @router.get("/api/sessions/{chat_id}")
+    async def api_session_detail(
+        chat_id: str,
+        _user: dict[str, Any] = Depends(auth_deps.require_user),
+    ):
+        """Trả về toàn bộ lịch sử tin nhắn và siêu dữ liệu của một phiên chat cụ thể."""
+        bot = get_bot()
+
+        async def _resolve_user(uid: str) -> dict[str, Any]:
+            return await lookup.resolve_user_profile(bot, uid)
+
+        detail = await session_repo.get_session_detail(chat_id, user_resolver=_resolve_user)
+        if detail is None:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phiên chat này trong MongoDB Atlas.")
+        return {"session": detail}
 
     return router

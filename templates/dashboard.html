@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="/static/css/dashboard.css" />
+  <link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_version }}" />
 </head>
 <body class="ox-body">
   <!-- Lớp phủ nền tối khi mở sidebar trên thiết bị di động -->
@@ -49,6 +49,6 @@
   </script>
 
   <!-- Điểm vào chính của giao diện Dashboard -->
-  <script type="module" src="/static/js/dashboard.js"></script>
+  <script type="module" src="/static/js/dashboard.js?v={{ asset_version }}"></script>
 </body>
 </html>

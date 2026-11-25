@@ -1,4 +1,4 @@
-<!-- Tab Tra cứu & duyệt toàn bộ nội dung phiên chat từ MongoDB Atlas -->
+<!-- Tab Tra cứu & duyệt toàn bộ nội dung phiên chat từ MongoDB Atlas kèm Modal xem chi tiết -->
 <section id="tab-sessions" class="tab-panel hidden space-y-5">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
@@ -12,8 +12,8 @@
     </span>
   </div>
 
-  <!-- Thanh bộ lọc đa điều kiện (bỏ trống toàn bộ để xem tất cả bản ghi) -->
-  <form id="form-search-sessions" class="card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
+  <!-- Thanh bộ lọc đa điều kiện (chặn submit mặc định để không tải lại trang) -->
+  <form id="form-search-sessions" onsubmit="return false;" class="card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
     <div class="lg:col-span-3">
       <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-q">Từ khóa nội dung / Mã chat</label>
       <input
@@ -56,7 +56,7 @@
       </select>
     </div>
     <div class="lg:col-span-2 flex gap-2">
-      <button type="submit" class="btn-primary flex-1">🔍 Lọc / Xem</button>
+      <button type="button" id="btn-search-sessions" class="btn-primary flex-1">🔍 Lọc / Xem</button>
       <button type="button" id="btn-reset-sessions-search" class="btn-ghost px-3" title="Xem tất cả (xóa bộ lọc)">↺</button>
     </div>
   </form>
@@ -69,7 +69,7 @@
           <tr class="border-b border-[#1e232e] text-[#8b95a7]">
             <th class="py-2.5 pr-4 w-72">Người dùng &amp; Mã chat (Chat ID)</th>
             <th class="py-2.5 pr-4">Nội dung tin nhắn</th>
-            <th class="py-2.5 text-right w-44 whitespace-nowrap">Thời gian</th>
+            <th class="py-2.5 text-right w-44 whitespace-nowrap">Thời gian &amp; Chi tiết</th>
           </tr>
         </thead>
         <tbody id="sessions-search-tbody" class="divide-y divide-[#1e232e]/80">
@@ -87,6 +87,37 @@
         <button type="button" id="btn-sessions-prev" class="btn-ghost text-xs px-3 py-1.5 disabled:opacity-40" disabled>← Trang trước</button>
         <button type="button" id="btn-sessions-next" class="btn-ghost text-xs px-3 py-1.5 disabled:opacity-40" disabled>Trang sau →</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Modal xem chi tiết toàn bộ hội thoại của một phiên chat (không chuyển trang) -->
+  <div
+    id="session-detail-modal"
+    class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="session-detail-title"
+  >
+    <div class="card w-full max-w-3xl max-h-[86vh] flex flex-col shadow-2xl overflow-hidden border border-[#2a3140]">
+      <!-- Tiêu đề Modal -->
+      <div class="p-4 border-b border-[#1e232e] flex items-start justify-between gap-3 bg-[#0e1117]">
+        <div id="session-detail-header" class="flex items-center gap-3 min-w-0">
+          <h3 id="session-detail-title" class="text-sm font-semibold text-white">Chi tiết phiên chat</h3>
+        </div>
+        <button
+          type="button"
+          id="btn-close-session-detail"
+          class="ox-icon-btn shrink-0"
+          title="Đóng cửa sổ"
+          aria-label="Đóng"
+        >✕</button>
+      </div>
+
+      <!-- Siêu dữ liệu phiên chat -->
+      <div id="session-detail-meta" class="px-4 py-2.5 bg-[#0a0d12] border-b border-[#1e232e] flex flex-wrap items-center gap-3 text-[11px] text-[#8b95a7]"></div>
+
+      <!-- Danh sách toàn bộ tin nhắn theo thứ tự thời gian -->
+      <div id="session-detail-messages" class="p-4 space-y-3 overflow-y-auto flex-1 bg-[#0c0f14]"></div>
     </div>
   </div>
 </section>

@@ -2,7 +2,7 @@
  * Bộ điều khiển Tab Tra cứu & duyệt phiên chat:
  * - Tự động tải toàn bộ bản ghi ngay khi mở tab (không bắt buộc nhập ID)
  * - Hỗ trợ lọc theo Vai trò Server, Discord User ID, Username, từ khóa nội dung và loại tin nhắn
- * - Hiển thị Avatar người dùng kèm Mã chat, Nội dung tin nhắn và Thời gian cùng phân trang
+ * - Mở Modal xem chi tiết toàn bộ hội thoại tại chỗ (không tải lại hay chuyển hướng trang)
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
@@ -25,7 +25,7 @@ function highlightMatch(rawText, keyword) {
   }
 }
 
-function renderAvatar(item) {
+function renderAvatar(item, sizeClass = "w-10 h-10") {
   const display = item.display_name || item.username || item.user_id || "?";
   const initial = escapeHtml(String(display).trim().charAt(0).toUpperCase() || "?");
   if (item.avatar_url) {
@@ -34,24 +34,24 @@ function renderAvatar(item) {
         src="${escapeHtml(item.avatar_url)}"
         alt="${escapeHtml(display)}"
         loading="lazy"
-        class="w-10 h-10 rounded-full object-cover border border-[#2a3140] shrink-0 bg-[#0a0d12]"
+        class="${sizeClass} rounded-full object-cover border border-[#2a3140] shrink-0 bg-[#0a0d12]"
       />
     `;
   }
   return `
     <div
-      class="w-10 h-10 rounded-full bg-gradient-to-br from-rose-500/80 to-rose-900/90 border border-[#2a3140] text-white font-semibold text-sm flex items-center justify-center shrink-0"
+      class="${sizeClass} rounded-full bg-gradient-to-br from-rose-500/80 to-rose-900/90 border border-[#2a3140] text-white font-semibold text-sm flex items-center justify-center shrink-0"
       aria-hidden="true"
     >${initial}</div>
   `;
 }
 
-function renderServerRoleBadges(roles) {
+function renderServerRoleBadges(roles, maxCount = 3) {
   if (!Array.isArray(roles) || !roles.length) return "";
   return `
     <div class="flex flex-wrap gap-1 mt-1">
       ${roles
-        .slice(0, 3)
+        .slice(0, maxCount)
         .map((role) => {
           const color = /^#[0-9a-f]{3,6}$/i.test(role.color || "") ? role.color : "#64748b";
           return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#0a0d12] border border-[#252b38] text-[10px] text-slate-300">
@@ -60,7 +60,7 @@ function renderServerRoleBadges(roles) {
           </span>`;
         })
         .join("")}
-      ${roles.length > 3 ? `<span class="text-[10px] text-[#5e6778]">+${roles.length - 3}</span>` : ""}
+      ${roles.length > maxCount ? `<span class="text-[10px] text-[#5e6778]">+${roles.length - maxCount}</span>` : ""}
     </div>
   `;
 }
@@ -68,6 +68,7 @@ function renderServerRoleBadges(roles) {
 export function createSessionsTabController() {
   let currentOffset = 0;
   let filtersLoaded = false;
+  let searchSeq = 0;
 
   async function loadServerRoleOptions() {
     const selectEl = document.getElementById("sessions-search-server-role");
@@ -91,10 +92,104 @@ export function createSessionsTabController() {
     }
   }
 
+  function closeSessionDetailModal() {
+    const modal = document.getElementById("session-detail-modal");
+    if (!modal) return;
+    modal.classList.add("hidden");
+    modal.classList.remove("flex");
+  }
+
+  async function openSessionDetail(chatId) {
+    const modal = document.getElementById("session-detail-modal");
+    const headerEl = document.getElementById("session-detail-header");
+    const metaEl = document.getElementById("session-detail-meta");
+    const msgsEl = document.getElementById("session-detail-messages");
+    if (!modal || !headerEl || !metaEl || !msgsEl) return;
+
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    headerEl.innerHTML = '<h3 id="session-detail-title" class="text-sm font-semibold text-white">Đang tải chi tiết phiên chat...</h3>';
+    metaEl.innerHTML = "";
+    msgsEl.innerHTML = '<div class="py-8 text-center text-xs text-[#8b95a7]">Đang nạp toàn bộ hội thoại từ MongoDB Atlas...</div>';
+
+    try {
+      const data = await apiRequest(`/api/sessions/${encodeURIComponent(chatId)}`);
+      const sess = data.session;
+      const displayName = sess.display_name || sess.username || "Người dùng Discord";
+      const usernameLine = sess.username ? `@${sess.username}` : "";
+
+      headerEl.innerHTML = `
+        ${renderAvatar(sess, "w-10 h-10")}
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <h3 id="session-detail-title" class="text-sm font-semibold text-white truncate">${escapeHtml(displayName)}</h3>
+            ${usernameLine ? `<span class="text-xs text-[#8b95a7]">${escapeHtml(usernameLine)}</span>` : ""}
+          </div>
+          ${renderServerRoleBadges(sess.server_roles, 6)}
+        </div>
+      `;
+
+      const createdStr = sess.created_at ? new Date(sess.created_at).toLocaleString("vi-VN") : "—";
+      const lastStr = sess.last_active ? new Date(sess.last_active).toLocaleString("vi-VN") : "—";
+      const statusBadge = sess.session_status === "active"
+        ? '<span class="text-emerald-400 font-medium">● Đang chạy</span>'
+        : `<span class="text-[#8b95a7]">Lưu trữ${sess.end_reason ? ` (${escapeHtml(sess.end_reason)})` : ""}</span>`;
+
+      metaEl.innerHTML = `
+        <button
+          type="button"
+          data-copy-chat-id="${escapeHtml(sess.chat_id)}"
+          class="font-mono text-rose-300 hover:text-rose-200 bg-[#131720] border border-[#252b38] px-2 py-0.5 rounded cursor-pointer"
+          title="Bấm để sao chép Chat ID"
+        >Chat ID: ${escapeHtml(sess.chat_id)} 📋</button>
+        <span class="font-mono">UID: ${escapeHtml(sess.user_id || "—")}</span>
+        <span>${statusBadge}</span>
+        <span>${sess.turns || 0} lượt · ${(sess.messages || []).length} tin nhắn</span>
+        <span>Bắt đầu: ${escapeHtml(createdStr)}</span>
+        <span>Gần nhất: ${escapeHtml(lastStr)}</span>
+      `;
+
+      const activeKeyword = (document.getElementById("sessions-search-q")?.value || "").trim();
+      const messages = sess.messages || [];
+      msgsEl.innerHTML = messages.length
+        ? messages
+            .map((msg) => {
+              const isModel = msg.role === "model";
+              const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString("vi-VN") : "—";
+              return `
+                <div class="rounded-lg border p-3.5 ${
+                  isModel
+                    ? "bg-[#131720] border-[#252b38]"
+                    : "bg-[#101622] border-sky-500/25"
+                }">
+                  <div class="flex items-center justify-between gap-2 mb-1.5 text-[11px]">
+                    <div class="flex items-center gap-2">
+                      ${
+                        isModel
+                          ? `<span class="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium">AI${msg.model ? ` · ${escapeHtml(msg.model)}` : ""}</span>`
+                          : '<span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-medium">User</span>'
+                      }
+                    </div>
+                    <span class="font-mono text-[#5e6778]">${escapeHtml(ts)}</span>
+                  </div>
+                  <div class="text-xs text-slate-200 whitespace-pre-wrap break-words leading-relaxed">${highlightMatch(msg.content, activeKeyword)}</div>
+                </div>
+              `;
+            })
+            .join("")
+        : '<div class="py-6 text-center text-xs text-[#5e6778]">Phiên chat này chưa có tin nhắn nào.</div>';
+    } catch (err) {
+      msgsEl.innerHTML = `<div class="py-6 text-center text-xs text-rose-400">Không tải được chi tiết phiên chat: ${escapeHtml(err.message)}</div>`;
+      showToast(err.message, false);
+    }
+  }
+
   async function searchSessions(offset = 0) {
+    const reqSeq = ++searchSeq;
     if (!filtersLoaded) {
       await loadServerRoleOptions();
     }
+    if (reqSeq !== searchSeq) return;
 
     currentOffset = Math.max(0, offset);
     const qInput = document.getElementById("sessions-search-q");
@@ -129,6 +224,8 @@ export function createSessionsTabController() {
 
     try {
       const data = await apiRequest(`/api/sessions/search?${params.toString()}`);
+      if (reqSeq !== searchSeq) return;
+
       const items = data.items || [];
       const total = Number(data.total ?? items.length);
       const hasMore = Boolean(data.has_more);
@@ -174,13 +271,19 @@ export function createSessionsTabController() {
                   <div class="min-w-0 flex-1">
                     <div class="font-medium text-slate-100 truncate">${escapeHtml(displayName)}</div>
                     ${usernameLine ? `<div class="text-[11px] text-[#8b95a7] truncate">${escapeHtml(usernameLine)}</div>` : ""}
-                    <div class="flex items-center gap-2 mt-1 flex-wrap">
+                    <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <button
+                        type="button"
+                        data-view-chat-id="${escapeHtml(item.chat_id)}"
+                        title="Xem toàn bộ hội thoại #${escapeHtml(item.chat_id)}"
+                        class="font-mono text-[11px] text-rose-300 hover:text-rose-200 bg-[#0a0d12] border border-[#1e232e] px-1.5 py-0.5 rounded transition cursor-pointer"
+                      >#${escapeHtml(item.chat_id_short)}</button>
                       <button
                         type="button"
                         data-copy-chat-id="${escapeHtml(item.chat_id)}"
-                        title="Bấm để sao chép đầy đủ: ${escapeHtml(item.chat_id)}"
-                        class="font-mono text-[11px] text-rose-300 hover:text-rose-200 bg-[#0a0d12] border border-[#1e232e] px-1.5 py-0.5 rounded transition cursor-pointer"
-                      >#${escapeHtml(item.chat_id_short)}</button>
+                        title="Sao chép mã Chat ID đầy đủ"
+                        class="text-[10px] text-[#8b95a7] hover:text-white px-1 py-0.5 rounded bg-[#181d27] border border-[#252b38] cursor-pointer"
+                      >📋</button>
                       ${statusLabel}
                     </div>
                     <div class="text-[10px] text-[#5e6778] font-mono mt-0.5 truncate" title="Discord User ID: ${escapeHtml(item.user_id)}">UID: ${escapeHtml(item.user_id || "—")}</div>
@@ -190,14 +293,26 @@ export function createSessionsTabController() {
               </td>
               <td class="py-3 pr-4">
                 <div class="mb-1.5 flex items-center gap-2">${roleBadge}</div>
-                <div class="text-slate-200 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto pr-1">${highlightMatch(item.content, q)}</div>
+                <div
+                  data-view-chat-id="${escapeHtml(item.chat_id)}"
+                  class="text-slate-200 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto pr-1 cursor-pointer hover:text-white"
+                  title="Bấm để xem chi tiết phiên chat"
+                >${highlightMatch(item.content, q)}</div>
               </td>
-              <td class="py-3 text-right font-mono text-[#8b95a7] whitespace-nowrap">${escapeHtml(timeStr)}</td>
+              <td class="py-3 text-right whitespace-nowrap">
+                <div class="font-mono text-[#8b95a7]">${escapeHtml(timeStr)}</div>
+                <button
+                  type="button"
+                  data-view-chat-id="${escapeHtml(item.chat_id)}"
+                  class="btn-ghost text-[11px] px-2.5 py-1 mt-2"
+                >👁 Xem chi tiết</button>
+              </td>
             </tr>
           `;
         })
         .join("");
     } catch (err) {
+      if (reqSeq !== searchSeq) return;
       tbody.innerHTML = `<tr><td colspan="3" class="py-6 text-center text-rose-400">Lỗi tìm kiếm: ${escapeHtml(err.message)}</td></tr>`;
       showToast(err.message, false);
     }
@@ -213,6 +328,22 @@ export function createSessionsTabController() {
     const form = document.getElementById("form-search-sessions");
     if (form) {
       form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        searchSessions(0);
+      });
+      // Hỗ trợ nhấn Enter trong bất kỳ ô nhập lọc nào mà không làm tải lại trang
+      form.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          searchSessions(0);
+        }
+      });
+    }
+
+    const searchBtn = document.getElementById("btn-search-sessions");
+    if (searchBtn) {
+      searchBtn.addEventListener("click", (event) => {
         event.preventDefault();
         searchSessions(0);
       });
@@ -250,22 +381,47 @@ export function createSessionsTabController() {
       nextBtn.addEventListener("click", () => searchSessions(currentOffset + PAGE_SIZE));
     }
 
-    // Sao chép nhanh mã Chat ID đầy đủ khi bấm vào cột Mã chat
-    const tbody = document.getElementById("sessions-search-tbody");
-    if (tbody) {
-      tbody.addEventListener("click", async (event) => {
-        const btn = event.target.closest("button[data-copy-chat-id]");
-        if (!btn) return;
-        const chatId = btn.dataset.copyChatId;
-        try {
-          await navigator.clipboard.writeText(chatId);
-          showToast(`📋 Đã sao chép mã chat: ${chatId}`);
-        } catch {
-          showToast(`Mã chat: ${chatId}`);
+    // Ủy quyền sự kiện mở Modal chi tiết và sao chép Chat ID (không gây chuyển hướng)
+    const sectionEl = document.getElementById("tab-sessions");
+    if (sectionEl) {
+      sectionEl.addEventListener("click", async (event) => {
+        const copyBtn = event.target.closest("[data-copy-chat-id]");
+        if (copyBtn) {
+          event.preventDefault();
+          event.stopPropagation();
+          const chatId = copyBtn.dataset.copyChatId;
+          try {
+            await navigator.clipboard.writeText(chatId);
+            showToast(`📋 Đã sao chép mã chat: ${chatId}`);
+          } catch {
+            showToast(`Mã chat: ${chatId}`);
+          }
+          return;
+        }
+
+        const viewEl = event.target.closest("[data-view-chat-id]");
+        if (viewEl) {
+          event.preventDefault();
+          openSessionDetail(viewEl.dataset.viewChatId);
         }
       });
     }
+
+    // Đóng Modal chi tiết bằng nút ×, bấm ra ngoài nền tối hoặc phím Escape
+    const closeBtn = document.getElementById("btn-close-session-detail");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", closeSessionDetailModal);
+    }
+    const modal = document.getElementById("session-detail-modal");
+    if (modal) {
+      modal.addEventListener("click", (event) => {
+        if (event.target === modal) closeSessionDetailModal();
+      });
+    }
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeSessionDetailModal();
+    });
   }
 
-  return { searchSessions, setQueryAndSearch, bindEvents };
+  return { searchSessions, setQueryAndSearch, openSessionDetail, bindEvents };
 }

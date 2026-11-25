@@ -146,6 +146,15 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert filtered_res.json()["total"] == 2
         assert all({"chat_id", "content", "timestamp", "avatar_url"} <= set(row.keys()) for row in filtered_res.json()["items"])
 
+        # Kiểm tra API xem chi tiết phiên chat (mở Modal không chuyển hướng)
+        chat_id = browse_json["items"][0]["chat_id"]
+        detail_res = client.get(f"/api/sessions/{chat_id}")
+        assert detail_res.status_code == 200
+        detail_session = detail_res.json()["session"]
+        assert detail_session["chat_id"] == chat_id
+        assert len(detail_session["messages"]) == 2
+        assert client.get("/api/sessions/nonexistent-id").status_code == 404
+
         # Kiểm tra Audit Log đã ghi nhận toàn bộ thay đổi
         audit_res = client.get("/api/audit-logs")
         assert audit_res.status_code == 200

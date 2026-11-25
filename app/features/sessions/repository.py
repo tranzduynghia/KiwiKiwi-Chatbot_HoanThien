@@ -418,3 +418,68 @@ class SessionRepository:
             "has_more": (safe_offset + capped_limit) < total,
         }
 
+    async def get_session_detail(
+        self,
+        chat_id: str,
+        *,
+        user_resolver: Optional[Any] = None,
+    ) -> Optional[dict[str, Any]]:
+        """Lấy chi tiết toàn bộ hội thoại và thông tin người dùng của một phiên chat theo `chat_id`."""
+        if self.archives_col is None:
+            return None
+        clean_id = (chat_id or "").strip()
+        if not clean_id:
+            return None
+
+        doc = await self._run(lambda: self.archives_col.find_one({"_id": clean_id}))
+        if not doc:
+            return None
+
+        uid_str = str(doc.get("user_id_str") or doc.get("user_id") or "")
+        doc_username = str(doc.get("username") or "")
+        doc_display = str(doc.get("display_name") or "")
+        doc_avatar = str(doc.get("avatar_url") or "")
+        doc_roles = doc.get("server_roles") if isinstance(doc.get("server_roles"), list) else []
+
+        if user_resolver is not None and uid_str and (not doc_username or not doc_avatar or not doc_roles):
+            resolved = await user_resolver(uid_str)
+            if resolved:
+                doc_username = doc_username or str(resolved.get("username") or "")
+                doc_display = doc_display or str(resolved.get("display_name") or "")
+                doc_avatar = doc_avatar or str(resolved.get("avatar_url") or "")
+                if not doc_roles and resolved.get("server_roles"):
+                    doc_roles = resolved["server_roles"]
+
+        def _fmt_dt(val: Any) -> str:
+            if isinstance(val, datetime):
+                return val.isoformat()
+            return str(val) if val else ""
+
+        messages = []
+        for msg in doc.get("messages") or []:
+            messages.append({
+                "role": str(msg.get("role") or "user"),
+                "content": str(msg.get("text") or ""),
+                "model": msg.get("model"),
+                "timestamp": _fmt_dt(msg.get("at") or doc.get("last_active") or doc.get("created_at")),
+            })
+
+        return {
+            "chat_id": str(doc.get("_id") or ""),
+            "chat_id_short": str(doc.get("_id") or "")[:8],
+            "user_id": uid_str,
+            "username": doc_username,
+            "display_name": doc_display or doc_username or uid_str,
+            "avatar_url": doc_avatar,
+            "server_roles": doc_roles,
+            "guild_name": str(doc.get("guild_name") or ""),
+            "turns": int(doc.get("turns") or 0),
+            "created_at": _fmt_dt(doc.get("created_at")),
+            "last_active": _fmt_dt(doc.get("last_active")),
+            "ended_at": _fmt_dt(doc.get("ended_at")),
+            "end_reason": doc.get("end_reason"),
+            "session_status": "active" if doc.get("ended_at") is None else "archived",
+            "messages": messages,
+        }
+
+

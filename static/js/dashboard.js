@@ -60,28 +60,46 @@ promptConfigTab = createPromptConfigTabController({
 });
 modelsTab = createModelsTabController({ onRefreshAll: refreshAll });
 
-// Kích hoạt tab theo mã tên và đóng ngăn kéo sidebar trên màn hình nhỏ
-function activateTab(targetTab) {
+const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "audit"]);
+
+// Kích hoạt tab theo mã tên, đồng bộ URL hash và đóng ngăn kéo sidebar trên màn hình nhỏ
+function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}) {
+  const safeTab = VALID_TABS.has(targetTab) ? targetTab : "status";
   document.querySelectorAll(".tab-btn").forEach((item) => {
-    item.dataset.active = String(item.dataset.tab === targetTab);
+    item.dataset.active = String(item.dataset.tab === safeTab);
   });
   document.querySelectorAll(".tab-panel").forEach((panel) => {
-    panel.classList.toggle("hidden", panel.id !== `tab-${targetTab}`);
+    panel.classList.toggle("hidden", panel.id !== `tab-${safeTab}`);
   });
   document.body.classList.remove("sidebar-mobile-open");
 
-  if (targetTab === "perms") {
+  if (updateHash && window.location.hash !== `#${safeTab}`) {
+    window.history.replaceState(null, "", `#${safeTab}`);
+  }
+
+  if (skipAutoLoad) return;
+  if (safeTab === "perms") {
     permissionsTab.loadPermissions();
-  } else if (targetTab === "sessions") {
-    sessionsTab.searchSessions();
-  } else if (targetTab === "audit") {
+  } else if (safeTab === "sessions") {
+    sessionsTab.searchSessions(0);
+  } else if (safeTab === "audit") {
     auditTab.loadAuditLogs();
   }
 }
 
 function bindShellControls() {
   document.querySelectorAll(".tab-btn").forEach((btn) => {
-    btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      activateTab(btn.dataset.tab);
+    });
+  });
+
+  window.addEventListener("hashchange", () => {
+    const fromHash = window.location.hash.replace(/^#/, "");
+    if (VALID_TABS.has(fromHash)) {
+      activateTab(fromHash, { updateHash: false });
+    }
   });
 
   // Nút thu gọn / mở rộng sidebar đáp ứng cả desktop và mobile
@@ -115,6 +133,7 @@ function bindShellControls() {
   if (globalSearch) {
     globalSearch.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
+      event.preventDefault();
       const raw = globalSearch.value.trim();
       const q = raw.toLowerCase();
       if (!q) return;
@@ -135,7 +154,7 @@ function bindShellControls() {
         activateTab("audit");
       } else {
         // Mặc định tìm kiếm trực tiếp trong nội dung phiên chat trên MongoDB Atlas
-        activateTab("sessions");
+        activateTab("sessions", { skipAutoLoad: true });
         sessionsTab.setQueryAndSearch(raw);
       }
     });
@@ -151,6 +170,12 @@ modelsTab.bindEvents();
 permissionsTab.bindEvents();
 sessionsTab.bindEvents();
 auditTab.bindEvents();
+
+// Khôi phục tab đang mở từ URL hash (tránh bị quay về trang chủ khi tải lại)
+const initialTab = window.location.hash.replace(/^#/, "");
+if (VALID_TABS.has(initialTab) && initialTab !== "status") {
+  activateTab(initialTab, { updateHash: false });
+}
 
 statusTab.loadStatus(false);
 loadConfig();

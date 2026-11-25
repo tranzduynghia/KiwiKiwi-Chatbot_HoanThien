@@ -1,6 +1,7 @@
 """Router render các trang HTML giao diện (/, /login, /dashboard) của Web Dashboard."""
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Request
@@ -11,6 +12,9 @@ from app.core.settings import DEFAULT_OCR_INSTRUCTION, DEFAULT_SYSTEM_PROMPT
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.auth.dependencies import AuthDependencies
 from app.features.auth.oauth import DiscordOAuthService
+
+# Mã phiên bản tài nguyên tĩnh giúp trình duyệt luôn nạp bản JS/CSS mới nhất sau mỗi lần deploy
+ASSET_VERSION = str(int(time.time()))
 
 
 def _render_template(templates: Jinja2Templates, request: Request, name: str, context: dict[str, Any]):
@@ -51,6 +55,7 @@ def create_pages_router(
                 "error": error,
                 "discord_oauth_enabled": oauth_service.is_enabled(request),
                 "db_connected": sync_coordinator.connected,
+                "asset_version": ASSET_VERSION,
             },
         )
 
@@ -67,6 +72,7 @@ def create_pages_router(
                 "user": user,
                 "default_system_prompt": DEFAULT_SYSTEM_PROMPT,
                 "default_ocr_instruction": DEFAULT_OCR_INSTRUCTION,
+                "asset_version": ASSET_VERSION,
             },
         )
 
