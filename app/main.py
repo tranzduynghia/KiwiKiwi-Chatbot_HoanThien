@@ -170,12 +170,21 @@ def build_container(
         synced_total = int(event.get("synced_total", 0))
         purged_total = int(event.get("purged_total", 0))
         timed_out = bool(event.get("sync_timed_out", False))
+        is_simulated = bool(event.get("simulated", False))
+        triggered_by = event.get("triggered_by") if isinstance(event.get("triggered_by"), dict) else {}
+
+        prefix = "[Mô phỏng Test Watchdog] " if is_simulated else ""
         summary = (
-            f"Giải cứu bộ nhớ khẩn cấp: đồng bộ an toàn {synced_total} bản ghi lên MongoDB Atlas"
+            f"{prefix}Giải cứu bộ nhớ khẩn cấp: đồng bộ an toàn {synced_total} bản ghi lên MongoDB Atlas"
             + (" (quá hạn 5s)" if timed_out else "")
             + f", dọn {purged_total} mục cache và cấp phát lại vùng đệm dự phòng"
         )
         changes = [
+            {
+                "field": "memory.simulated",
+                "before": False,
+                "after": is_simulated,
+            },
             {
                 "field": "memory.rss_mb",
                 "before": f"{event.get('peak_rss_mb')} MB",
@@ -204,9 +213,10 @@ def build_container(
                 "after": str(event.get("sync_error")),
             })
         await audit_service.record(
-            actor="system (memory-watchdog)",
-            actor_type="system",
-            action="memory_emergency_cleanup",
+            actor=str(triggered_by.get("actor") or "system (memory-watchdog)"),
+            actor_type=str(triggered_by.get("actor_type") or "system"),
+            actor_meta=triggered_by.get("actor_meta"),
+            action="memory_watchdog_simulation" if is_simulated else "memory_emergency_cleanup",
             section="system",
             summary=summary,
             changes=changes,

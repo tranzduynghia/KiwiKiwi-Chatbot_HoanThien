@@ -204,3 +204,46 @@ async def test_container_memory_watchdog_end_to_end_sync_and_preserve_config(app
     assert len(system_logs) == 1
     assert system_logs[0]["action"] == "memory_emergency_cleanup"
     assert "4 bản ghi" in system_logs[0]["summary"]
+
+
+@pytest.mark.asyncio
+async def test_memory_watchdog_simulate_emergency_cleanup_runs_four_steps():
+    """simulate_emergency_cleanup() chạy đúng 4 bước thật trên cache/MongoDB mà không cần RSS > 464MB và gắn simulated=True."""
+    order: list[str] = []
+    audited: list[dict] = []
+
+    wd: MemoryWatchdog
+
+    async def fake_sync():
+        assert wd.reserve_ready is False
+        order.append("sync")
+        return {"sessions": 2, "metrics": 1}
+
+    def fake_purge():
+        assert order == ["sync"]
+        order.append("purge")
+        return {"session_cache": 3}
+
+    async def fake_audit(event):
+        order.append("audit")
+        audited.append(event)
+
+    wd = MemoryWatchdog(
+        reserve_bytes=256 * 1024,
+        read_rss_bytes=lambda: int(180.0 * 1024 * 1024),  # RSS bình thường (dưới ngưỡng 464MB)
+        sync_before_purge=fake_sync,
+        purge_caches=fake_purge,
+        record_audit_event=fake_audit,
+    )
+
+    event = await wd.simulate_emergency_cleanup(triggered_by={"actor": "admin", "actor_type": "password"})
+    assert event["simulated"] is True
+    assert event["reserve_released"] is True
+    assert event["reserve_reallocated"] is True
+    assert event["synced_total"] == 3
+    assert event["purged_total"] == 3
+    assert wd.reserve_ready is True
+    assert order == ["sync", "purge", "audit"]
+    assert len(audited) == 1
+    assert audited[0]["simulated"] is True
+    assert audited[0]["triggered_by"]["actor"] == "admin"

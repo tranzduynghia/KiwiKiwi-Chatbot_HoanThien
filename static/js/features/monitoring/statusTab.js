@@ -166,6 +166,28 @@ export function createStatusTabController() {
     });
   }
 
+  function renderWatchdogIndicator(wd) {
+    if (!wd) return;
+    const reserveEl = document.getElementById("st-ram-reserve");
+    if (reserveEl) {
+      const icon = wd.state === "cleaning" ? "🚨" : wd.reserve_ready ? "🛡️" : "⚠️";
+      const nextLabel = `${icon} ${wd.status_label}`;
+      if (reserveEl.textContent !== nextLabel) reserveEl.textContent = nextLabel;
+      reserveEl.className = `font-medium truncate transition-colors duration-200 ${
+        wd.state === "cleaning"
+          ? "text-rose-400"
+          : wd.reserve_ready
+            ? "text-emerald-400"
+            : "text-amber-300"
+      }`;
+    }
+    const metaText =
+      wd.emergency_count > 0
+        ? `Đã kích hoạt: ${wd.emergency_count} lần`
+        : `Ngưỡng ${Math.round(wd.trigger_threshold_mb)}MB`;
+    setTextIfChanged("st-ram-watchdog-meta", metaText);
+  }
+
   async function loadStatus(checkGemini = false, { silent = false } = {}) {
     if (checkGemini) {
       if (isFetchingGemini && silent) return;
@@ -222,27 +244,7 @@ export function createStatusTabController() {
         }`;
       }
       setTextIfChanged("st-ram-rss", `Tiến trình: ${res.ram_rss_mb} MB`);
-      const wd = res.memory_watchdog;
-      if (wd) {
-        const reserveEl = document.getElementById("st-ram-reserve");
-        if (reserveEl) {
-          const icon = wd.state === "cleaning" ? "🚨" : wd.reserve_ready ? "🛡️" : "⚠️";
-          const nextLabel = `${icon} ${wd.status_label}`;
-          if (reserveEl.textContent !== nextLabel) reserveEl.textContent = nextLabel;
-          reserveEl.className = `font-medium truncate transition-colors duration-200 ${
-            wd.state === "cleaning"
-              ? "text-rose-400"
-              : wd.reserve_ready
-                ? "text-emerald-400"
-                : "text-amber-300"
-          }`;
-        }
-        const metaText =
-          wd.emergency_count > 0
-            ? `Đã cứu OOM: ${wd.emergency_count} lần`
-            : `Ngưỡng ${Math.round(wd.trigger_threshold_mb)}MB`;
-        setTextIfChanged("st-ram-watchdog-meta", metaText);
-      }
+      renderWatchdogIndicator(res.memory_watchdog);
       setTextIfChanged("st-cpu", `${res.cpu_percent}% CPU`);
       setTextIfChanged("st-threads", `${res.threads} luồng`);
       setTextIfChanged("st-requests-brief", `Hôm nay: ${data.stats.today_total} req · Tổng: ${data.stats.total} req`);
@@ -376,6 +378,36 @@ export function createStatusTabController() {
         showToast(err.message, false);
       }
     });
+
+    const testWatchdogBtn = document.getElementById("btn-test-watchdog");
+    if (testWatchdogBtn) {
+      testWatchdogBtn.addEventListener("click", async () => {
+        const confirmed = window.confirm(
+          "Chạy mô phỏng quy trình 4 bước Memory Watchdog (Giải phóng đệm 20MB → Đồng bộ MongoDB Atlas → Dọn cache RAM & GC → Cấp phát lại đệm)?"
+        );
+        if (!confirmed) return;
+
+        const originalLabel = testWatchdogBtn.textContent;
+        testWatchdogBtn.disabled = true;
+        testWatchdogBtn.textContent = "⏳ Đang chạy...";
+        try {
+          const res = await apiRequest("/api/system/watchdog/test", { method: "POST" });
+          if (res.memory_watchdog) {
+            renderWatchdogIndicator(res.memory_watchdog);
+          }
+          const timeoutNote = res.sync_timed_out ? " (đồng bộ quá hạn 5s)" : "";
+          showToast(
+            `✅ Test Watchdog hoàn tất: đồng bộ ${res.synced_total ?? 0} bản ghi lên Atlas${timeoutNote}, dọn ${res.purged_total ?? 0} mục cache (GC: ${res.gc_collected ?? 0} đối tượng).`
+          );
+          loadStatus(false, { silent: true });
+        } catch (err) {
+          showToast(err.message || "Không thể chạy Test Watchdog.", false);
+        } finally {
+          testWatchdogBtn.disabled = false;
+          testWatchdogBtn.textContent = originalLabel;
+        }
+      });
+    }
   }
 
   return {

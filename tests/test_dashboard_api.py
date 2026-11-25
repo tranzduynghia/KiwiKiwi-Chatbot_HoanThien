@@ -38,7 +38,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert login_html.status_code == 200
         assert "/static/js/features/auth/login.js" in login_html.text
 
-        # 3) Đăng nhập quyền Operator -> đọc được config nhưng bị chặn 403 ở API quản trị phân quyền
+        # 3) Đăng nhập quyền Operator -> đọc được config nhưng bị chặn 403 ở API quản trị phân quyền & Test Watchdog
         op_login = client.post("/auth/login", json={"username": "operator1", "password": "OperPass123!"})
         assert op_login.status_code == 200
         assert client.get("/api/me").json()["user"]["role"] == "operator"
@@ -46,6 +46,10 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
             "/api/permissions/discord",
             json={"user_id": "222333444555666777", "label": "Denied", "can_status": True},
         ).status_code == 403
+        assert client.post("/api/system/watchdog/test").status_code == 403
+        op_dash_html = client.get("/dashboard")
+        assert op_dash_html.status_code == 200
+        assert "id=\"btn-test-watchdog\"" not in op_dash_html.text
 
         # 4) Đăng nhập quyền Admin -> render trang Dashboard + cập nhật toàn bộ cấu hình + phân quyền
         adm_login = client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
@@ -57,6 +61,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert "id=\"tab-status\"" in dash_html.text
         assert "id=\"tab-models\"" in dash_html.text
         assert "id=\"st-ram-reserve\"" in dash_html.text
+        assert "id=\"btn-test-watchdog\"" in dash_html.text
         assert "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128" in dash_html.text
 
         status_res = client.get("/api/status?check_gemini=1")
@@ -71,6 +76,18 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert wd_json["trigger_threshold_mb"] == 464.0
         assert wd_json["recover_threshold_mb"] == 400.0
         assert "Sẵn sàng" in wd_json["status_label"]
+
+        # Admin chạy mô phỏng an toàn quy trình 4 bước MemoryWatchdog qua POST /api/system/watchdog/test
+        app_container.user_lookup._user_cache["777888"] = (0.0, {"username": "kiwi_tester"})
+        wd_test_res = client.post("/api/system/watchdog/test")
+        assert wd_test_res.status_code == 200
+        wd_test_json = wd_test_res.json()
+        assert wd_test_json["ok"] is True
+        assert wd_test_json["simulated"] is True
+        assert wd_test_json["event"]["simulated"] is True
+        assert wd_test_json["purged_total"] >= 1
+        assert wd_test_json["memory_watchdog"]["reserve_ready"] is True
+        assert wd_test_json["memory_watchdog"]["emergency_count"] >= 1
 
         ask_res = client.put(
             "/api/config/ask",

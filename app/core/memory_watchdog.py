@@ -149,6 +149,112 @@ class MemoryWatchdog:
                 log.warning("Không ghi được Audit Log sự kiện MemoryWatchdog: %s", exc)
         return event
 
+    async def _execute_emergency_cleanup(
+        self,
+        *,
+        simulated: bool = False,
+        triggered_by: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Thực thi trọn vẹn quy trình 4 bước Sync-Before-Purge (dùng chung cho cảnh báo RSS thật và mô phỏng Admin)."""
+        self._state = "cleaning"
+        self._emergency_count += 1
+        triggered_at = datetime.now(timezone.utc).isoformat()
+        peak_rss_mb = self.current_rss_mb()
+
+        if simulated:
+            log.info(
+                "Bắt đầu MÔ PHỎNG quy trình 4 bước MemoryWatchdog (RSS hiện tại %.1f MB, ngưỡng thật %.0f MB).",
+                peak_rss_mb,
+                self.trigger_mb,
+            )
+        else:
+            log.warning(
+                "CẢNH BÁO BỘ NHỚ KHẨN CẤP: RSS đạt %.1f MB > %.0f MB (trần %.0f MB). "
+                "Bắt đầu quy trình 4 bước (Giải phóng đệm -> Đồng bộ MongoDB -> Dọn cache & GC -> Phục hồi).",
+                peak_rss_mb,
+                self.trigger_mb,
+                self.ceiling_mb,
+            )
+
+        # BƯỚC 1: Giải phóng ngay vùng đệm dự phòng 20MB lấy khoảng trống cho network I/O và serialization
+        released = self.release_reserve()
+        rss_after_release_mb = self.current_rss_mb()
+
+        # BƯỚC 2: Bắt buộc đồng bộ dữ liệu đang chờ trong RAM lên MongoDB Atlas (timeout cứng 5 giây)
+        synced_details: dict[str, int] = {}
+        sync_timed_out = False
+        sync_error: Optional[str] = None
+        if self._sync_before_purge is not None:
+            try:
+                result = await asyncio.wait_for(self._sync_before_purge(), timeout=self.sync_timeout)
+                if isinstance(result, dict):
+                    synced_details = {str(k): int(v) for k, v in result.items()}
+            except asyncio.TimeoutError:
+                sync_timed_out = True
+                sync_error = f"Quá thời gian đồng bộ MongoDB Atlas ({self.sync_timeout:g}s)"
+                log.warning("MemoryWatchdog Bước 2 quá hạn %.1fs — tiếp tục dọn cache RAM để tránh OOM.", self.sync_timeout)
+            except Exception as exc:
+                sync_error = f"{type(exc).__name__}: {exc}"[:200]
+                log.warning("MemoryWatchdog Bước 2 lỗi đồng bộ MongoDB Atlas: %s", sync_error)
+
+        # BƯỚC 3: Chỉ sau khi đồng bộ xong (hoặc timeout) mới xóa cache RAM không thiết yếu & ép GC
+        purged_details: dict[str, int] = {}
+        if self._purge_caches is not None:
+            try:
+                purged = self._purge_caches()
+                if isinstance(purged, dict):
+                    purged_details.update({str(k): int(v) for k, v in purged.items()})
+            except Exception as exc:
+                log.warning("MemoryWatchdog Bước 3 lỗi khi dọn cache: %s", exc)
+
+        discord_msgs_cleared = self._purge_discord_message_cache()
+        if discord_msgs_cleared:
+            purged_details["discord_messages"] = discord_msgs_cleared
+
+        gc_collected = gc.collect()
+        rss_after_purge_mb = self.current_rss_mb()
+
+        synced_total = sum(v for k, v in synced_details.items() if k != "total")
+        if "total" in synced_details and synced_total == 0:
+            synced_total = synced_details["total"]
+        purged_total = sum(purged_details.values())
+
+        event: dict[str, Any] = {
+            "simulated": bool(simulated),
+            "triggered_by": dict(triggered_by) if triggered_by else None,
+            "triggered_at": triggered_at,
+            "peak_rss_mb": peak_rss_mb,
+            "rss_after_release_mb": rss_after_release_mb,
+            "rss_after_purge_mb": rss_after_purge_mb,
+            "reserve_released": released,
+            "synced_details": synced_details,
+            "synced_total": synced_total,
+            "sync_timed_out": sync_timed_out,
+            "sync_error": sync_error,
+            "purged_details": purged_details,
+            "purged_total": purged_total,
+            "gc_collected": gc_collected,
+            "recovered_at": None,
+            "recovered_rss_mb": None,
+            "reserve_reallocated": False,
+        }
+        self._pending_recovery_event = event
+        self._last_event = dict(event)
+
+        # BƯỚC 4: Nếu RSS đã ở dưới ngưỡng 400MB -> cấp phát lại ngay vùng đệm 20MB và ghi Audit Log
+        if rss_after_purge_mb < self.recover_mb:
+            return await self._finalize_recovery(rss_after_purge_mb)
+
+        self._state = "released_waiting_recovery"
+        log.warning(
+            "MemoryWatchdog sau dọn RAM: RSS %.1f MB (vẫn >= %.0f MB). "
+            "Tạm giữ trạng thái giải phóng đệm cho tới khi RSS < %.0f MB.",
+            rss_after_purge_mb,
+            self.recover_mb,
+            self.recover_mb,
+        )
+        return event
+
     async def check_once(self) -> Optional[dict[str, Any]]:
         """Thực hiện 1 nhịp kiểm tra RSS: kích hoạt quy trình 4 bước nếu > 464MB hoặc cấp phát lại khi < 400MB."""
         async with self._lock:
@@ -164,95 +270,16 @@ class MemoryWatchdog:
             if rss_mb <= self.trigger_mb:
                 return None
 
-            # Kích hoạt quy trình khẩn cấp 4 bước
-            self._state = "cleaning"
-            self._emergency_count += 1
-            triggered_at = datetime.now(timezone.utc).isoformat()
-            peak_rss_mb = rss_mb
-            log.warning(
-                "CẢNH BÁO BỘ NHỚ KHẨN CẤP: RSS đạt %.1f MB > %.0f MB (trần %.0f MB). "
-                "Bắt đầu quy trình 4 bước (Giải phóng đệm -> Đồng bộ MongoDB -> Dọn cache & GC -> Phục hồi).",
-                peak_rss_mb,
-                self.trigger_mb,
-                self.ceiling_mb,
-            )
+            return await self._execute_emergency_cleanup(simulated=False)
 
-            # BƯỚC 1: Giải phóng ngay vùng đệm dự phòng 20MB lấy khoảng trống cho network I/O và serialization
-            released = self.release_reserve()
-            rss_after_release_mb = self.current_rss_mb()
-
-            # BƯỚC 2: Bắt buộc đồng bộ dữ liệu đang chờ trong RAM lên MongoDB Atlas (timeout cứng 5 giây)
-            synced_details: dict[str, int] = {}
-            sync_timed_out = False
-            sync_error: Optional[str] = None
-            if self._sync_before_purge is not None:
-                try:
-                    result = await asyncio.wait_for(self._sync_before_purge(), timeout=self.sync_timeout)
-                    if isinstance(result, dict):
-                        synced_details = {str(k): int(v) for k, v in result.items()}
-                except asyncio.TimeoutError:
-                    sync_timed_out = True
-                    sync_error = f"Quá thời gian đồng bộ MongoDB Atlas ({self.sync_timeout:g}s)"
-                    log.warning("MemoryWatchdog Bước 2 quá hạn %.1fs — tiếp tục dọn cache RAM để tránh OOM.", self.sync_timeout)
-                except Exception as exc:
-                    sync_error = f"{type(exc).__name__}: {exc}"[:200]
-                    log.warning("MemoryWatchdog Bước 2 lỗi đồng bộ MongoDB Atlas: %s", sync_error)
-
-            # BƯỚC 3: Chỉ sau khi đồng bộ xong (hoặc timeout) mới xóa cache RAM không thiết yếu & ép GC
-            purged_details: dict[str, int] = {}
-            if self._purge_caches is not None:
-                try:
-                    purged = self._purge_caches()
-                    if isinstance(purged, dict):
-                        purged_details.update({str(k): int(v) for k, v in purged.items()})
-                except Exception as exc:
-                    log.warning("MemoryWatchdog Bước 3 lỗi khi dọn cache: %s", exc)
-
-            discord_msgs_cleared = self._purge_discord_message_cache()
-            if discord_msgs_cleared:
-                purged_details["discord_messages"] = discord_msgs_cleared
-
-            gc_collected = gc.collect()
-            rss_after_purge_mb = self.current_rss_mb()
-
-            synced_total = sum(v for k, v in synced_details.items() if k != "total")
-            if "total" in synced_details and synced_total == 0:
-                synced_total = synced_details["total"]
-            purged_total = sum(purged_details.values())
-
-            event: dict[str, Any] = {
-                "triggered_at": triggered_at,
-                "peak_rss_mb": peak_rss_mb,
-                "rss_after_release_mb": rss_after_release_mb,
-                "rss_after_purge_mb": rss_after_purge_mb,
-                "reserve_released": released,
-                "synced_details": synced_details,
-                "synced_total": synced_total,
-                "sync_timed_out": sync_timed_out,
-                "sync_error": sync_error,
-                "purged_details": purged_details,
-                "purged_total": purged_total,
-                "gc_collected": gc_collected,
-                "recovered_at": None,
-                "recovered_rss_mb": None,
-                "reserve_reallocated": False,
-            }
-            self._pending_recovery_event = event
-            self._last_event = dict(event)
-
-            # BƯỚC 4: Nếu RSS đã hạ xuống dưới 400MB -> cấp phát lại ngay vùng đệm 20MB và ghi nhật ký
-            if rss_after_purge_mb < self.recover_mb:
-                return await self._finalize_recovery(rss_after_purge_mb)
-
-            self._state = "released_waiting_recovery"
-            log.warning(
-                "MemoryWatchdog sau dọn RAM: RSS %.1f MB (vẫn >= %.0f MB). "
-                "Tạm giữ trạng thái giải phóng đệm cho tới khi RSS < %.0f MB.",
-                rss_after_purge_mb,
-                self.recover_mb,
-                self.recover_mb,
-            )
-            return event
+    async def simulate_emergency_cleanup(
+        self,
+        *,
+        triggered_by: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Chạy mô phỏng an toàn toàn bộ quy trình 4 bước Sync-Before-Purge theo yêu cầu Admin mà không cần ép tăng RAM."""
+        async with self._lock:
+            return await self._execute_emergency_cleanup(simulated=True, triggered_by=triggered_by)
 
     async def run_forever(self, is_closed: Callable[[], bool]) -> None:
         """Vòng lặp nền kiểm tra RSS mỗi 1500ms cho đến khi tiến trình đóng."""

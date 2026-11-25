@@ -61,9 +61,21 @@
             <span id="st-ram" class="font-mono text-slate-300">—</span>
             <span id="st-ram-rss">Tiến trình: —</span>
           </div>
-          <div class="flex items-center justify-between gap-2 text-[11px] bg-[#0a0d12] border border-[#1e232e] rounded-lg px-2.5 py-1.5">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] bg-[#0a0d12] border border-[#1e232e] rounded-lg px-2.5 py-1.5">
             <span id="st-ram-reserve" class="font-medium text-emerald-400 truncate">🛡️ Dự phòng 20MB: Sẵn sàng</span>
-            <span id="st-ram-watchdog-meta" class="font-mono text-[10px] text-[#5e6778] shrink-0">Ngưỡng 464MB</span>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span id="st-ram-watchdog-meta" class="font-mono text-[10px] text-[#5e6778]">Ngưỡng 464MB</span>
+              {% if user.is_admin %}
+              <button
+                id="btn-test-watchdog"
+                type="button"
+                title="Mô phỏng quy trình 4 bước Sync-Before-Purge (không gây tăng RAM thật)"
+                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-rose-600/20 border border-[#2a3140] hover:border-rose-500/40 text-[10px] font-medium text-slate-200 hover:text-rose-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                🧪 Test Watchdog
+              </button>
+              {% endif %}
+            </div>
           </div>
           <div class="flex items-center justify-between text-[11px] text-[#5e6778] border-t border-[#1e232e] pt-2">
             <span id="st-threads">— luồng</span>
