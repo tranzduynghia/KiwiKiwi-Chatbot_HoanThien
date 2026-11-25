@@ -67,8 +67,9 @@ def sanitize_presence_config(
     activity_type: str,
     activity_text: str,
     custom_status: str = "",
-) -> dict[str, str]:
-    """Kiểm tra hợp lệ trạng thái trực tuyến, Custom Status (bong bóng chữ) và hoạt động chính của bot."""
+    auto_rotate: bool = False,
+) -> dict[str, Any]:
+    """Kiểm tra hợp lệ trạng thái trực tuyến, Custom Status (bong bóng chữ), hoạt động chính và chế độ luân phiên."""
     clean_status = str(status or "online").strip().lower()
     if clean_status not in ALLOWED_PRESENCE_STATUSES:
         raise ValueError("Trạng thái hiển thị không hợp lệ (chỉ nhận online, idle, dnd, invisible).")
@@ -95,4 +96,5 @@ def sanitize_presence_config(
         "custom_status": clean_custom,
         "activity_type": clean_type,
         "activity_text": clean_text,
+        "auto_rotate": bool(auto_rotate),
     }

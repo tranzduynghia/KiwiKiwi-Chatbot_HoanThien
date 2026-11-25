@@ -1,8 +1,9 @@
 /**
  * Bộ điều khiển thẻ "Bot Presence & Status":
  * - Chọn trạng thái trực tuyến (online / idle / dnd / invisible) kèm chấm màu
- * - Tùy chỉnh song song Custom Status (bong bóng chữ cạnh avatar) VÀ Hoạt động chính (None / Playing / Listening to / Watching / Competing in)
- * - Xem trước trực tiếp giao diện hồ sơ Discord và gọi PUT /api/config/presence để áp dụng tức thì
+ * - Tùy chỉnh Custom Status (bong bóng chữ) và Hoạt động chính (None / Playing / Listening to / Watching / Competing in)
+ * - Chế độ Smart Merge (mặc định khi điền cả 2): gộp thành 1 bong bóng chữ `Custom · Prefix Activity` để Discord không ẩn
+ * - Tùy chọn "Luân phiên tự động (mỗi 20s)": bot đổi qua lại giữa bong bóng chữ và hoạt động chính mỗi 20 giây
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
@@ -22,8 +23,34 @@ const ACTIVITY_PREFIX = {
   none: "",
 };
 
+const PREVIEW_ROTATE_MS = 3500;
+
 export function createPresenceCardController({ onConfigSaved }) {
   let selectedStatus = "online";
+  let previewRotateStep = 0;
+  let previewRotateTimer = null;
+
+  function stopPreviewRotation() {
+    if (previewRotateTimer) {
+      clearInterval(previewRotateTimer);
+      previewRotateTimer = null;
+    }
+  }
+
+  function ensurePreviewRotation(shouldRotate) {
+    if (!shouldRotate) {
+      stopPreviewRotation();
+      previewRotateStep = 0;
+      return;
+    }
+    if (!previewRotateTimer) {
+      previewRotateTimer = setInterval(() => {
+        if (document.hidden) return;
+        previewRotateStep = (previewRotateStep + 1) % 2;
+        renderPreview();
+      }, PREVIEW_ROTATE_MS);
+    }
+  }
 
   function updateStatusButtons() {
     document.querySelectorAll(".presence-status-btn").forEach((btn) => {
@@ -31,10 +58,24 @@ export function createPresenceCardController({ onConfigSaved }) {
     });
   }
 
+  function setCustomBubble(customWrapEl, customTextEl, text) {
+    if (!customWrapEl || !customTextEl) return;
+    if (text) {
+      customWrapEl.classList.remove("hidden");
+      customTextEl.textContent = text;
+    } else {
+      customWrapEl.classList.add("hidden");
+      customTextEl.textContent = "";
+    }
+  }
+
   function renderPreview() {
     const customEl = document.getElementById("presence-custom-status");
     const typeEl = document.getElementById("presence-activity-type");
     const textEl = document.getElementById("presence-activity-text");
+    const rotateEl = document.getElementById("presence-auto-rotate");
+    const modeHintEl = document.getElementById("presence-mode-hint");
+    const modeBadgeEl = document.getElementById("presence-preview-mode-badge");
     const dotEl = document.getElementById("presence-preview-dot");
     const customWrapEl = document.getElementById("presence-preview-custom-wrap");
     const customTextEl = document.getElementById("presence-preview-custom-text");
@@ -45,36 +86,73 @@ export function createPresenceCardController({ onConfigSaved }) {
     const customVal = customEl ? customEl.value.trim() : "";
     const activityType = typeEl.value || "none";
     const textVal = textEl.value.trim();
+    const autoRotate = Boolean(rotateEl && rotateEl.checked);
     textEl.disabled = activityType === "none";
 
     const meta = STATUS_META[selectedStatus] || STATUS_META.online;
     dotEl.className = `w-3.5 h-3.5 rounded-full ${meta.dotClass} border-2 border-[#0a0d12] absolute -bottom-0.5 -right-0.5 transition-colors duration-200`;
     statusLabelEl.textContent = meta.label;
 
-    // Hiển thị hoặc ẩn bong bóng Custom Status cạnh avatar
-    if (customWrapEl && customTextEl) {
-      if (customVal) {
-        customWrapEl.classList.remove("hidden");
-        customTextEl.textContent = customVal;
-      } else {
-        customWrapEl.classList.add("hidden");
-        customTextEl.textContent = "";
-      }
+    const hasCustom = Boolean(customVal);
+    const hasPrimary = activityType !== "none" && Boolean(textVal);
+    const prefix = ACTIVITY_PREFIX[activityType] || "Listening to";
+
+    if (modeHintEl) {
+      modeHintEl.textContent = autoRotate
+        ? "Đang bật: Bot sẽ tự đổi qua lại giữa Bong bóng Custom Status và Hoạt động chính mỗi 20 giây."
+        : "Tắt (mặc định): Gộp thông minh thành 1 bong bóng chữ (Custom Status · Hoạt động) để Discord không ẩn hoạt động chính.";
     }
 
-    // Hiển thị dòng Hoạt động chính (có thể song song cùng bong bóng Custom Status)
-    const hasPrimaryActivity = activityType !== "none" && Boolean(textVal);
-    if (hasPrimaryActivity) {
-      const prefix = ACTIVITY_PREFIX[activityType] || "Listening to";
-      activityEl.classList.remove("hidden");
-      activityEl.innerHTML = `${escapeHtml(prefix)} <strong class="text-slate-200 font-medium">${escapeHtml(textVal)}</strong>`;
-    } else if (customVal) {
+    // Trường hợp điền CẢ HAI: áp dụng Smart Merge hoặc Auto-Rotate 20s
+    if (hasCustom && hasPrimary) {
+      if (autoRotate) {
+        ensurePreviewRotation(true);
+        if (previewRotateStep === 0) {
+          setCustomBubble(customWrapEl, customTextEl, customVal);
+          activityEl.classList.add("hidden");
+          activityEl.innerHTML = "";
+          if (modeBadgeEl) modeBadgeEl.textContent = "🔄 Luân phiên 20s · 1/2 Bong bóng";
+        } else {
+          setCustomBubble(customWrapEl, customTextEl, "");
+          activityEl.classList.remove("hidden");
+          activityEl.innerHTML = `${escapeHtml(prefix)} <strong class="text-slate-200 font-medium">${escapeHtml(textVal)}</strong>`;
+          if (modeBadgeEl) modeBadgeEl.textContent = "🔄 Luân phiên 20s · 2/2 Hoạt động";
+        }
+        return;
+      }
+
+      // Smart Merge mặc định: gộp thành 1 bong bóng chữ phân tách bằng " · "
+      ensurePreviewRotation(false);
+      const mergedText = `${customVal} · ${prefix} ${textVal}`.slice(0, 128);
+      setCustomBubble(customWrapEl, customTextEl, mergedText);
       activityEl.classList.add("hidden");
       activityEl.innerHTML = "";
-    } else {
-      activityEl.classList.remove("hidden");
-      activityEl.innerHTML = '<span class="text-[#5e6778] italic">Không hiển thị hoạt động</span>';
+      if (modeBadgeEl) modeBadgeEl.textContent = "✨ Smart Merge (1 bong bóng)";
+      return;
     }
+
+    ensurePreviewRotation(false);
+
+    if (hasCustom) {
+      setCustomBubble(customWrapEl, customTextEl, customVal);
+      activityEl.classList.add("hidden");
+      activityEl.innerHTML = "";
+      if (modeBadgeEl) modeBadgeEl.textContent = "💬 Chỉ Bong bóng chữ";
+      return;
+    }
+
+    if (hasPrimary) {
+      setCustomBubble(customWrapEl, customTextEl, "");
+      activityEl.classList.remove("hidden");
+      activityEl.innerHTML = `${escapeHtml(prefix)} <strong class="text-slate-200 font-medium">${escapeHtml(textVal)}</strong>`;
+      if (modeBadgeEl) modeBadgeEl.textContent = "🎮 Hoạt động chính";
+      return;
+    }
+
+    setCustomBubble(customWrapEl, customTextEl, "");
+    activityEl.classList.remove("hidden");
+    activityEl.innerHTML = '<span class="text-[#5e6778] italic">Không hiển thị hoạt động</span>';
+    if (modeBadgeEl) modeBadgeEl.textContent = "Không hoạt động";
   }
 
   function fill(config) {
@@ -84,6 +162,7 @@ export function createPresenceCardController({ onConfigSaved }) {
     const customEl = document.getElementById("presence-custom-status");
     const typeEl = document.getElementById("presence-activity-type");
     const textEl = document.getElementById("presence-activity-text");
+    const rotateEl = document.getElementById("presence-auto-rotate");
 
     let customVal = presence.custom_status ?? "";
     let activityType = presence.activity_type || "listening";
@@ -105,7 +184,9 @@ export function createPresenceCardController({ onConfigSaved }) {
     if (customEl) customEl.value = customVal;
     if (typeEl) typeEl.value = activityType;
     if (textEl) textEl.value = activityText;
+    if (rotateEl) rotateEl.checked = Boolean(presence.auto_rotate);
 
+    previewRotateStep = 0;
     updateStatusButtons();
     renderPreview();
   }
@@ -132,9 +213,16 @@ export function createPresenceCardController({ onConfigSaved }) {
     const customEl = document.getElementById("presence-custom-status");
     const typeEl = document.getElementById("presence-activity-type");
     const textEl = document.getElementById("presence-activity-text");
+    const rotateEl = document.getElementById("presence-auto-rotate");
     if (customEl) customEl.addEventListener("input", renderPreview);
     if (typeEl) typeEl.addEventListener("change", renderPreview);
     if (textEl) textEl.addEventListener("input", renderPreview);
+    if (rotateEl) {
+      rotateEl.addEventListener("change", () => {
+        previewRotateStep = 0;
+        renderPreview();
+      });
+    }
 
     const saveBtn = document.getElementById("btn-save-presence");
     if (saveBtn) {
@@ -142,6 +230,7 @@ export function createPresenceCardController({ onConfigSaved }) {
         const customStatus = customEl ? customEl.value.trim() : "";
         const activityType = typeEl ? typeEl.value : "none";
         const activityText = textEl ? textEl.value.trim() : "";
+        const autoRotate = Boolean(rotateEl && rotateEl.checked);
         saveBtn.disabled = true;
         try {
           const res = await apiRequest("/api/config/presence", {
@@ -151,6 +240,7 @@ export function createPresenceCardController({ onConfigSaved }) {
               custom_status: customStatus,
               activity_type: activityType,
               activity_text: activityText,
+              auto_rotate: autoRotate,
             }),
           });
           showToast(

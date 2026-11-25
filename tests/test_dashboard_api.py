@@ -87,38 +87,49 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert prompt_res.status_code == 200
         assert prompt_res.json()["config"]["append_current_date"] is False
 
-        # Kiểm tra cập nhật ĐỒNG THỜI Custom Status (bong bóng chữ) + Hoạt động chính (Listening to)
-        dual_presence_res = client.put(
+        # 1) Smart Merge mặc định khi điền cả Custom Status + Hoạt động chính (auto_rotate=False)
+        merge_presence_res = client.put(
             "/api/config/presence",
             json={
                 "status": "online",
                 "custom_status": "Ngôi nhà nhỏ của KiwiKiwi~",
                 "activity_type": "listening",
                 "activity_text": "m!help",
+                "auto_rotate": False,
             },
         )
-        assert dual_presence_res.status_code == 200
-        dual_json = dual_presence_res.json()
-        assert dual_json["applied_live"] is True
-        assert dual_json["config"]["presence"] == {
+        assert merge_presence_res.status_code == 200
+        merge_json = merge_presence_res.json()
+        assert merge_json["applied_live"] is True
+        assert merge_json["config"]["presence"] == {
             "status": "online",
             "custom_status": "Ngôi nhà nhỏ của KiwiKiwi~",
             "activity_type": "listening",
             "activity_text": "m!help",
+            "auto_rotate": False,
         }
-        assert len(fake_bot.gateway_payloads) == 1
-        gw_payload = fake_bot.gateway_payloads[-1]
-        assert gw_payload["op"] == 3
-        assert gw_payload["d"]["status"] == "online"
-        gw_activities = gw_payload["d"]["activities"]
-        assert len(gw_activities) == 2
-        assert gw_activities[0]["type"] == 4
-        assert gw_activities[0]["state"] == "Ngôi nhà nhỏ của KiwiKiwi~"
-        assert gw_activities[1]["type"] == 2
-        assert gw_activities[1]["name"] == "m!help"
-        assert len(fake_bot.guilds[0].me.activities) == 2
+        assert len(fake_bot.presence_updates) == 1
+        merged_status, merged_activity = fake_bot.presence_updates[-1]
+        assert str(merged_status) == "online"
+        assert merged_activity is not None
+        assert merged_activity.state == "Ngôi nhà nhỏ của KiwiKiwi~ · Listening to m!help"
 
-        # Kiểm tra cập nhật chỉ Hoạt động chính (không có bong bóng chữ)
+        # 2) Bật chế độ Luân phiên tự động (mỗi 20s) -> lưu auto_rotate=True và áp dụng bước 1 (Custom Status)
+        rotate_presence_res = client.put(
+            "/api/config/presence",
+            json={
+                "status": "idle",
+                "custom_status": "Ngôi nhà nhỏ của KiwiKiwi~",
+                "activity_type": "listening",
+                "activity_text": "m!help",
+                "auto_rotate": True,
+            },
+        )
+        assert rotate_presence_res.status_code == 200
+        assert rotate_presence_res.json()["config"]["presence"]["auto_rotate"] is True
+        assert getattr(fake_bot, "_presence_rotate_task", None) is not None
+
+        # 3) Kiểm tra cập nhật chỉ Hoạt động chính (tự động dừng vòng lặp luân phiên cũ)
         presence_res = client.put(
             "/api/config/presence",
             json={
@@ -126,6 +137,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
                 "custom_status": "",
                 "activity_type": "watching",
                 "activity_text": "m!help · KiwiKiwi",
+                "auto_rotate": False,
             },
         )
         assert presence_res.status_code == 200
@@ -136,8 +148,9 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
             "custom_status": "",
             "activity_type": "watching",
             "activity_text": "m!help · KiwiKiwi",
+            "auto_rotate": False,
         }
-        assert len(fake_bot.presence_updates) == 1
+        assert getattr(fake_bot, "_presence_rotate_task", None) is None
         applied_status, applied_activity = fake_bot.presence_updates[-1]
         assert str(applied_status) == "dnd"
         assert applied_activity is not None and applied_activity.name == "m!help · KiwiKiwi"

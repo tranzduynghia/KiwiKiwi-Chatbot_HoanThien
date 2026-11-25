@@ -177,6 +177,7 @@ def build_default_config() -> dict[str, Any]:
             "custom_status": "",
             "activity_type": "listening",
             "activity_text": "m!help",
+            "auto_rotate": False,
         },
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",

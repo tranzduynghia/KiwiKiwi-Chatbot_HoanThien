@@ -14,7 +14,7 @@ from discord import app_commands
 from google import genai
 
 from app.bot.error_handler import register_error_handler
-from app.bot.presence import apply_bot_presence
+from app.bot.presence import apply_bot_presence, stop_presence_rotation
 from app.core.settings import BOT_VERSION
 from app.core.utils import format_bytes
 from app.features.chat.commands import register_chat_commands
@@ -179,7 +179,8 @@ class AskBot(discord.Client):
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self) -> None:
-        """Dừng máy chủ Web Dashboard, đóng kết nối MongoDB Atlas và đóng client Discord an toàn."""
+        """Dừng tác vụ luân phiên Presence, máy chủ Web Dashboard, MongoDB Atlas và đóng client Discord an toàn."""
+        stop_presence_rotation(self)
         if self._web_server is not None:
             self._web_server.should_exit = True
         if self._web_task is not None:

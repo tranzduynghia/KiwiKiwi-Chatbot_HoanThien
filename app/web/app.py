@@ -1,6 +1,7 @@
 """Factory khởi tạo ứng dụng FastAPI, gắn tài nguyên tĩnh và lắp ghép router các tính năng."""
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -8,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from app.bot.presence import apply_bot_presence
+from app.bot.presence import apply_bot_presence, stop_presence_rotation
 from app.features.audit.router import create_audit_router
 from app.features.auth.router import create_auth_router
 from app.features.config.router import create_config_router
@@ -25,7 +26,13 @@ STATIC_DIR = PROJECT_ROOT / "static"
 
 def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
     """Lắp ghép FastAPI app từ container phụ thuộc và gắn toàn bộ router của từng tính năng."""
-    app = FastAPI(title="KiwiKiwi Bot Dashboard", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        yield
+        stop_presence_rotation(get_bot())
+
+    app = FastAPI(title="KiwiKiwi Bot Dashboard", docs_url=None, redoc_url=None, lifespan=_lifespan)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
     if STATIC_DIR.exists():
