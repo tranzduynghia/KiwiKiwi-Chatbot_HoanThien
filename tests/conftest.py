@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from types import SimpleNamespace
 from typing import Any, Optional
 
@@ -19,7 +20,7 @@ class FakeCursor:
 
     def sort(self, field: str, direction: int = 1) -> "FakeCursor":
         reverse = direction < 0
-        self._docs.sort(key=lambda item: item.get(field) or "", reverse=reverse)
+        self._docs.sort(key=lambda item: str(item.get(field) or ""), reverse=reverse)
         return self
 
     async def to_list(self, length: Optional[int] = None) -> list[dict[str, Any]]:
@@ -37,15 +38,40 @@ class FakeCollection:
         self.indexes: dict[str, Any] = {}
         self.fail_writes: bool = False
 
+    def _extract_values(self, doc: dict[str, Any], dotted_key: str) -> list[Any]:
+        """Trích xuất giá trị theo đường dẫn chấm (kể cả mảng lồng như `messages.text`)."""
+        parts = dotted_key.split(".")
+        current: list[Any] = [doc]
+        for part in parts:
+            next_vals: list[Any] = []
+            for item in current:
+                if isinstance(item, dict) and part in item:
+                    val = item[part]
+                    if isinstance(val, list):
+                        next_vals.extend(val)
+                    else:
+                        next_vals.append(val)
+            current = next_vals
+        return current
+
     def _matches(self, doc: dict[str, Any], flt: dict[str, Any]) -> bool:
         for key, expected in (flt or {}).items():
-            actual = doc.get(key)
+            if key == "$or":
+                if not any(self._matches(doc, sub_flt) for sub_flt in expected):
+                    return False
+                continue
+            values = self._extract_values(doc, key) if "." in key else [doc.get(key)]
             if isinstance(expected, dict):
-                if "$lte" in expected and not (actual is not None and actual <= expected["$lte"]):
+                if "$regex" in expected:
+                    flags = re.IGNORECASE if "i" in str(expected.get("$options", "")) else 0
+                    pattern = re.compile(expected["$regex"], flags)
+                    if not any(isinstance(v, str) and pattern.search(v) for v in values):
+                        return False
+                if "$lte" in expected and not any(v is not None and v <= expected["$lte"] for v in values):
                     return False
-                if "$gt" in expected and not (actual is not None and actual > expected["$gt"]):
+                if "$gt" in expected and not any(v is not None and v > expected["$gt"] for v in values):
                     return False
-            elif actual != expected:
+            elif expected not in values:
                 return False
         return True
 

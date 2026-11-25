@@ -14,6 +14,7 @@ from app.features.config.router import create_config_router
 from app.features.models.router import create_models_router
 from app.features.monitoring.router import create_monitoring_router
 from app.features.permissions.router import create_permissions_router
+from app.features.sessions.router import create_sessions_router
 from app.web.pages import create_pages_router
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -74,6 +75,12 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         create_permissions_router(
             permission_service=container.permission_service,
             sync_coordinator=container.sync_coordinator,
+            auth_deps=container.auth_deps,
+        )
+    )
+    app.include_router(
+        create_sessions_router(
+            session_repo=container.session_repo,
             auth_deps=container.auth_deps,
         )
     )

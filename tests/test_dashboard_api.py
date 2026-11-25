@@ -119,6 +119,20 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert client.put("/api/permissions/users/helper1/password", json={"password": "NewPass456!"}).status_code == 200
         assert client.delete("/api/permissions/users/helper1").status_code == 200
 
+        # Kiểm tra tìm kiếm nội dung phiên chat từ MongoDB Atlas qua /api/sessions/search
+        await app_container.session_repo.save_turn(
+            777888,
+            "Kiểm tra từ khóa KiwiKiwi",
+            "Phản hồi mẫu cho KiwiKiwi",
+            None,
+            "gemini-2.5-flash",
+        )
+        search_res = client.get("/api/sessions/search?q=KiwiKiwi")
+        assert search_res.status_code == 200
+        search_json = search_res.json()
+        assert search_json["total"] == 2
+        assert all({"chat_id", "content", "timestamp"} <= set(row.keys()) for row in search_json["items"])
+
         # Kiểm tra Audit Log đã ghi nhận toàn bộ thay đổi
         audit_res = client.get("/api/audit-logs")
         assert audit_res.status_code == 200

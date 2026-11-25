@@ -9,6 +9,7 @@ import { createPromptConfigTabController } from "./features/config/promptConfigT
 import { createModelsTabController } from "./features/models/modelsTab.js";
 import { createStatusTabController } from "./features/monitoring/statusTab.js";
 import { createPermissionsTabController } from "./features/permissions/permissionsTab.js";
+import { createSessionsTabController } from "./features/sessions/sessionsTab.js";
 
 function readBootstrapData() {
   const el = document.getElementById("dashboard-bootstrap");
@@ -22,6 +23,7 @@ const bootstrap = readBootstrapData();
 
 const statusTab = createStatusTabController();
 const permissionsTab = createPermissionsTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
+const sessionsTab = createSessionsTabController();
 const auditTab = createAuditTabController();
 
 let askConfigTab;
@@ -70,6 +72,8 @@ function activateTab(targetTab) {
 
   if (targetTab === "perms") {
     permissionsTab.loadPermissions();
+  } else if (targetTab === "sessions") {
+    sessionsTab.searchSessions();
   } else if (targetTab === "audit") {
     auditTab.loadAuditLogs();
   }
@@ -106,30 +110,33 @@ function bindShellControls() {
     topAuditBtn.addEventListener("click", () => activateTab("audit"));
   }
 
-  // Ô tìm kiếm nhanh trên Topbar: nhấn Enter để lọc model hoặc nhảy tới tab tương ứng
+  // Ô tìm kiếm nhanh trên Topbar: nhấn Enter để nhảy tab hoặc tra cứu trực tiếp phiên chat
   const globalSearch = document.getElementById("global-search");
   if (globalSearch) {
     globalSearch.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
-      const q = globalSearch.value.trim().toLowerCase();
+      const raw = globalSearch.value.trim();
+      const q = raw.toLowerCase();
       if (!q) return;
       if (q.includes("gemini") || q.includes("model") || q.includes("flash") || q.includes("pro")) {
         activateTab("models");
         const modSearch = document.getElementById("mod-search");
         if (modSearch) {
-          modSearch.value = globalSearch.value.trim();
+          modSearch.value = raw;
           modSearch.dispatchEvent(new Event("input"));
         }
       } else if (q.includes("prompt") || q.includes("ocr") || q.includes("system")) {
         activateTab("prompt");
-      } else if (q.includes("ask") || q.includes("cooldown") || q.includes("session")) {
+      } else if (q.includes("ask") || q.includes("cooldown")) {
         activateTab("ask");
       } else if (q.includes("perm") || q.includes("admin") || q.includes("user") || q.includes("quyền")) {
         activateTab("perms");
       } else if (q.includes("audit") || q.includes("log") || q.includes("nhật ký")) {
         activateTab("audit");
       } else {
-        activateTab("status");
+        // Mặc định tìm kiếm trực tiếp trong nội dung phiên chat trên MongoDB Atlas
+        activateTab("sessions");
+        sessionsTab.setQueryAndSearch(raw);
       }
     });
   }
@@ -142,6 +149,7 @@ askConfigTab.bindEvents();
 promptConfigTab.bindEvents();
 modelsTab.bindEvents();
 permissionsTab.bindEvents();
+sessionsTab.bindEvents();
 auditTab.bindEvents();
 
 statusTab.loadStatus(false);

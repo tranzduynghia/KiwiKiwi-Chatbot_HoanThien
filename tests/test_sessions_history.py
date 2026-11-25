@@ -56,3 +56,23 @@ async def test_session_repository_save_load_and_end(app_container, fake_db):
     assert ended is not None
     assert ended["turns"] == 2
     assert await app_container.session_repo.load(uid) is None
+
+
+@pytest.mark.asyncio
+async def test_session_repository_search_messages(app_container, fake_db):
+    """Kiểm tra tìm kiếm nội dung phiên chat theo từ khóa, vai trò và mã phiên trên MongoDB."""
+    await app_container.session_repo.attach_db(fake_db)
+    await app_container.session_repo.save_turn(1001, "Hướng dẫn cài đặt Python", "Bạn hãy tải Python 3.12.", None, "gemini-2.5-flash")
+    await app_container.session_repo.save_turn(2002, "Thời tiết hôm nay", "Trời nắng đẹp.", None, "gemini-3.5-flash")
+
+    # Tìm theo từ khóa không phân biệt hoa thường
+    python_hits = await app_container.session_repo.search_messages(query="python")
+    assert len(python_hits) == 2
+    assert all(hit["chat_id"] and hit["timestamp"] for hit in python_hits)
+
+    # Lọc thêm theo vai trò model và user_id
+    model_only = await app_container.session_repo.search_messages(query="python", role="model", user_id="1001")
+    assert len(model_only) == 1
+    assert model_only[0]["role"] == "model"
+    assert "Python 3.12" in model_only[0]["content"]
+

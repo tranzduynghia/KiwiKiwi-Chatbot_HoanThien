@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -249,3 +250,80 @@ class SessionRepository:
     async def archive_count(self) -> Optional[int]:
         """Ước lượng tổng số phiên đã được lưu trữ trong collection `archives`."""
         return await self._run(lambda: self.archives_col.estimated_document_count())
+
+    async def search_messages(
+        self,
+        *,
+        query: str = "",
+        user_id: str = "",
+        role: str = "",
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Tìm kiếm nội dung tin nhắn trong các phiên chat từ MongoDB Atlas (`archives`)."""
+        if self.archives_col is None:
+            return []
+
+        capped_limit = max(1, min(300, int(limit)))
+        clean_query = (query or "").strip()
+        clean_uid = (user_id or "").strip()
+        clean_role = (role or "").strip().lower()
+        if clean_role not in ("user", "model"):
+            clean_role = ""
+
+        # Xây dựng bộ lọc MongoDB an toàn (thoát ký tự regex đặc biệt để tránh lỗi/ReDoS)
+        mongo_filter: dict[str, Any] = {}
+        if clean_uid:
+            mongo_filter["user_id_str"] = clean_uid
+        if clean_query:
+            escaped = re.escape(clean_query)
+            mongo_filter["$or"] = [
+                {"messages.text": {"$regex": escaped, "$options": "i"}},
+                {"_id": {"$regex": escaped, "$options": "i"}},
+                {"user_id_str": {"$regex": escaped, "$options": "i"}},
+            ]
+
+        # Lấy tối đa 250 phiên gần nhất khớp điều kiện rồi tách từng tin nhắn khớp từ khóa
+        docs = await self._run(
+            lambda: self.archives_col.find(mongo_filter).sort("last_active", -1).to_list(250),
+            [],
+        )
+
+        query_lower = clean_query.lower()
+        matched_rows: list[dict[str, Any]] = []
+
+        for doc in docs or []:
+            chat_id = str(doc.get("_id") or "")
+            uid_str = str(doc.get("user_id_str") or doc.get("user_id") or "")
+            session_status = "active" if doc.get("ended_at") is None else "archived"
+            fallback_dt = doc.get("last_active") or doc.get("created_at")
+            id_matched = bool(query_lower and (query_lower in chat_id.lower() or query_lower in uid_str.lower()))
+
+            for msg in doc.get("messages") or []:
+                msg_role = str(msg.get("role") or "")
+                if clean_role and msg_role != clean_role:
+                    continue
+                msg_text = str(msg.get("text") or "")
+                if query_lower and not id_matched and query_lower not in msg_text.lower():
+                    continue
+
+                raw_at = msg.get("at") or fallback_dt
+                if isinstance(raw_at, datetime):
+                    ts_iso = raw_at.isoformat()
+                else:
+                    ts_iso = str(raw_at) if raw_at else ""
+
+                matched_rows.append({
+                    "chat_id": chat_id,
+                    "chat_id_short": chat_id[:8] if chat_id else "—",
+                    "user_id": uid_str,
+                    "role": msg_role or "user",
+                    "model": msg.get("model"),
+                    "content": msg_text,
+                    "timestamp": ts_iso,
+                    "session_status": session_status,
+                })
+
+        # Sắp xếp kết quả mới nhất lên đầu theo mốc thời gian
+        matched_rows.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+        return matched_rows[:capped_limit]
+
