@@ -435,6 +435,111 @@
     </div>
   </div>
 
+  <!-- Thẻ điều khiển Cloudflare Tunnel (cloudflared) hỗ trợ hot-reload không cần restart bot -->
+  <div class="card p-5 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h3 class="font-semibold text-sm text-white">🌐 Cloudflare Tunnel (cloudflared)</h3>
+          <span
+            id="cf-status-badge"
+            class="text-[11px] font-medium px-2.5 py-0.5 rounded-full border bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
+          >
+            ⚫ Đã tắt
+          </span>
+          <span
+            id="cf-outbound-badge"
+            class="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
+          >
+            Outbound: Direct
+          </span>
+        </div>
+        <p class="text-[11px] text-[#8b95a7] mt-1">
+          Quản lý đường hầm Zero Trust / Quick Tunnel trực tiếp trong container — áp dụng nóng không cần khởi động lại bot
+        </p>
+      </div>
+      {% if user.is_admin %}
+      <div class="flex flex-wrap items-center gap-2">
+        <button type="button" id="btn-stop-tunnel" class="btn-ghost text-xs">⏹ Tắt Tunnel</button>
+        <button type="button" id="btn-save-tunnel" class="btn-primary text-xs">🚀 Bật / Cập nhật Tunnel</button>
+      </div>
+      {% else %}
+      <span class="text-[11px] text-[#5e6778] italic">Chỉ Admin mới được chỉnh Cloudflare Tunnel</span>
+      {% endif %}
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      <!-- Chọn chế độ Tunnel & nhập Token bảo mật -->
+      <div class="lg:col-span-7 space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
+          <div class="sm:col-span-5">
+            <label class="block text-xs text-[#8b95a7] mb-1.5" for="cf-tunnel-mode">Chế độ Tunnel</label>
+            <select id="cf-tunnel-mode" class="inp" {{ '' if user.is_admin else 'disabled' }}>
+              <option value="named">Named Tunnel (Token)</option>
+              <option value="quick">Quick Tunnel (trycloudflare.com)</option>
+            </select>
+          </div>
+          <div id="cf-tunnel-token-wrap" class="sm:col-span-7">
+            <div class="flex items-center justify-between gap-2 mb-1.5">
+              <label class="block text-xs text-[#8b95a7]" for="cf-tunnel-token">Cloudflare Tunnel Token</label>
+              <span id="cf-token-hint" class="text-[10px] text-[#5e6778]">Chưa lưu Token</span>
+            </div>
+            <input
+              id="cf-tunnel-token"
+              type="password"
+              autocomplete="new-password"
+              placeholder="Dán Cloudflare Tunnel Token (eyJhIjoi...)"
+              class="inp font-mono text-xs"
+              {{ '' if user.is_admin else 'disabled' }}
+            />
+          </div>
+        </div>
+
+        <!-- Công tắc Chỉ nhận truy cập qua Cloudflare Tunnel -->
+        <div class="rounded-lg bg-[#0a0d12] border border-[#1e232e] px-3.5 py-2.5 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <label for="cf-tunnel-only-inbound" class="block text-xs font-medium text-slate-200 cursor-pointer">
+              🔒 Chỉ nhận truy cập qua Cloudflare Tunnel (Chặn truy cập trực tiếp)
+            </label>
+            <p class="text-[11px] text-[#8b95a7] mt-0.5 leading-snug">
+              Kiểm tra header cạnh Cloudflare (<code>Cf-Ray</code> / <code>CF-Connecting-IP</code>) để chặn truy cập trực tiếp bỏ qua Tunnel (giữ nguyên <code>/health</code>).
+            </p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer shrink-0">
+            <input id="cf-tunnel-only-inbound" type="checkbox" class="sr-only peer" {{ '' if user.is_admin else 'disabled' }} />
+            <span class="w-10 h-5 bg-[#1e232e] rounded-full peer peer-checked:bg-rose-600 transition-colors duration-200 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform after:duration-200 peer-checked:after:translate-x-5"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Thông tin kết nối trực tiếp, Public URL & lỗi -->
+      <div class="lg:col-span-5 rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-2.5 text-xs">
+        <div class="flex items-center justify-between text-[#8b95a7]">
+          <span class="font-medium text-slate-200">Thông tin kết nối trực tiếp</span>
+          <span id="cf-origin-url" class="font-mono text-[10px] text-[#5e6778]">Origin nội bộ: http://127.0.0.1:10000</span>
+        </div>
+
+        <div id="cf-public-url-wrap" class="hidden rounded-lg bg-[#131720] border border-emerald-500/30 p-2.5">
+          <div class="text-[10px] text-[#8b95a7] mb-1">Public URL đang hoạt động:</div>
+          <a
+            id="cf-public-url"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="font-mono text-xs text-emerald-300 hover:text-emerald-200 underline break-all"
+          >—</a>
+        </div>
+
+        <div class="text-[11px] text-[#5e6778] leading-relaxed">
+          • <strong class="text-slate-300">Named Tunnel:</strong> Định tuyến Public Hostname về <code class="text-slate-300">http://127.0.0.1:&lt;PORT&gt;</code> trong Cloudflare Zero Trust.<br />
+          • <strong class="text-slate-300">Quick Tunnel:</strong> Tự cấp URL <code class="text-slate-300">https://*.trycloudflare.com</code> không cần cấu hình token.
+        </div>
+
+        <div id="cf-last-error" class="hidden text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-1.5 break-words"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Hàng dưới: Chi tiết sử dụng + Danh sách Server Discord -->
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
     <div class="card p-5 space-y-2.5">

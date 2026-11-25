@@ -19,6 +19,8 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
  && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|fastapi|uvicorn|httpx|pydantic)==" || true) \
  && rm -f /tmp/pypi-*.json
 
+COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/cloudflared
+
 COPY bot.py init_admin.py ./
 COPY app/ ./app/
 COPY templates/ ./templates/

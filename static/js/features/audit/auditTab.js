@@ -13,6 +13,7 @@ const SECTION_LABELS = {
   prompt: "System Instruction",
   models: "Model Gemini",
   presence: "Trạng thái Bot (Presence)",
+  tunnel: "Cloudflare Tunnel",
   discord_permissions: "Phân quyền Discord",
   dashboard_users: "Tài khoản Dashboard",
   system: "Hệ thống & Bộ nhớ",

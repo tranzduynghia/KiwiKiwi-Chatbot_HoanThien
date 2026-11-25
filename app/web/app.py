@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Callable
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -31,9 +32,27 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
     async def _lifespan(_app: FastAPI):
         yield
         stop_presence_rotation(get_bot())
+        if getattr(container, "cloudflare_tunnel", None) is not None:
+            await container.cloudflare_tunnel.stop()
 
     app = FastAPI(title="KiwiKiwi Bot Dashboard", docs_url=None, redoc_url=None, lifespan=_lifespan)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+    @app.middleware("http")
+    async def enforce_cloudflare_tunnel_inbound(request: Request, call_next):
+        """Chặn truy cập trực tiếp bỏ qua Cloudflare khi `tunnel_only_inbound` được bật (luôn giữ `/health` cho Northflank)."""
+        if request.url.path != "/health":
+            tunnel_cfg = container.config_repo.tunnel_cfg()
+            if tunnel_cfg.get("tunnel_only_inbound"):
+                has_cf_edge_header = bool(
+                    request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip")
+                )
+                if not has_cf_edge_header:
+                    detail = "Truy cập trực tiếp bị chặn: chỉ cho phép truy cập thông qua Cloudflare Tunnel."
+                    if request.url.path.startswith("/api/"):
+                        return JSONResponse({"detail": detail}, status_code=403)
+                    return PlainTextResponse(detail, status_code=403)
+        return await call_next(request)
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -72,6 +91,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             get_models_snapshot=container.model_registry.build_snapshot,
             auth_deps=container.auth_deps,
             apply_presence_fn=lambda presence_cfg: apply_bot_presence(get_bot(), presence_cfg),
+            apply_tunnel_fn=container.cloudflare_tunnel.apply_config,
         )
     )
     app.include_router(

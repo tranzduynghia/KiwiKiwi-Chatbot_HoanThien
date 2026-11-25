@@ -29,7 +29,8 @@ class AskBot(discord.Client):
     """Tiến trình bot Discord kiêm máy chủ Web Dashboard FastAPI chạy chung vòng lặp asyncio."""
 
     def __init__(self, container: Any):
-        super().__init__(intents=discord.Intents.default())
+        proxy_url = (getattr(container.settings, "outbound_proxy_url", "") or "").strip() or None
+        super().__init__(intents=discord.Intents.default(), proxy=proxy_url)
         self.container = container
         self.tree = app_commands.CommandTree(self)
         self.ready_at: Optional[float] = None
@@ -75,10 +76,15 @@ class AskBot(discord.Client):
         register_error_handler(self.tree)
 
     async def setup_hook(self) -> None:
-        """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, tải model, bật MemoryWatchdog và đồng bộ slash commands."""
+        """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, tự bật Cloudflare Tunnel (nếu bật), tải model và đồng bộ slash commands."""
         settings = self.container.settings
         await self.start_web()  # Mở cổng sớm để nền tảng host (Northflank/Render) nhận diện service
         await self.init_database()  # Kết nối MongoDB + nạp cấu hình động trước khi sync & chạy
+
+        tunnel_cfg = self.container.config_repo.tunnel_cfg()
+        if tunnel_cfg.get("cf_tunnel_enabled"):
+            await self.container.cloudflare_tunnel.apply_config(tunnel_cfg)
+
         await self.container.model_registry.refresh()
 
         self.loop.create_task(self.model_refresher())
@@ -99,13 +105,14 @@ class AskBot(discord.Client):
 
         log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + cmd.name for cmd in synced), scope)
         log.info(
-            "Phiên bản %s · google-genai %s (API %s) · discord.py %s · pymongo %s · RAM tiến trình: %s",
+            "Phiên bản %s · google-genai %s (API %s) · discord.py %s · pymongo %s · RAM tiến trình: %s · Outbound: %s",
             BOT_VERSION,
             getattr(genai, "__version__", "?"),
             settings.gemini_api_version or "mặc định SDK",
             discord.__version__,
             pymongo.version,
             format_bytes(psutil.Process().memory_info().rss),
+            "proxy" if settings.outbound_proxy_url else "direct",
         )
 
     async def start_web(self) -> None:
@@ -203,10 +210,11 @@ class AskBot(discord.Client):
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self) -> None:
-        """Dừng MemoryWatchdog, tác vụ luân phiên Presence, Web Dashboard, MongoDB Atlas và đóng client Discord."""
+        """Dừng Cloudflare Tunnel, MemoryWatchdog, tác vụ luân phiên Presence, Web Dashboard, MongoDB Atlas và đóng client Discord."""
         stop_presence_rotation(self)
         if self._memory_watchdog_task is not None and not self._memory_watchdog_task.done():
             self._memory_watchdog_task.cancel()
+        await self.container.cloudflare_tunnel.stop()
         if self._web_server is not None:
             self._web_server.should_exit = True
         if self._web_task is not None:

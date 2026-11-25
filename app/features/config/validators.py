@@ -98,3 +98,40 @@ def sanitize_presence_config(
         "activity_text": clean_text,
         "auto_rotate": bool(auto_rotate),
     }
+
+
+ALLOWED_TUNNEL_MODES = ("named", "quick")
+
+
+def sanitize_tunnel_config(
+    *,
+    cf_tunnel_enabled: bool,
+    cf_tunnel_mode: str,
+    cf_tunnel_token: str | None,
+    tunnel_only_inbound: bool,
+    existing_token: str = "",
+    clear_token: bool = False,
+) -> dict[str, Any]:
+    """Chuẩn hóa cấu hình Cloudflare Tunnel; giữ nguyên token đã lưu nếu người dùng để trống ô mật khẩu."""
+    clean_mode = str(cf_tunnel_mode or "named").strip().lower()
+    if clean_mode not in ALLOWED_TUNNEL_MODES:
+        raise ValueError("Chế độ Cloudflare Tunnel không hợp lệ (chỉ nhận 'named' hoặc 'quick').")
+
+    incoming_token = (cf_tunnel_token or "").strip()
+    if clear_token:
+        final_token = ""
+    elif incoming_token:
+        final_token = incoming_token
+    else:
+        final_token = (existing_token or "").strip()
+
+    enabled = bool(cf_tunnel_enabled)
+    if enabled and clean_mode == "named" and not final_token:
+        raise ValueError("Vui lòng nhập Cloudflare Tunnel Token khi bật chế độ Named Tunnel.")
+
+    return {
+        "cf_tunnel_enabled": enabled,
+        "cf_tunnel_mode": clean_mode,
+        "cf_tunnel_token": final_token,
+        "tunnel_only_inbound": bool(tunnel_only_inbound),
+    }

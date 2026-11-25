@@ -1,14 +1,35 @@
-"""Router FastAPI quản lý API đọc/cập nhật cấu hình /ask, phiên chat, System Instruction và Bot Presence."""
+"""Router FastAPI quản lý API đọc/cập nhật cấu hình /ask, phiên chat, System Instruction, Bot Presence và Cloudflare Tunnel."""
 from __future__ import annotations
 
+import copy
 from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.sync import WriteBehindSyncCoordinator
-from app.features.config.schemas import AskConfigPayload, PresenceConfigPayload, PromptConfigPayload
+from app.features.config.schemas import (
+    AskConfigPayload,
+    PresenceConfigPayload,
+    PromptConfigPayload,
+    TunnelConfigPayload,
+)
 from app.features.config.service import ConfigService
-from app.features.config.validators import sanitize_ask_and_session, sanitize_presence_config
+from app.features.config.validators import (
+    sanitize_ask_and_session,
+    sanitize_presence_config,
+    sanitize_tunnel_config,
+)
+
+
+def _mask_config_secrets(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Ẩn giá trị nguyên bản của `cf_tunnel_token` trước khi gửi JSON về trình duyệt, thay bằng cờ `cf_tunnel_has_token`."""
+    safe = copy.deepcopy(cfg)
+    tunnel = safe.get("tunnel")
+    if isinstance(tunnel, dict):
+        has_token = bool(str(tunnel.get("cf_tunnel_token") or "").strip())
+        tunnel["cf_tunnel_token"] = ""
+        tunnel["cf_tunnel_has_token"] = has_token
+    return safe
 
 
 def create_config_router(
@@ -17,15 +38,16 @@ def create_config_router(
     get_models_snapshot: Callable[[], Awaitable[dict[str, Any]]],
     auth_deps: Any,
     apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
+    apply_tunnel_fn: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None,
 ) -> APIRouter:
-    """Tạo router cho `/api/config`, `/api/config/ask`, `/api/config/prompt` và `/api/config/presence`."""
+    """Tạo router cho `/api/config`, `/api/config/ask`, `/api/config/prompt`, `/api/config/presence` và `/api/config/tunnel`."""
     router = APIRouter(tags=["config"])
 
     @router.get("/api/config")
     async def api_get_config(_user: dict[str, Any] = Depends(auth_deps.require_user)):
         cfg = await config_service.get_config(force=True)
         models_info = await get_models_snapshot()
-        return {"config": cfg, "models_runtime": models_info}
+        return {"config": _mask_config_secrets(cfg), "models_runtime": models_info}
 
     @router.put("/api/config/ask")
     async def api_update_ask_config(
@@ -46,7 +68,7 @@ def create_config_router(
             section="ask",
             summary="Cập nhật cấu hình /ask & phiên chat",
         )
-        return {"ok": True, "config": updated, "sync": sync_coordinator.sync_status()}
+        return {"ok": True, "config": _mask_config_secrets(updated), "sync": sync_coordinator.sync_status()}
 
     @router.put("/api/config/prompt")
     async def api_update_prompt_config(
@@ -66,7 +88,7 @@ def create_config_router(
             section="prompt",
             summary="Cập nhật System Instruction / OCR Instruction",
         )
-        return {"ok": True, "config": updated, "sync": sync_coordinator.sync_status()}
+        return {"ok": True, "config": _mask_config_secrets(updated), "sync": sync_coordinator.sync_status()}
 
     @router.put("/api/config/presence")
     async def api_update_presence_config(
@@ -101,7 +123,55 @@ def create_config_router(
         return {
             "ok": True,
             "applied_live": applied_live,
-            "config": updated,
+            "config": _mask_config_secrets(updated),
+            "sync": sync_coordinator.sync_status(),
+        }
+
+    @router.put("/api/config/tunnel")
+    async def api_update_tunnel_config(
+        payload: TunnelConfigPayload,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Lưu cấu hình Cloudflare Tunnel vào MongoDB, ghi Audit Log và khởi động/tắt nóng tiến trình `cloudflared`."""
+        current_cfg = await config_service.get_config(force=True)
+        existing_tunnel = current_cfg.get("tunnel") if isinstance(current_cfg.get("tunnel"), dict) else {}
+        existing_token = str(existing_tunnel.get("cf_tunnel_token") or "")
+
+        try:
+            clean_tunnel = sanitize_tunnel_config(
+                cf_tunnel_enabled=payload.cf_tunnel_enabled,
+                cf_tunnel_mode=payload.cf_tunnel_mode,
+                cf_tunnel_token=payload.cf_tunnel_token,
+                tunnel_only_inbound=payload.tunnel_only_inbound,
+                existing_token=existing_token,
+                clear_token=payload.clear_token,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        actor, actor_type = auth_deps.actor_label(user)
+        action_summary = (
+            f"Bật/cập nhật Cloudflare Tunnel (chế độ {clean_tunnel['cf_tunnel_mode']})"
+            if clean_tunnel["cf_tunnel_enabled"]
+            else "Tắt Cloudflare Tunnel"
+        )
+        updated = await config_service.update_config(
+            {"tunnel": clean_tunnel},
+            updated_by=actor,
+            actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(user),
+            section="tunnel",
+            summary=action_summary,
+        )
+
+        tunnel_status: Optional[dict[str, Any]] = None
+        if apply_tunnel_fn is not None:
+            tunnel_status = await apply_tunnel_fn(clean_tunnel)
+
+        return {
+            "ok": True,
+            "config": _mask_config_secrets(updated),
+            "cloudflare_tunnel": tunnel_status,
             "sync": sync_coordinator.sync_status(),
         }
 

@@ -1,7 +1,7 @@
 """Các schema Pydantic xác thực đầu vào cho API cấu hình /ask và System Instruction."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -29,3 +29,13 @@ class PresenceConfigPayload(BaseModel):
     activity_type: str = Field(default="listening", max_length=20)
     activity_text: str = Field(default="", max_length=128)
     auto_rotate: bool = False
+
+
+class TunnelConfigPayload(BaseModel):
+    """Payload bật/tắt hoặc cập nhật nóng cấu hình Cloudflare Tunnel (Named Token hoặc Quick Tunnel)."""
+
+    cf_tunnel_enabled: bool = False
+    cf_tunnel_mode: str = Field(default="named", max_length=20)
+    cf_tunnel_token: Optional[str] = Field(default=None, max_length=4096)
+    tunnel_only_inbound: bool = False
+    clear_token: bool = False

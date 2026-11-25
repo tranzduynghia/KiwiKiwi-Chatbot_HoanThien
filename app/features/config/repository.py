@@ -105,6 +105,10 @@ class ConfigRepository:
         """Trả về nhánh cấu hình trạng thái hiển thị & hoạt động Discord của bot."""
         return self._config.get("presence", {})
 
+    def tunnel_cfg(self) -> dict[str, Any]:
+        """Trả về nhánh cấu hình Cloudflare Tunnel (`cf_tunnel_enabled`, `cf_tunnel_mode`, `cf_tunnel_token`, `tunnel_only_inbound`)."""
+        return self._config.get("tunnel", {})
+
     def model_override(self, model_id: str) -> dict[str, Any]:
         """Lấy cấu hình ghi đè (tên hiển thị, tag, ẩn/hiện) của một model cụ thể."""
         overrides = self.models_cfg().get("overrides") or {}

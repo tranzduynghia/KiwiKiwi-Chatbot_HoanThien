@@ -105,6 +105,7 @@ class AppSettings:
     discord_client_id: str = ""
     discord_client_secret: str = ""
     discord_redirect_uri: str = ""
+    outbound_proxy_url: str = ""
     cache_ttl_seconds: float = 5.0
 
     @classmethod
@@ -123,6 +124,7 @@ class AppSettings:
             discord_client_id=(os.getenv("DISCORD_CLIENT_ID") or "").strip(),
             discord_client_secret=(os.getenv("DISCORD_CLIENT_SECRET") or "").strip(),
             discord_redirect_uri=(os.getenv("DISCORD_REDIRECT_URI") or "").strip(),
+            outbound_proxy_url=(os.getenv("OUTBOUND_PROXY_URL") or "").strip(),
         )
 
 
@@ -178,6 +180,12 @@ def build_default_config() -> dict[str, Any]:
             "activity_type": "listening",
             "activity_text": "m!help",
             "auto_rotate": False,
+        },
+        "tunnel": {
+            "cf_tunnel_enabled": False,
+            "cf_tunnel_mode": "named",
+            "cf_tunnel_token": "",
+            "tunnel_only_inbound": False,
         },
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",

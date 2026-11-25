@@ -27,7 +27,7 @@ function setTextIfChanged(id, value) {
   }
 }
 
-export function createStatusTabController() {
+export function createStatusTabController({ onTunnelTelemetry } = {}) {
   const latencyHistory = [];
   let isFetchingSystem = false;
   let isFetchingGemini = false;
@@ -245,6 +245,9 @@ export function createStatusTabController() {
       }
       setTextIfChanged("st-ram-rss", `Tiến trình: ${res.ram_rss_mb} MB`);
       renderWatchdogIndicator(res.memory_watchdog);
+      if (onTunnelTelemetry && data.cloudflare_tunnel) {
+        onTunnelTelemetry(data.cloudflare_tunnel);
+      }
       setTextIfChanged("st-cpu", `${res.cpu_percent}% CPU`);
       setTextIfChanged("st-threads", `${res.threads} luồng`);
       setTextIfChanged("st-requests-brief", `Hôm nay: ${data.stats.today_total} req · Tổng: ${data.stats.total} req`);

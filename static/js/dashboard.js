@@ -7,6 +7,7 @@ import { createAuditTabController } from "./features/audit/auditTab.js";
 import { createAskConfigTabController } from "./features/config/askConfigTab.js";
 import { createPresenceCardController } from "./features/config/presenceCard.js";
 import { createPromptConfigTabController } from "./features/config/promptConfigTab.js";
+import { createTunnelCardController } from "./features/config/tunnelCard.js";
 import { createModelsTabController } from "./features/models/modelsTab.js";
 import { createStatusTabController } from "./features/monitoring/statusTab.js";
 import { createPermissionsTabController } from "./features/permissions/permissionsTab.js";
@@ -22,7 +23,12 @@ function readBootstrapData() {
 
 const bootstrap = readBootstrapData();
 
-const statusTab = createStatusTabController();
+let tunnelCard;
+const statusTab = createStatusTabController({
+  onTunnelTelemetry: (telemetry) => {
+    if (tunnelCard) tunnelCard.renderTelemetry(telemetry);
+  },
+});
 const permissionsTab = createPermissionsTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
 const sessionsTab = createSessionsTabController();
 const auditTab = createAuditTabController();
@@ -43,6 +49,7 @@ async function loadConfig() {
 
     askConfigTab.fill(cfg);
     presenceCard.fill(cfg);
+    tunnelCard.fill(cfg);
     promptConfigTab.fill(cfg);
     modelsTab.fill(cfg, data.models_runtime);
   } catch (err) {
@@ -57,6 +64,10 @@ async function refreshAll() {
 
 askConfigTab = createAskConfigTabController({ onConfigSaved: loadConfig });
 presenceCard = createPresenceCardController({ onConfigSaved: loadConfig });
+tunnelCard = createTunnelCardController({
+  isAdmin: Boolean(bootstrap.isAdmin),
+  onConfigSaved: loadConfig,
+});
 promptConfigTab = createPromptConfigTabController({
   defaultSystemPrompt: bootstrap.defaultSystemPrompt || "",
   defaultOcrInstruction: bootstrap.defaultOcrInstruction || "",
@@ -276,6 +287,7 @@ bindShellControls();
 statusTab.bindEvents();
 askConfigTab.bindEvents();
 presenceCard.bindEvents();
+tunnelCard.bindEvents();
 promptConfigTab.bindEvents();
 modelsTab.bindEvents();
 permissionsTab.bindEvents();

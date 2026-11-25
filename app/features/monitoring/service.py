@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 import discord
 
+from app.core.cloudflare_tunnel import CloudflareTunnelService
 from app.core.database import MongoDatabaseManager
 from app.core.memory_watchdog import MemoryWatchdog
 from app.core.settings import BOT_VERSION
@@ -22,7 +23,7 @@ from app.features.sessions.repository import SessionRepository
 
 
 class MonitoringService:
-    """Tổng hợp trạng thái bot Discord, tài nguyên RAM/CPU, Gemini API, MongoDB và thống kê sử dụng."""
+    """Tổng hợp trạng thái bot Discord, tài nguyên RAM/CPU, Gemini API, MongoDB, Cloudflare Tunnel và thống kê sử dụng."""
 
     def __init__(
         self,
@@ -35,6 +36,7 @@ class MonitoringService:
         sync_coordinator: WriteBehindSyncCoordinator,
         usage_stats: UsageStats,
         memory_watchdog: Optional[MemoryWatchdog] = None,
+        cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
         start_time: Optional[float] = None,
     ):
         self._config = config_repo
@@ -45,6 +47,7 @@ class MonitoringService:
         self._sync = sync_coordinator
         self._stats = usage_stats
         self._memory_watchdog = memory_watchdog
+        self._cloudflare_tunnel = cloudflare_tunnel
         self.start_time = start_time if start_time is not None else time.time()
 
     def uptime_seconds(self) -> float:
@@ -114,6 +117,11 @@ class MonitoringService:
             if self._memory_watchdog is not None
             else None
         )
+        tunnel_status = (
+            self._cloudflare_tunnel.status_snapshot()
+            if self._cloudflare_tunnel is not None
+            else None
+        )
 
         return {
             "bot": {
@@ -141,6 +149,7 @@ class MonitoringService:
                 "threads": proc_metrics["threads"],
                 "memory_watchdog": watchdog_status,
             },
+            "cloudflare_tunnel": tunnel_status,
             "gemini": {
                 "discovered_count": len(self._models.text),
                 "updated_at": int(self._models.updated_at) if self._models.updated_at else None,

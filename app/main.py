@@ -14,6 +14,7 @@ from google import genai
 from google.genai import types
 
 from app.bot.client import AskBot
+from app.core.cloudflare_tunnel import CloudflareTunnelService
 from app.core.concurrency import DynamicSemaphore, UserLockManager
 from app.core.database import MongoDatabaseManager
 from app.core.logging import configure_logging
@@ -70,7 +71,19 @@ class AppContainer:
     gemini_service: GeminiChatService
     usage_stats: UsageStats
     memory_watchdog: MemoryWatchdog
+    cloudflare_tunnel: CloudflareTunnelService
     monitoring_service: MonitoringService
+
+
+def build_gemini_http_options(settings: AppSettings) -> Optional[types.HttpOptions]:
+    """Tạo `types.HttpOptions` cho Google GenAI SDK hỗ trợ cả `GEMINI_API_VERSION` và `OUTBOUND_PROXY_URL`."""
+    kwargs: dict[str, Any] = {}
+    if settings.gemini_api_version:
+        kwargs["api_version"] = settings.gemini_api_version
+    if settings.outbound_proxy_url:
+        kwargs["client_args"] = {"proxy": settings.outbound_proxy_url}
+        kwargs["async_client_args"] = {"proxy": settings.outbound_proxy_url}
+    return types.HttpOptions(**kwargs) if kwargs else None
 
 
 def build_container(
@@ -79,14 +92,11 @@ def build_container(
     gemini_client: Any = None,
     start_time: Optional[float] = None,
     reserve_buffer_bytes: int = DEFAULT_RESERVE_BYTES,
+    cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
 ) -> AppContainer:
     """Khởi tạo và lắp ghép toàn bộ thành phần ứng dụng mà không dùng biến toàn cục cấp module."""
     if gemini_client is None:
-        http_options = (
-            types.HttpOptions(api_version=settings.gemini_api_version)
-            if settings.gemini_api_version
-            else None
-        )
+        http_options = build_gemini_http_options(settings)
         gemini_client = genai.Client(api_key=settings.gemini_api_key, http_options=http_options)
 
     db_manager = MongoDatabaseManager(uri=settings.mongodb_uri, db_name=settings.mongodb_db)
@@ -230,6 +240,11 @@ def build_container(
         record_audit_event=_record_memory_watchdog_audit,
     )
 
+    tunnel_service = cloudflare_tunnel or CloudflareTunnelService(
+        local_port=settings.port,
+        outbound_proxy_url=settings.outbound_proxy_url,
+    )
+
     monitoring_service = MonitoringService(
         config_repo=config_repo,
         model_registry=model_registry,
@@ -239,6 +254,7 @@ def build_container(
         sync_coordinator=sync_coordinator,
         usage_stats=usage_stats,
         memory_watchdog=memory_watchdog,
+        cloudflare_tunnel=tunnel_service,
         start_time=start_time if start_time is not None else time.time(),
     )
 
@@ -267,6 +283,7 @@ def build_container(
         gemini_service=gemini_service,
         usage_stats=usage_stats,
         memory_watchdog=memory_watchdog,
+        cloudflare_tunnel=tunnel_service,
         monitoring_service=monitoring_service,
     )
 

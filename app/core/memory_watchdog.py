@@ -19,9 +19,29 @@ DEFAULT_CHECK_INTERVAL_SECONDS = 1.5      # Kiểm tra nhẹ mỗi 1500ms
 DEFAULT_SYNC_TIMEOUT_SECONDS = 5.0        # Giới hạn cứng 5s đồng bộ MongoDB Atlas tránh treo watchdog
 
 
-def _default_read_rss_bytes() -> int:
-    """Đọc RSS thực tế của tiến trình Python hiện tại từ hệ điều hành (bytes)."""
+CGROUP_MEMORY_PATHS = (
+    "/sys/fs/cgroup/memory.current",                 # Linux cgroup v2 (Northflank / Docker hiện đại)
+    "/sys/fs/cgroup/memory/memory.usage_in_bytes",   # Linux cgroup v1 (tương thích ngược)
+)
+
+
+def read_container_memory_bytes() -> int:
+    """Đọc tổng bộ nhớ thực tế của toàn container Docker qua cgroup v2/v1 (gồm cả Python + cloudflared); fallback sang RSS."""
+    for path in CGROUP_MEMORY_PATHS:
+        try:
+            with open(path, encoding="utf-8") as handle:
+                raw = handle.read().strip()
+            value = int(raw)
+            if value > 0:
+                return value
+        except Exception:
+            continue
     return int(psutil.Process().memory_info().rss)
+
+
+def _default_read_rss_bytes() -> int:
+    """Trả về mức bộ nhớ container hiện tại (cgroup v2/v1 -> psutil RSS) phục vụ kiểm tra ngưỡng 464MB."""
+    return read_container_memory_bytes()
 
 
 class MemoryWatchdog:
