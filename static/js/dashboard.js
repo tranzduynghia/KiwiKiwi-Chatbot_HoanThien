@@ -61,10 +61,14 @@ promptConfigTab = createPromptConfigTabController({
 modelsTab = createModelsTabController({ onRefreshAll: refreshAll });
 
 const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "audit"]);
+const AUTO_REFRESH_INTERVAL_MS = 2000;
+let activeTab = "status";
+let pollTimer = null;
 
 // Kích hoạt tab theo mã tên, đồng bộ URL hash và đóng ngăn kéo sidebar trên màn hình nhỏ
 function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}) {
   const safeTab = VALID_TABS.has(targetTab) ? targetTab : "status";
+  activeTab = safeTab;
   document.querySelectorAll(".tab-btn").forEach((item) => {
     item.dataset.active = String(item.dataset.tab === safeTab);
   });
@@ -81,10 +85,44 @@ function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}
   if (safeTab === "perms") {
     permissionsTab.loadPermissions();
   } else if (safeTab === "sessions") {
-    sessionsTab.searchSessions(0);
+    sessionsTab.searchSessions(0, { silent: false });
   } else if (safeTab === "audit") {
-    auditTab.loadAuditLogs();
+    auditTab.loadAuditLogs({ silent: false });
   }
+}
+
+// Chạy 1 nhịp cập nhật nền im lặng mỗi 2000ms (không nhấp nháy, không đóng modal, giữ nguyên bộ lọc & cuộn)
+function runSilentBackgroundTick() {
+  if (document.hidden) return;
+  statusTab.loadStatus(false, { silent: true });
+  if (activeTab === "audit") {
+    auditTab.loadAuditLogs({ silent: true });
+  } else if (activeTab === "sessions") {
+    sessionsTab.refreshCurrentSilently();
+  }
+}
+
+function stopBackgroundPolling() {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function startBackgroundPolling() {
+  stopBackgroundPolling();
+  const toggleEl = document.getElementById("auto-refresh-toggle");
+  if (toggleEl && !toggleEl.checked) return;
+  if (document.hidden) return;
+  pollTimer = setInterval(runSilentBackgroundTick, AUTO_REFRESH_INTERVAL_MS);
+}
+
+// Áp dụng hiệu ứng mờ dần & trượt nhẹ lên 1 lần duy nhất cho các thẻ khi tải trang đầu tiên
+function applyInitialCardEntrance() {
+  document.querySelectorAll("#tab-status .card, #tab-status .ox-kpi-card").forEach((el, idx) => {
+    el.style.animationDelay = `${Math.min(idx * 35, 240)}ms`;
+    el.classList.add("ox-enter");
+  });
 }
 
 function bindShellControls() {
@@ -99,6 +137,31 @@ function bindShellControls() {
     const fromHash = window.location.hash.replace(/^#/, "");
     if (VALID_TABS.has(fromHash)) {
       activateTab(fromHash, { updateHash: false });
+    }
+  });
+
+  // Bật / tắt chu kỳ tự làm mới 2000ms từ công tắc trên giao diện
+  const autoToggle = document.getElementById("auto-refresh-toggle");
+  if (autoToggle) {
+    autoToggle.addEventListener("change", () => {
+      if (autoToggle.checked) {
+        startBackgroundPolling();
+      } else {
+        stopBackgroundPolling();
+      }
+    });
+  }
+
+  // Tự động tạm dừng polling 2000ms khi tab trình duyệt bị ẩn và tiếp tục ngay khi quay lại
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      stopBackgroundPolling();
+    } else {
+      const toggleEl = document.getElementById("auto-refresh-toggle");
+      if (!toggleEl || toggleEl.checked) {
+        runSilentBackgroundTick();
+        startBackgroundPolling();
+      }
     }
   });
 
@@ -161,7 +224,7 @@ function bindShellControls() {
   }
 }
 
-// Khởi chạy toàn bộ trình lắng nghe sự kiện và nạp dữ liệu ban đầu
+// Khởi chạy toàn bộ trình lắng nghe sự kiện, hiệu ứng lần đầu và vòng lặp nền 2000ms
 bindShellControls();
 statusTab.bindEvents();
 askConfigTab.bindEvents();
@@ -171,12 +234,14 @@ permissionsTab.bindEvents();
 sessionsTab.bindEvents();
 auditTab.bindEvents();
 
+applyInitialCardEntrance();
+
 // Khôi phục tab đang mở từ URL hash (tránh bị quay về trang chủ khi tải lại)
 const initialTab = window.location.hash.replace(/^#/, "");
 if (VALID_TABS.has(initialTab) && initialTab !== "status") {
   activateTab(initialTab, { updateHash: false });
 }
 
-statusTab.loadStatus(false);
+statusTab.loadStatus(false, { silent: false });
 loadConfig();
-statusTab.startAutoRefresh();
+startBackgroundPolling();

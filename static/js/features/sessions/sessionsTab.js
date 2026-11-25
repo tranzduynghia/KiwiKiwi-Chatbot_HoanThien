@@ -69,6 +69,8 @@ export function createSessionsTabController() {
   let currentOffset = 0;
   let filtersLoaded = false;
   let searchSeq = 0;
+  let lastRenderKey = "";
+  let isSilentFetching = false;
 
   async function loadServerRoleOptions() {
     const selectEl = document.getElementById("sessions-search-server-role");
@@ -106,6 +108,12 @@ export function createSessionsTabController() {
     const msgsEl = document.getElementById("session-detail-messages");
     if (!modal || !headerEl || !metaEl || !msgsEl) return;
 
+    const panel = modal.firstElementChild;
+    if (panel) {
+      panel.classList.remove("ox-modal-enter");
+      void panel.offsetWidth;
+      panel.classList.add("ox-modal-enter");
+    }
     modal.classList.remove("hidden");
     modal.classList.add("flex");
     headerEl.innerHTML = '<h3 id="session-detail-title" class="text-sm font-semibold text-white">Đang tải chi tiết phiên chat...</h3>';
@@ -186,47 +194,58 @@ export function createSessionsTabController() {
     }
   }
 
-  async function searchSessions(offset = 0) {
+  async function searchSessions(offset = 0, { silent = false } = {}) {
+    if (silent && isSilentFetching) return;
+    if (silent) isSilentFetching = true;
+
     const reqSeq = ++searchSeq;
-    if (!filtersLoaded) {
-      await loadServerRoleOptions();
-    }
-    if (reqSeq !== searchSeq) return;
-
-    currentOffset = Math.max(0, offset);
-    const qInput = document.getElementById("sessions-search-q");
-    const uidInput = document.getElementById("sessions-search-uid");
-    const usernameInput = document.getElementById("sessions-search-username");
-    const serverRoleSelect = document.getElementById("sessions-search-server-role");
-    const roleSelect = document.getElementById("sessions-search-role");
-    const tbody = document.getElementById("sessions-search-tbody");
-    const countEl = document.getElementById("sessions-result-count");
-    const pageInfoEl = document.getElementById("sessions-page-info");
-    const prevBtn = document.getElementById("btn-sessions-prev");
-    const nextBtn = document.getElementById("btn-sessions-next");
-    if (!tbody) return;
-
-    const q = (qInput?.value || "").trim();
-    const userId = (uidInput?.value || "").trim();
-    const username = (usernameInput?.value || "").trim();
-    const serverRole = (serverRoleSelect?.value || "").trim();
-    const role = (roleSelect?.value || "").trim();
-
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (userId) params.set("user_id", userId);
-    if (username) params.set("username", username);
-    if (serverRole) params.set("server_role", serverRole);
-    if (role) params.set("role", role);
-    params.set("limit", String(PAGE_SIZE));
-    params.set("offset", String(currentOffset));
-
-    tbody.innerHTML =
-      '<tr><td colspan="3" class="py-6 text-center text-[#8b95a7]">Đang tải danh sách phiên chat từ MongoDB Atlas...</td></tr>';
-
     try {
+      if (!filtersLoaded) {
+        await loadServerRoleOptions();
+      }
+      if (reqSeq !== searchSeq) return;
+
+      currentOffset = Math.max(0, offset);
+      const qInput = document.getElementById("sessions-search-q");
+      const uidInput = document.getElementById("sessions-search-uid");
+      const usernameInput = document.getElementById("sessions-search-username");
+      const serverRoleSelect = document.getElementById("sessions-search-server-role");
+      const roleSelect = document.getElementById("sessions-search-role");
+      const tbody = document.getElementById("sessions-search-tbody");
+      const countEl = document.getElementById("sessions-result-count");
+      const pageInfoEl = document.getElementById("sessions-page-info");
+      const prevBtn = document.getElementById("btn-sessions-prev");
+      const nextBtn = document.getElementById("btn-sessions-next");
+      if (!tbody) return;
+
+      const q = (qInput?.value || "").trim();
+      const userId = (uidInput?.value || "").trim();
+      const username = (usernameInput?.value || "").trim();
+      const serverRole = (serverRoleSelect?.value || "").trim();
+      const role = (roleSelect?.value || "").trim();
+
+      const params = new URLSearchParams();
+      if (q) params.set("q", q);
+      if (userId) params.set("user_id", userId);
+      if (username) params.set("username", username);
+      if (serverRole) params.set("server_role", serverRole);
+      if (role) params.set("role", role);
+      params.set("limit", String(PAGE_SIZE));
+      params.set("offset", String(currentOffset));
+
+      if (!silent) {
+        tbody.innerHTML =
+          '<tr><td colspan="3" class="py-6 text-center text-[#8b95a7]">Đang tải danh sách phiên chat từ MongoDB Atlas...</td></tr>';
+      }
+
       const data = await apiRequest(`/api/sessions/search?${params.toString()}`);
       if (reqSeq !== searchSeq) return;
+
+      const nextKey = JSON.stringify({ q, userId, username, serverRole, role, currentOffset, data });
+      if (silent && nextKey === lastRenderKey) {
+        return;
+      }
+      lastRenderKey = nextKey;
 
       const items = data.items || [];
       const total = Number(data.total ?? items.length);
@@ -251,6 +270,7 @@ export function createSessionsTabController() {
         return;
       }
 
+      const rowAnimClass = silent ? "" : "ox-enter";
       tbody.innerHTML = items
         .map((item) => {
           const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString("vi-VN") : "—";
@@ -267,7 +287,7 @@ export function createSessionsTabController() {
           return `
             <tr
               data-view-chat-id="${escapeHtml(item.chat_id)}"
-              class="hover:bg-[#181d28]/80 align-top cursor-pointer transition-colors"
+              class="hover:bg-[#181d28]/80 align-top cursor-pointer transition-colors ${rowAnimClass}"
               title="Bấm để xem toàn bộ hội thoại phiên #${escapeHtml(item.chat_id_short)}"
             >
               <td class="py-3 pr-4">
@@ -312,15 +332,23 @@ export function createSessionsTabController() {
         .join("");
     } catch (err) {
       if (reqSeq !== searchSeq) return;
-      tbody.innerHTML = `<tr><td colspan="3" class="py-6 text-center text-rose-400">Lỗi tìm kiếm: ${escapeHtml(err.message)}</td></tr>`;
-      showToast(err.message, false);
+      if (!silent) {
+        tbody.innerHTML = `<tr><td colspan="3" class="py-6 text-center text-rose-400">Lỗi tìm kiếm: ${escapeHtml(err.message)}</td></tr>`;
+        showToast(err.message, false);
+      }
+    } finally {
+      if (silent) isSilentFetching = false;
     }
+  }
+
+  function refreshCurrentSilently() {
+    return searchSessions(currentOffset, { silent: true });
   }
 
   function setQueryAndSearch(keyword) {
     const qInput = document.getElementById("sessions-search-q");
     if (qInput) qInput.value = keyword || "";
-    searchSessions(0);
+    searchSessions(0, { silent: false });
   }
 
   function bindEvents() {
@@ -422,5 +450,5 @@ export function createSessionsTabController() {
     });
   }
 
-  return { searchSessions, setQueryAndSearch, openSessionDetail, bindEvents };
+  return { searchSessions, refreshCurrentSilently, setQueryAndSearch, openSessionDetail, bindEvents };
 }

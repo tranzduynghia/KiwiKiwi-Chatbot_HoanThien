@@ -105,6 +105,8 @@ function renderActorCell(item) {
 
 export function createAuditTabController() {
   let cachedItems = [];
+  let lastRenderKey = "";
+  let isFetching = false;
 
   function closeAuditDetailModal() {
     const modal = document.getElementById("audit-detail-modal");
@@ -190,11 +192,19 @@ export function createAuditTabController() {
       `;
     }
 
+    const panel = modal.firstElementChild;
+    if (panel) {
+      panel.classList.remove("ox-modal-enter");
+      void panel.offsetWidth;
+      panel.classList.add("ox-modal-enter");
+    }
     modal.classList.remove("hidden");
     modal.classList.add("flex");
   }
 
-  async function loadAuditLogs() {
+  async function loadAuditLogs({ silent = false } = {}) {
+    if (isFetching && silent) return;
+    isFetching = true;
     try {
       const sectionEl = document.getElementById("audit-section-filter");
       const section = sectionEl ? sectionEl.value : "";
@@ -203,7 +213,16 @@ export function createAuditTabController() {
       const tbody = document.getElementById("audit-tbody");
       if (!tbody) return;
 
-      cachedItems = data.items || [];
+      const items = data.items || [];
+      const nextKey = JSON.stringify(items);
+      // Nếu đang cập nhật nền im lặng và dữ liệu không đổi -> giữ nguyên DOM & vị trí cuộn
+      if (silent && nextKey === lastRenderKey) {
+        return;
+      }
+
+      cachedItems = items;
+      lastRenderKey = nextKey;
+      const rowAnimClass = silent ? "" : "ox-enter";
 
       tbody.innerHTML = cachedItems.length
         ? cachedItems
@@ -215,7 +234,7 @@ export function createAuditTabController() {
                 ? '<span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30">Chờ sync</span>'
                 : '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Atlas</span>';
               return `
-                <tr class="hover:bg-[#181d28]/70">
+                <tr class="hover:bg-[#181d28]/70 ${rowAnimClass}">
                   <td class="py-2.5 pr-3 font-mono text-[#8b95a7] whitespace-nowrap">${escapeHtml(timeStr)}</td>
                   <td class="py-2.5 pr-3">${renderActorCell(item)}</td>
                   <td class="py-2.5 pr-3"><span class="px-2 py-0.5 rounded bg-[#181d27] border border-[#252b38] text-[10px] text-slate-300 whitespace-nowrap">${escapeHtml(sectionName)}</span></td>
@@ -234,15 +253,17 @@ export function createAuditTabController() {
             .join("")
         : '<tr><td colspan="6" class="py-4 text-center text-[#5e6778]">Chưa có bản ghi nhật ký chỉnh sửa nào.</td></tr>';
     } catch (err) {
-      showToast(err.message, false);
+      if (!silent) showToast(err.message, false);
+    } finally {
+      isFetching = false;
     }
   }
 
   function bindEvents() {
     const filterEl = document.getElementById("audit-section-filter");
-    if (filterEl) filterEl.addEventListener("change", loadAuditLogs);
+    if (filterEl) filterEl.addEventListener("change", () => loadAuditLogs({ silent: false }));
     const refreshBtn = document.getElementById("btn-refresh-audit");
-    if (refreshBtn) refreshBtn.addEventListener("click", loadAuditLogs);
+    if (refreshBtn) refreshBtn.addEventListener("click", () => loadAuditLogs({ silent: false }));
 
     // Mở Modal chi tiết diff tại chỗ khi bấm nút "Chi tiết"
     const tbody = document.getElementById("audit-tbody");

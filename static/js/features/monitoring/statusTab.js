@@ -1,6 +1,6 @@
 /**
- * Bộ điều khiển Tab 1: Giám sát trạng thái Bot theo bố cục Oxfin Dark Admin
- * (Biểu đồ cột thống kê, 6 thẻ KPI hình thoi, biểu đồ đường cong độ trễ màu vàng và tiến độ RAM/MongoDB).
+ * Bộ điều khiển Tab 1: Giám sát trạng thái Bot theo bố cục Oxfin Dark Admin.
+ * Hỗ trợ cập nhật nền im lặng mỗi 2000ms (không nhấp nháy, không đặt lại thanh cuộn, không chạy lại hiệu ứng tải đầu).
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
@@ -18,16 +18,27 @@ function buildSmoothSplinePath(points) {
   return d;
 }
 
+function setTextIfChanged(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const next = String(value ?? "");
+  if (el.textContent !== next) {
+    el.textContent = next;
+  }
+}
+
 export function createStatusTabController() {
-  let statusTimer = null;
   const latencyHistory = [];
+  let isFetching = false;
+  let barsInitialized = false;
+  let lastChainHtml = "";
+  let lastGuildsHtml = "";
 
   function renderUsageBarChart(stats) {
     const barsEl = document.getElementById("ox-usage-bars");
     const labelsEl = document.getElementById("ox-usage-labels");
     if (!barsEl || !labelsEl) return;
 
-    // Ưu tiên hiển thị các tính năng & chỉ số chính theo 6 cột giống biểu đồ Oxfin
     const entries = [
       { label: "Tổng", value: stats.total || 0, primary: true },
       { label: "Thành công", value: stats.ok || 0, primary: false },
@@ -39,27 +50,43 @@ export function createStatusTabController() {
 
     const maxVal = Math.max(10, ...entries.map((item) => item.value));
     const roundedMax = Math.ceil(maxVal / 10) * 10;
-    const yMaxEl = document.getElementById("chart-y-max");
-    const yMidEl = document.getElementById("chart-y-mid");
-    if (yMaxEl) yMaxEl.textContent = String(roundedMax);
-    if (yMidEl) yMidEl.textContent = String(Math.round(roundedMax / 2));
+    setTextIfChanged("chart-y-max", roundedMax);
+    setTextIfChanged("chart-y-mid", Math.round(roundedMax / 2));
 
-    barsEl.innerHTML = entries
-      .map((item) => {
-        const heightPct = item.value > 0 ? Math.max(16, Math.round((item.value / roundedMax) * 100)) : 14;
-        return `
-          <div class="ox-bar-col">
-            <div class="ox-bar-rect ${item.primary ? "is-primary" : ""}" style="height:${heightPct}%" title="${escapeHtml(item.label)}: ${item.value}">
-              <span>${item.value}</span>
+    // Lần đầu tiên dựng cấu trúc DOM cột; các lần cập nhật nền 2s chỉ cập nhật chiều cao & số tại chỗ để chuyển động mượt
+    if (!barsInitialized || barsEl.children.length !== entries.length) {
+      barsEl.innerHTML = entries
+        .map((item, idx) => {
+          const heightPct = item.value > 0 ? Math.max(16, Math.round((item.value / roundedMax) * 100)) : 14;
+          return `
+            <div class="ox-bar-col">
+              <div data-bar-idx="${idx}" class="ox-bar-rect ${item.primary ? "is-primary" : ""}" style="height:${heightPct}%" title="${escapeHtml(item.label)}: ${item.value}">
+                <span data-bar-val="${idx}">${item.value}</span>
+              </div>
             </div>
-          </div>
-        `;
-      })
-      .join("");
+          `;
+        })
+        .join("");
 
-    labelsEl.innerHTML = entries
-      .map((item) => `<span class="flex-1 text-center truncate">${escapeHtml(item.label)}</span>`)
-      .join("");
+      labelsEl.innerHTML = entries
+        .map((item) => `<span class="flex-1 text-center truncate">${escapeHtml(item.label)}</span>`)
+        .join("");
+      barsInitialized = true;
+      return;
+    }
+
+    entries.forEach((item, idx) => {
+      const heightPct = item.value > 0 ? Math.max(16, Math.round((item.value / roundedMax) * 100)) : 14;
+      const rectEl = barsEl.querySelector(`[data-bar-idx="${idx}"]`);
+      const valEl = barsEl.querySelector(`[data-bar-val="${idx}"]`);
+      if (rectEl) {
+        rectEl.style.height = `${heightPct}%`;
+        rectEl.title = `${item.label}: ${item.value}`;
+      }
+      if (valEl && valEl.textContent !== String(item.value)) {
+        valEl.textContent = String(item.value);
+      }
+    });
   }
 
   function renderLatencySpline(pingMs, dbMs) {
@@ -69,17 +96,14 @@ export function createStatusTabController() {
 
     const sample = Number(pingMs ?? dbMs ?? 0);
     latencyHistory.push(Math.max(0, sample));
-    if (latencyHistory.length > 10) {
+    if (latencyHistory.length > 14) {
       latencyHistory.shift();
     }
 
-    // Nếu mới chỉ có 1 điểm dữ liệu, bổ sung nền mượt để đường cong hiển thị đẹp ngay từ lần tải đầu
     const series = latencyHistory.length >= 2 ? latencyHistory : [sample * 0.85, sample, sample * 0.95, sample];
     const maxVal = Math.max(50, ...series) * 1.2;
-    const yMaxEl = document.getElementById("lat-y-max");
-    const yMidEl = document.getElementById("lat-y-mid");
-    if (yMaxEl) yMaxEl.textContent = String(Math.round(maxVal));
-    if (yMidEl) yMidEl.textContent = String(Math.round(maxVal / 2));
+    setTextIfChanged("lat-y-max", Math.round(maxVal));
+    setTextIfChanged("lat-y-mid", Math.round(maxVal / 2));
 
     const leftX = 32;
     const rightX = 350;
@@ -98,57 +122,67 @@ export function createStatusTabController() {
     areaEl.setAttribute("d", areaPath);
   }
 
-  async function loadStatus(checkGemini = false) {
+  async function loadStatus(checkGemini = false, { silent = false } = {}) {
+    if (isFetching && silent) return;
+    isFetching = true;
     try {
       const data = await apiRequest(`/api/status${checkGemini ? "?check_gemini=1" : ""}`);
       const isOnline = data.bot.online;
 
       const headerBadge = document.getElementById("hdr-status-badge");
-      headerBadge.textContent = isOnline ? "● Online" : "● Offline";
-      headerBadge.className = `text-[11px] font-medium px-2.5 py-1 rounded-full border ${
-        isOnline
-          ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-          : "bg-rose-500/15 text-rose-300 border-rose-500/30"
-      }`;
+      if (headerBadge) {
+        const badgeText = isOnline ? "● Online" : "● Offline";
+        if (headerBadge.textContent !== badgeText) headerBadge.textContent = badgeText;
+        headerBadge.className = `text-[11px] font-medium px-2.5 py-1 rounded-full border transition-colors duration-300 ${
+          isOnline
+            ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+            : "bg-rose-500/15 text-rose-300 border-rose-500/30"
+        }`;
+      }
 
-      document.getElementById("st-online").innerHTML = isOnline
-        ? '<span class="text-emerald-400">Online</span>'
-        : '<span class="text-rose-400">Offline</span>';
-      document.getElementById("st-ping").textContent = data.bot.ping_ms !== null ? `${data.bot.ping_ms} ms` : "—";
-      document.getElementById("st-botname").textContent = data.bot.username || "—";
-      document.getElementById("st-uptime").textContent = data.bot.uptime_human || "0s";
-      document.getElementById("st-guilds").textContent = String(data.bot.guild_count ?? 0);
-      document.getElementById("st-version").textContent = `v${data.bot.version} · py ${data.bot.python_version}`;
+      const stOnlineEl = document.getElementById("st-online");
+      if (stOnlineEl) {
+        const onlineHtml = isOnline
+          ? '<span class="text-emerald-400">Online</span>'
+          : '<span class="text-rose-400">Offline</span>';
+        if (stOnlineEl.innerHTML !== onlineHtml) stOnlineEl.innerHTML = onlineHtml;
+      }
 
-      const modelsCountEl = document.getElementById("st-models-count");
-      if (modelsCountEl) modelsCountEl.textContent = String(data.gemini.discovered_count ?? 0);
-      const todayKpiEl = document.getElementById("st-today-kpi");
-      if (todayKpiEl) todayKpiEl.textContent = String(data.stats.today_total ?? 0);
+      setTextIfChanged("st-ping", data.bot.ping_ms !== null ? `${data.bot.ping_ms} ms` : "—");
+      setTextIfChanged("st-botname", data.bot.username || "—");
+      setTextIfChanged("st-uptime", data.bot.uptime_human || "0s");
+      setTextIfChanged("st-guilds", String(data.bot.guild_count ?? 0));
+      setTextIfChanged("st-version", `v${data.bot.version} · py ${data.bot.python_version}`);
+      setTextIfChanged("st-models-count", String(data.gemini.discovered_count ?? 0));
+      setTextIfChanged("st-today-kpi", String(data.stats.today_total ?? 0));
 
       // Tài nguyên RAM và CPU của container
       const res = data.resources;
-      document.getElementById("st-ram").textContent = `${res.ram_used_mb} / ${res.ram_limit_mb} MB`;
-      document.getElementById("st-ram-pct").textContent = `${res.ram_percent}%`;
+      setTextIfChanged("st-ram", `${res.ram_used_mb} / ${res.ram_limit_mb} MB`);
+      setTextIfChanged("st-ram-pct", `${res.ram_percent}%`);
       const ramBar = document.getElementById("st-ram-bar");
-      ramBar.style.width = `${Math.min(100, res.ram_percent)}%`;
-      ramBar.className = `ox-progress-fill ${
-        res.ram_percent > 85 ? "bg-rose-500" : res.ram_percent > 65 ? "bg-amber-400" : "bg-emerald-500"
-      }`;
-      document.getElementById("st-ram-rss").textContent = `Tiến trình: ${res.ram_rss_mb} MB`;
-      document.getElementById("st-cpu").textContent = `${res.cpu_percent}% CPU`;
-      document.getElementById("st-threads").textContent = `${res.threads} luồng`;
-      document.getElementById("st-requests-brief").textContent =
-        `Hôm nay: ${data.stats.today_total} req · Tổng: ${data.stats.total} req`;
+      if (ramBar) {
+        ramBar.style.width = `${Math.min(100, res.ram_percent)}%`;
+        ramBar.className = `ox-progress-fill ${
+          res.ram_percent > 85 ? "bg-rose-500" : res.ram_percent > 65 ? "bg-amber-400" : "bg-emerald-500"
+        }`;
+      }
+      setTextIfChanged("st-ram-rss", `Tiến trình: ${res.ram_rss_mb} MB`);
+      setTextIfChanged("st-cpu", `${res.cpu_percent}% CPU`);
+      setTextIfChanged("st-threads", `${res.threads} luồng`);
+      setTextIfChanged("st-requests-brief", `Hôm nay: ${data.stats.today_total} req · Tổng: ${data.stats.total} req`);
 
       // Trạng thái Gemini API và chuỗi Auto
       if (data.gemini.check) {
         const check = data.gemini.check;
-        document.getElementById("st-gemini-check").innerHTML = check.ok
-          ? `<span class="text-emerald-400">🟢 Kết nối OK</span> · ${check.latency_ms} ms`
-          : `<span class="text-rose-400">🔴 Lỗi (${escapeHtml(check.message)})</span> · ${check.latency_ms} ms`;
+        const checkEl = document.getElementById("st-gemini-check");
+        if (checkEl) {
+          checkEl.innerHTML = check.ok
+            ? `<span class="text-emerald-400">🟢 Kết nối OK</span> · ${check.latency_ms} ms`
+            : `<span class="text-rose-400">🔴 Lỗi (${escapeHtml(check.message)})</span> · ${check.latency_ms} ms`;
+        }
       }
-      const chainEl = document.getElementById("st-auto-chain");
-      chainEl.innerHTML = data.gemini.auto_chain
+      const chainHtml = data.gemini.auto_chain
         .map((item, idx) => {
           const cd = item.cooldown_left > 0
             ? ` <span class="text-amber-300">⏳${Math.ceil(item.cooldown_left)}s</span>`
@@ -157,43 +191,53 @@ export function createStatusTabController() {
           return `<span class="px-2 py-1 rounded-md bg-[#0a0d12] border border-[#1e232e] font-mono text-[11px]">${escapeHtml(item.id)}${cd}</span>${arrow}`;
         })
         .join("");
-      document.getElementById("st-gemini-meta").textContent =
-        `${data.gemini.discovered_count} model chat` +
-        (data.gemini.last_error ? ` · ⚠️ ${data.gemini.last_error}` : "");
+      if (chainHtml !== lastChainHtml) {
+        const chainEl = document.getElementById("st-auto-chain");
+        if (chainEl) chainEl.innerHTML = chainHtml;
+        lastChainHtml = chainHtml;
+      }
+      setTextIfChanged(
+        "st-gemini-meta",
+        `${data.gemini.discovered_count} model chat` + (data.gemini.last_error ? ` · ⚠️ ${data.gemini.last_error}` : "")
+      );
 
       // Trạng thái MongoDB Atlas & bộ đệm đồng bộ RAM
       const db = data.mongodb;
       const dbBadge = document.getElementById("st-db-badge");
-      dbBadge.textContent = !db.enabled ? "Chưa bật" : db.ok ? "🟢 Hoạt động" : "🔴 Lỗi";
-      dbBadge.className = `text-[11px] px-2 py-0.5 rounded-full ${
-        !db.enabled
-          ? "bg-[#181d27] text-[#8b95a7]"
-          : db.ok
-            ? "bg-emerald-500/15 text-emerald-300"
-            : "bg-rose-500/15 text-rose-300"
-      }`;
-      document.getElementById("st-db-ms").textContent = db.ok ? `${db.latency_ms} ms` : "—";
-      document.getElementById("st-db-active").textContent = db.active_sessions ?? "—";
-      document.getElementById("st-db-archived").textContent = db.archived_sessions ?? "—";
+      if (dbBadge) {
+        const dbBadgeText = !db.enabled ? "Chưa bật" : db.ok ? "🟢 Hoạt động" : "🔴 Lỗi";
+        if (dbBadge.textContent !== dbBadgeText) dbBadge.textContent = dbBadgeText;
+        dbBadge.className = `text-[11px] px-2 py-0.5 rounded-full ${
+          !db.enabled
+            ? "bg-[#181d27] text-[#8b95a7]"
+            : db.ok
+              ? "bg-emerald-500/15 text-emerald-300"
+              : "bg-rose-500/15 text-rose-300"
+        }`;
+      }
+      setTextIfChanged("st-db-ms", db.ok ? `${db.latency_ms} ms` : "—");
+      setTextIfChanged("st-db-active", db.active_sessions ?? "—");
+      setTextIfChanged("st-db-archived", db.archived_sessions ?? "—");
       if (db.storage_mb !== null) {
         const pct = Math.min(100, (db.storage_mb / db.quota_mb) * 100);
-        document.getElementById("st-db-storage").textContent = `${db.storage_mb} / ${db.quota_mb} MB (${pct.toFixed(1)}%)`;
-        document.getElementById("st-db-bar").style.width = `${pct}%`;
+        setTextIfChanged("st-db-storage", `${db.storage_mb} / ${db.quota_mb} MB (${pct.toFixed(1)}%)`);
+        const dbBar = document.getElementById("st-db-bar");
+        if (dbBar) dbBar.style.width = `${pct}%`;
       } else {
-        document.getElementById("st-db-storage").textContent = "—";
+        setTextIfChanged("st-db-storage", "—");
       }
 
       const pendingCount = db.sync?.pending_count ?? 0;
-      const syncDetailEl = document.getElementById("st-sync-detail");
-      if (syncDetailEl) {
-        syncDetailEl.textContent =
-          pendingCount > 0
-            ? `⚠️ Bộ đệm RAM: ${pendingCount} mục chờ đồng bộ Atlas`
-            : "✓ Bộ đệm RAM đã đồng bộ hoàn toàn với Atlas";
-      }
+      setTextIfChanged(
+        "st-sync-detail",
+        pendingCount > 0
+          ? `⚠️ Bộ đệm RAM: ${pendingCount} mục chờ đồng bộ Atlas`
+          : "✓ Bộ đệm RAM đã đồng bộ hoàn toàn với Atlas"
+      );
       const sidebarSyncEl = document.getElementById("sidebar-sync-badge");
       if (sidebarSyncEl) {
-        sidebarSyncEl.textContent = pendingCount > 0 ? `${pendingCount} chờ sync` : "Đã đồng bộ";
+        const syncLabel = pendingCount > 0 ? `${pendingCount} chờ sync` : "Đã đồng bộ";
+        if (sidebarSyncEl.textContent !== syncLabel) sidebarSyncEl.textContent = syncLabel;
         sidebarSyncEl.className = `font-mono ${pendingCount > 0 ? "text-amber-400" : "text-emerald-400"}`;
       }
       const pendingDot = document.getElementById("topbar-pending-dot");
@@ -202,29 +246,28 @@ export function createStatusTabController() {
         pendingDot.classList.toggle("hidden", pendingCount <= 0);
       }
 
-      // Cập nhật 2 biểu đồ đặc trưng Oxfin
+      // Cập nhật mượt 2 biểu đồ tại chỗ
       renderUsageBarChart(data.stats);
       renderLatencySpline(data.bot.ping_ms, db.ok ? db.latency_ms : null);
 
       // Chi tiết thống kê sử dụng
       const stats = data.stats;
-      document.getElementById("st-usage-summary").textContent =
-        `Tổng request: ${stats.total} · Thành công: ${stats.success_rate !== null ? `${stats.success_rate}%` : "—"} · Lỗi: ${stats.errors} · Hôm nay (Pacific): ${stats.today_total}`;
+      setTextIfChanged(
+        "st-usage-summary",
+        `Tổng request: ${stats.total} · Thành công: ${stats.success_rate !== null ? `${stats.success_rate}%` : "—"} · Lỗi: ${stats.errors} · Hôm nay (Pacific): ${stats.today_total}`
+      );
       const dailyModelsText = Object.entries(stats.daily_models || {})
         .map(([modelId, count]) => `${modelId} (×${count})`)
         .join(", ") || "Chưa có";
-      document.getElementById("st-usage-models").textContent = `Model dùng hôm nay: ${dailyModelsText}`;
+      setTextIfChanged("st-usage-models", `Model dùng hôm nay: ${dailyModelsText}`);
       const featuresText = Object.entries(stats.features || {})
         .map(([feature, count]) => `${feature}: ${count}`)
         .join(" · ") || "—";
-      document.getElementById("st-usage-features").textContent = `Tính năng: ${featuresText}`;
-      document.getElementById("st-usage-err").textContent = stats.last_error
-        ? `⚠️ Lỗi gần nhất: ${stats.last_error.message}`
-        : "";
+      setTextIfChanged("st-usage-features", `Tính năng: ${featuresText}`);
+      setTextIfChanged("st-usage-err", stats.last_error ? `⚠️ Lỗi gần nhất: ${stats.last_error.message}` : "");
 
-      // Danh sách Server Discord
-      const guildListEl = document.getElementById("st-guild-list");
-      guildListEl.innerHTML = data.bot.guilds.length
+      // Danh sách Server Discord (chỉ cập nhật DOM khi nội dung thực sự thay đổi để giữ nguyên vị trí cuộn)
+      const guildsHtml = data.bot.guilds.length
         ? data.bot.guilds
             .map(
               (guild) =>
@@ -232,39 +275,34 @@ export function createStatusTabController() {
             )
             .join("")
         : '<div class="py-2 text-[#5e6778]">Chưa tham gia server nào hoặc bot đang khởi động.</div>';
+      if (guildsHtml !== lastGuildsHtml) {
+        const guildListEl = document.getElementById("st-guild-list");
+        if (guildListEl) guildListEl.innerHTML = guildsHtml;
+        lastGuildsHtml = guildsHtml;
+      }
     } catch (err) {
-      console.error(err);
+      if (!silent) console.error(err);
+    } finally {
+      isFetching = false;
     }
   }
 
   function bindEvents() {
-    document.getElementById("btn-refresh-status").addEventListener("click", () => loadStatus(false));
-    document.getElementById("btn-check-gemini").addEventListener("click", () => loadStatus(true));
+    document.getElementById("btn-refresh-status").addEventListener("click", () => loadStatus(false, { silent: false }));
+    document.getElementById("btn-check-gemini").addEventListener("click", () => loadStatus(true, { silent: false }));
     document.getElementById("btn-clear-cd").addEventListener("click", async () => {
       try {
         const res = await apiRequest("/api/models/clear-cooldowns", { method: "POST" });
         showToast(`Đã xóa cooldown của ${res.cleared} model.`);
-        loadStatus(false);
+        loadStatus(false, { silent: true });
       } catch (err) {
         showToast(err.message, false);
       }
     });
-    document.getElementById("auto-refresh-toggle").addEventListener("change", (event) => {
-      clearInterval(statusTimer);
-      if (event.target.checked) {
-        statusTimer = setInterval(() => loadStatus(false), 5000);
-      }
-    });
-  }
-
-  function startAutoRefresh() {
-    clearInterval(statusTimer);
-    statusTimer = setInterval(() => loadStatus(false), 5000);
   }
 
   return {
     bindEvents,
     loadStatus,
-    startAutoRefresh,
   };
 }
