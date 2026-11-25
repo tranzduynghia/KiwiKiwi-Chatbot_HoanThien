@@ -165,7 +165,7 @@ body.sidebar-collapsed .ox-main-wrapper {
   background: transparent;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background-color 0.16s ease, color 0.16s ease;
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease, transform 150ms ease;
   text-align: left;
 }
 
@@ -174,11 +174,16 @@ body.sidebar-collapsed .ox-main-wrapper {
   height: 17px;
   flex-shrink: 0;
   opacity: 0.78;
+  transition: color 200ms ease, opacity 200ms ease;
 }
 
 .tab-btn:hover {
   color: #f8fafc;
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn:active {
+  transform: scale(0.98);
 }
 
 .tab-btn[data-active="true"] {
@@ -220,13 +225,18 @@ body.sidebar-collapsed .ox-main-wrapper {
   justify-content: center;
   cursor: pointer;
   position: relative;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  transition: all 150ms ease;
 }
 
 .ox-icon-btn:hover {
   background-color: #1e2431;
   color: #ffffff;
   border-color: var(--ox-border-strong);
+  filter: brightness(1.1);
+}
+
+.ox-icon-btn:active {
+  transform: scale(0.95);
 }
 
 .ox-notif-dot {
@@ -262,7 +272,7 @@ body.sidebar-collapsed .ox-main-wrapper {
   border: 1px solid var(--ox-border);
   color: var(--ox-text);
   font-size: 0.82rem;
-  transition: border-color 0.15s ease;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
 .ox-search-input::placeholder {
@@ -293,7 +303,7 @@ body.sidebar-collapsed .ox-main-wrapper {
   font-size: 0.85rem;
   color: var(--ox-text);
   width: 100%;
-  transition: border-color 0.15s ease;
+  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
 .inp:focus {
@@ -309,16 +319,17 @@ body.sidebar-collapsed .ox-main-wrapper {
   border-radius: 8px;
   font-size: 0.82rem;
   border: 1px solid transparent;
-  transition: background-color 0.15s ease, transform 0.1s ease;
+  transition: all 150ms ease;
   cursor: pointer;
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background-color: var(--ox-accent-hover);
+  filter: brightness(1.1);
 }
 
-.btn-primary:active {
-  transform: translateY(1px);
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .btn-ghost {
@@ -329,13 +340,18 @@ body.sidebar-collapsed .ox-main-wrapper {
   border-radius: 8px;
   font-size: 0.8rem;
   border: 1px solid var(--ox-border);
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: all 150ms ease;
   cursor: pointer;
 }
 
-.btn-ghost:hover {
+.btn-ghost:hover:not(:disabled) {
   background-color: #212836;
   border-color: var(--ox-border-strong);
+  filter: brightness(1.1);
+}
+
+.btn-ghost:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 .btn-danger {
@@ -346,11 +362,16 @@ body.sidebar-collapsed .ox-main-wrapper {
   border-radius: 7px;
   font-size: 0.75rem;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  transition: all 150ms ease;
 }
 
-.btn-danger:hover {
+.btn-danger:hover:not(:disabled) {
   background-color: rgba(225, 29, 72, 0.24);
+  filter: brightness(1.1);
+}
+
+.btn-danger:active:not(:disabled) {
+  transform: scale(0.95);
 }
 
 /* ==========================================================================
@@ -560,6 +581,21 @@ body.sidebar-collapsed .ox-main-wrapper {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes oxTabFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ox-tab-enter {
+  animation: oxTabFadeIn 200ms ease-out both;
 }
 
 .ox-enter {

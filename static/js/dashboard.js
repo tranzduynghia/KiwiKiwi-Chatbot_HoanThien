@@ -65,15 +65,31 @@ const AUTO_REFRESH_INTERVAL_MS = 2000;
 let activeTab = "status";
 let pollTimer = null;
 
-// Kích hoạt tab theo mã tên, đồng bộ URL hash và đóng ngăn kéo sidebar trên màn hình nhỏ
+// Kích hoạt tab theo mã tên, phát hiệu ứng chuyển trang mượt 200ms và đồng bộ URL hash
 function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}) {
   const safeTab = VALID_TABS.has(targetTab) ? targetTab : "status";
+  const isTabChanged = activeTab !== safeTab;
   activeTab = safeTab;
+
+  const mainEl = document.querySelector("main");
+  if (mainEl) {
+    mainEl.dataset.activeTab = safeTab;
+  }
+
   document.querySelectorAll(".tab-btn").forEach((item) => {
     item.dataset.active = String(item.dataset.tab === safeTab);
   });
   document.querySelectorAll(".tab-panel").forEach((panel) => {
-    panel.classList.toggle("hidden", panel.id !== `tab-${safeTab}`);
+    const isTarget = panel.id === `tab-${safeTab}`;
+    panel.classList.toggle("hidden", !isTarget);
+    if (isTarget) {
+      // Khởi phát lại hiệu ứng mờ dần & trượt nhẹ lên mỗi khi chuyển tab (không chạy khi poll nền 2s)
+      panel.classList.remove("ox-tab-enter");
+      if (isTabChanged) {
+        void panel.offsetWidth;
+        panel.classList.add("ox-tab-enter");
+      }
+    }
   });
   document.body.classList.remove("sidebar-mobile-open");
 
