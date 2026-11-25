@@ -29,7 +29,8 @@ function setTextIfChanged(id, value) {
 
 export function createStatusTabController() {
   const latencyHistory = [];
-  let isFetching = false;
+  let isFetchingSystem = false;
+  let isFetchingGemini = false;
   let barsInitialized = false;
   let lastChainHtml = "";
   let lastGuildsHtml = "";
@@ -123,8 +124,13 @@ export function createStatusTabController() {
   }
 
   async function loadStatus(checkGemini = false, { silent = false } = {}) {
-    if (isFetching && silent) return;
-    isFetching = true;
+    if (checkGemini) {
+      if (isFetchingGemini && silent) return;
+      isFetchingGemini = true;
+    } else {
+      if (isFetchingSystem && silent) return;
+      isFetchingSystem = true;
+    }
     try {
       const data = await apiRequest(`/api/status${checkGemini ? "?check_gemini=1" : ""}`);
       const isOnline = data.bot.online;
@@ -283,7 +289,8 @@ export function createStatusTabController() {
     } catch (err) {
       if (!silent) console.error(err);
     } finally {
-      isFetching = false;
+      if (checkGemini) isFetchingGemini = false;
+      else isFetchingSystem = false;
     }
   }
 

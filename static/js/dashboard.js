@@ -61,9 +61,13 @@ promptConfigTab = createPromptConfigTabController({
 modelsTab = createModelsTabController({ onRefreshAll: refreshAll });
 
 const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "audit"]);
-const AUTO_REFRESH_INTERVAL_MS = 2000;
+const SYSTEM_POLL_INTERVAL_MS = 1000;
+const GEMINI_INITIAL_DELAY_MS = 200;
+const GEMINI_POLL_INTERVAL_MS = 15000;
 let activeTab = "status";
-let pollTimer = null;
+let systemPollTimer = null;
+let geminiPollTimer = null;
+let geminiInitialTimer = null;
 
 // Kích hoạt tab theo mã tên, phát hiệu ứng chuyển trang mượt 200ms và đồng bộ URL hash
 function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}) {
@@ -83,7 +87,7 @@ function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}
     const isTarget = panel.id === `tab-${safeTab}`;
     panel.classList.toggle("hidden", !isTarget);
     if (isTarget) {
-      // Khởi phát lại hiệu ứng mờ dần & trượt nhẹ lên mỗi khi chuyển tab (không chạy khi poll nền 2s)
+      // Khởi phát lại hiệu ứng mờ dần & trượt nhẹ lên mỗi khi chuyển tab (không chạy khi poll nền 1s)
       panel.classList.remove("ox-tab-enter");
       if (isTabChanged) {
         void panel.offsetWidth;
@@ -107,8 +111,8 @@ function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}
   }
 }
 
-// Chạy 1 nhịp cập nhật nền im lặng mỗi 2000ms (không nhấp nháy, không đóng modal, giữ nguyên bộ lọc & cuộn)
-function runSilentBackgroundTick() {
+// Nhịp 1000ms (1s): cập nhật nền im lặng RAM, CPU, Discord Ping, Uptime, bộ đếm & nhật ký đang mở
+function runSystemPollTick() {
   if (document.hidden) return;
   statusTab.loadStatus(false, { silent: true });
   if (activeTab === "audit") {
@@ -118,19 +122,42 @@ function runSilentBackgroundTick() {
   }
 }
 
+// Nhịp 15000ms (15s): đo độ trễ Gemini API im lặng tránh chạm hạn mức 429 hoặc cooldown giả
+function runGeminiLatencyTick() {
+  if (document.hidden) return;
+  statusTab.loadStatus(true, { silent: true });
+}
+
 function stopBackgroundPolling() {
-  if (pollTimer !== null) {
-    clearInterval(pollTimer);
-    pollTimer = null;
+  if (systemPollTimer !== null) {
+    clearInterval(systemPollTimer);
+    systemPollTimer = null;
+  }
+  if (geminiPollTimer !== null) {
+    clearInterval(geminiPollTimer);
+    geminiPollTimer = null;
+  }
+  if (geminiInitialTimer !== null) {
+    clearTimeout(geminiInitialTimer);
+    geminiInitialTimer = null;
   }
 }
 
-function startBackgroundPolling() {
+function startBackgroundPolling({ scheduleInitialGemini = false } = {}) {
   stopBackgroundPolling();
   const toggleEl = document.getElementById("auto-refresh-toggle");
   if (toggleEl && !toggleEl.checked) return;
   if (document.hidden) return;
-  pollTimer = setInterval(runSilentBackgroundTick, AUTO_REFRESH_INTERVAL_MS);
+
+  systemPollTimer = setInterval(runSystemPollTick, SYSTEM_POLL_INTERVAL_MS);
+  geminiPollTimer = setInterval(runGeminiLatencyTick, GEMINI_POLL_INTERVAL_MS);
+
+  if (scheduleInitialGemini) {
+    geminiInitialTimer = setTimeout(() => {
+      geminiInitialTimer = null;
+      runGeminiLatencyTick();
+    }, GEMINI_INITIAL_DELAY_MS);
+  }
 }
 
 // Áp dụng hiệu ứng mờ dần & trượt nhẹ lên 1 lần duy nhất cho các thẻ khi tải trang đầu tiên
@@ -156,7 +183,7 @@ function bindShellControls() {
     }
   });
 
-  // Bật / tắt chu kỳ tự làm mới 2000ms từ công tắc trên giao diện
+  // Bật / tắt chu kỳ tự làm mới (1s hệ thống + 15s Gemini) từ công tắc trên giao diện
   const autoToggle = document.getElementById("auto-refresh-toggle");
   if (autoToggle) {
     autoToggle.addEventListener("change", () => {
@@ -168,14 +195,14 @@ function bindShellControls() {
     });
   }
 
-  // Tự động tạm dừng polling 2000ms khi tab trình duyệt bị ẩn và tiếp tục ngay khi quay lại
+  // Tự động tạm dừng cả 2 chu kỳ polling khi tab trình duyệt bị ẩn và tiếp tục ngay khi quay lại
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopBackgroundPolling();
     } else {
       const toggleEl = document.getElementById("auto-refresh-toggle");
       if (!toggleEl || toggleEl.checked) {
-        runSilentBackgroundTick();
+        runSystemPollTick();
         startBackgroundPolling();
       }
     }
@@ -260,4 +287,4 @@ if (VALID_TABS.has(initialTab) && initialTab !== "status") {
 
 statusTab.loadStatus(false, { silent: false });
 loadConfig();
-startBackgroundPolling();
+startBackgroundPolling({ scheduleInitialGemini: true });
