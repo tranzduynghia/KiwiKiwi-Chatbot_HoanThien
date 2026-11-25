@@ -266,11 +266,32 @@ def register_chat_commands(
                 reason = f"bị chặn ({parsed.blocked})" if parsed.blocked else f"finish_reason={parsed.finish}"
                 raise UserError(f"Model không trả về nội dung — {reason}. Hãy thử diễn đạt lại.")
 
-            # Lưu lượt hội thoại vào phiên và kho lưu trữ vĩnh viễn
+            # Lưu lượt hội thoại kèm thông tin người dùng (username, avatar, vai trò server) vào MongoDB
             turns = 0
             if can_save:
                 stored_user = ("[OCR] " if ocr else "") + (f"[Đính kèm: {file.filename}] " if file else "") + prompt
-                turns = await session_repo.save_turn(uid, stored_user, parsed.text, session_doc, model_id) or 0
+                member_roles = []
+                for server_role in getattr(interaction.user, "roles", []) or []:
+                    if server_role.name == "@everyone":
+                        continue
+                    color_hex = str(server_role.color) if getattr(server_role.color, "value", 0) else "#64748b"
+                    member_roles.append({"id": str(server_role.id), "name": server_role.name, "color": color_hex})
+                user_meta = {
+                    "username": getattr(interaction.user, "name", ""),
+                    "display_name": getattr(interaction.user, "display_name", "") or getattr(interaction.user, "name", ""),
+                    "avatar_url": str(getattr(interaction.user.display_avatar, "url", "") or ""),
+                    "guild_id": str(interaction.guild.id) if interaction.guild else "",
+                    "guild_name": interaction.guild.name if interaction.guild else "",
+                    "server_roles": member_roles,
+                }
+                turns = await session_repo.save_turn(
+                    uid,
+                    stored_user,
+                    parsed.text,
+                    session_doc,
+                    model_id,
+                    user_meta=user_meta,
+                ) or 0
                 if not turns:
                     notes.append("Không lưu được phiên/lưu trữ (lỗi MongoDB) — tin nhắn này sẽ không được nhớ")
 

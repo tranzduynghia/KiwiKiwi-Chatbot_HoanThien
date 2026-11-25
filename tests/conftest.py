@@ -226,13 +226,35 @@ class FakeGeminiClient:
 
 
 class FakeBot:
-    """Mô phỏng client Discord tối thiểu phục vụ API `/health` và `/api/status`."""
+    """Mô phỏng client Discord tối thiểu phục vụ API `/health`, `/api/status` và tra cứu vai trò/người dùng."""
 
     def __init__(self):
         self.user = SimpleNamespace(id=999999999999999999, __str__=lambda _s: "KiwiKiwi#0001")
-        self.guilds = [SimpleNamespace(id=111, name="Test Guild", member_count=42)]
+        role_mod = SimpleNamespace(id=501, name="Moderator", color=SimpleNamespace(value=0xE11D48, __str__=lambda _s: "#e11d48"))
+        role_vip = SimpleNamespace(id=502, name="VIP", color=SimpleNamespace(value=0x3B82F6, __str__=lambda _s: "#3b82f6"))
+        role_everyone = SimpleNamespace(id=500, name="@everyone", color=SimpleNamespace(value=0, __str__=lambda _s: "#000000"))
+        self._members = {
+            777888: SimpleNamespace(
+                id=777888,
+                name="kiwi_tester",
+                display_name="Kiwi Tester",
+                display_avatar=SimpleNamespace(url="https://cdn.discordapp.com/avatars/777888/abc.png"),
+                roles=[role_everyone, role_mod],
+            )
+        }
+        guild = SimpleNamespace(
+            id=111,
+            name="Test Guild",
+            member_count=42,
+            roles=[role_everyone, role_mod, role_vip],
+            get_member=lambda uid: self._members.get(uid),
+        )
+        self.guilds = [guild]
         self.latency = 0.045
         self.ready_at = 1700000000.0
+
+    def get_user(self, uid: int):
+        return self._members.get(uid)
 
     def is_ready(self) -> bool:
         return True

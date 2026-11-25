@@ -119,7 +119,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert client.put("/api/permissions/users/helper1/password", json={"password": "NewPass456!"}).status_code == 200
         assert client.delete("/api/permissions/users/helper1").status_code == 200
 
-        # Kiểm tra tìm kiếm nội dung phiên chat từ MongoDB Atlas qua /api/sessions/search
+        # Kiểm tra bộ lọc vai trò server và tra cứu/duyệt toàn bộ phiên chat từ MongoDB Atlas
         await app_container.session_repo.save_turn(
             777888,
             "Kiểm tra từ khóa KiwiKiwi",
@@ -127,11 +127,24 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
             None,
             "gemini-2.5-flash",
         )
-        search_res = client.get("/api/sessions/search?q=KiwiKiwi")
-        assert search_res.status_code == 200
-        search_json = search_res.json()
-        assert search_json["total"] == 2
-        assert all({"chat_id", "content", "timestamp"} <= set(row.keys()) for row in search_json["items"])
+        filters_res = client.get("/api/sessions/filters")
+        assert filters_res.status_code == 200
+        role_names = [r["name"] for r in filters_res.json()["server_roles"]]
+        assert "Moderator" in role_names
+
+        # Duyệt toàn bộ không cần nhập ID + kiểm tra tự bổ sung avatar & username từ Discord client
+        browse_res = client.get("/api/sessions/search")
+        assert browse_res.status_code == 200
+        browse_json = browse_res.json()
+        assert browse_json["total"] == 2
+        assert browse_json["items"][0]["username"] == "kiwi_tester"
+        assert browse_json["items"][0]["avatar_url"].startswith("https://cdn.discordapp.com/")
+
+        # Lọc theo username và server_role
+        filtered_res = client.get("/api/sessions/search?username=kiwi_tester&server_role=501")
+        assert filtered_res.status_code == 200
+        assert filtered_res.json()["total"] == 2
+        assert all({"chat_id", "content", "timestamp", "avatar_url"} <= set(row.keys()) for row in filtered_res.json()["items"])
 
         # Kiểm tra Audit Log đã ghi nhận toàn bộ thay đổi
         audit_res = client.get("/api/audit-logs")

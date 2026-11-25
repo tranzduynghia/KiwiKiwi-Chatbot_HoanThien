@@ -60,19 +60,56 @@ async def test_session_repository_save_load_and_end(app_container, fake_db):
 
 @pytest.mark.asyncio
 async def test_session_repository_search_messages(app_container, fake_db):
-    """Kiểm tra tìm kiếm nội dung phiên chat theo từ khóa, vai trò và mã phiên trên MongoDB."""
+    """Kiểm tra duyệt toàn bộ bản ghi và lọc theo từ khóa, username, vai trò server, user_id trên MongoDB."""
     await app_container.session_repo.attach_db(fake_db)
-    await app_container.session_repo.save_turn(1001, "Hướng dẫn cài đặt Python", "Bạn hãy tải Python 3.12.", None, "gemini-2.5-flash")
-    await app_container.session_repo.save_turn(2002, "Thời tiết hôm nay", "Trời nắng đẹp.", None, "gemini-3.5-flash")
+    await app_container.session_repo.save_turn(
+        1001,
+        "Hướng dẫn cài đặt Python",
+        "Bạn hãy tải Python 3.12.",
+        None,
+        "gemini-2.5-flash",
+        user_meta={
+            "username": "alice_dev",
+            "display_name": "Alice Dev",
+            "avatar_url": "https://cdn.discordapp.com/avatars/1001/alice.png",
+            "guild_name": "Kiwi Server",
+            "server_roles": [{"id": "901", "name": "Admin", "color": "#e11d48"}],
+        },
+    )
+    await app_container.session_repo.save_turn(
+        2002,
+        "Thời tiết hôm nay",
+        "Trời nắng đẹp.",
+        None,
+        "gemini-3.5-flash",
+        user_meta={
+            "username": "bob_user",
+            "display_name": "Bob",
+            "avatar_url": "https://cdn.discordapp.com/avatars/2002/bob.png",
+            "guild_name": "Kiwi Server",
+            "server_roles": [{"id": "902", "name": "Member", "color": "#22c55e"}],
+        },
+    )
 
-    # Tìm theo từ khóa không phân biệt hoa thường
-    python_hits = await app_container.session_repo.search_messages(query="python")
-    assert len(python_hits) == 2
-    assert all(hit["chat_id"] and hit["timestamp"] for hit in python_hits)
+    # Duyệt toàn bộ mà không cần nhập ID hay từ khóa
+    all_res = await app_container.session_repo.search_messages()
+    assert all_res["total"] == 4
+    assert len(all_res["items"]) == 4
 
-    # Lọc thêm theo vai trò model và user_id
+    # Lọc theo username
+    alice_res = await app_container.session_repo.search_messages(username="alice")
+    assert alice_res["total"] == 2
+    assert all(item["avatar_url"].endswith("alice.png") for item in alice_res["items"])
+
+    # Lọc theo vai trò server (ID hoặc tên vai trò)
+    role_res = await app_container.session_repo.search_messages(server_role="902")
+    assert role_res["total"] == 2
+    assert all(item["username"] == "bob_user" for item in role_res["items"])
+
+    # Lọc kết hợp từ khóa + vai trò model + user_id
     model_only = await app_container.session_repo.search_messages(query="python", role="model", user_id="1001")
-    assert len(model_only) == 1
-    assert model_only[0]["role"] == "model"
-    assert "Python 3.12" in model_only[0]["content"]
+    assert model_only["total"] == 1
+    assert model_only["items"][0]["role"] == "model"
+    assert "Python 3.12" in model_only["items"][0]["content"]
+
 

@@ -81,6 +81,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
     app.include_router(
         create_sessions_router(
             session_repo=container.session_repo,
+            get_bot=get_bot,
             auth_deps=container.auth_deps,
         )
     )
