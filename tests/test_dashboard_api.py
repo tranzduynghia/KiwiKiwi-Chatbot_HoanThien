@@ -56,11 +56,14 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert "/static/js/dashboard.js" in dash_html.text
         assert "id=\"tab-status\"" in dash_html.text
         assert "id=\"tab-models\"" in dash_html.text
+        assert "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128" in dash_html.text
 
         status_res = client.get("/api/status?check_gemini=1")
         assert status_res.status_code == 200
         status_json = status_res.json()
         assert status_json["bot"]["online"] is True
+        assert status_json["bot"]["display_name"] == "KiwiKiwi"
+        assert status_json["bot"]["avatar_url"] == "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128"
         assert status_json["gemini"]["check"]["ok"] is True
 
         ask_res = client.put(

@@ -1,14 +1,30 @@
 <!-- Thanh điều hướng dọc bên trái theo phong cách Oxfin Dark Admin -->
 <aside id="ox-sidebar" class="ox-sidebar">
-  <!-- Logo thương hiệu kiểu hình thoi đỏ đặc trưng -->
+  <!-- Logo thương hiệu hiển thị ảnh đại diện thật của Bot Discord (fallback về biểu tượng hình thoi khi offline) -->
   <div class="ox-brand">
-    <svg width="30" height="28" viewBox="0 0 36 32" fill="none" aria-hidden="true">
-      <path d="M10.5 3L21 16L10.5 29L0 16L10.5 3Z" fill="#f43f5e" />
-      <path d="M18 3L28.5 16L18 29L7.5 16L18 3Z" fill="#e11d48" fill-opacity="0.82" />
-      <path d="M25.5 3L36 16L25.5 29L15 16L25.5 3Z" fill="#fda4af" fill-opacity="0.72" />
-    </svg>
+    <div class="relative w-9 h-9 shrink-0 flex items-center justify-center">
+      <img
+        id="brand-bot-avatar"
+        src="{{ bot_avatar_url or '' }}"
+        alt="{{ bot_display_name or 'KiwiKiwi' }}"
+        class="w-9 h-9 rounded-full object-cover border border-[#2a3140] bg-[#0a0d12] {{ '' if bot_avatar_url else 'hidden' }}"
+      />
+      <svg
+        id="brand-bot-avatar-fallback"
+        width="30"
+        height="28"
+        viewBox="0 0 36 32"
+        fill="none"
+        aria-hidden="true"
+        class="{{ 'hidden' if bot_avatar_url else '' }}"
+      >
+        <path d="M10.5 3L21 16L10.5 29L0 16L10.5 3Z" fill="#f43f5e" />
+        <path d="M18 3L28.5 16L18 29L7.5 16L18 3Z" fill="#e11d48" fill-opacity="0.82" />
+        <path d="M25.5 3L36 16L25.5 29L15 16L25.5 3Z" fill="#fda4af" fill-opacity="0.72" />
+      </svg>
+    </div>
     <div class="min-w-0">
-      <div class="ox-brand-title truncate">KiwiKiwi</div>
+      <div id="brand-bot-name" class="ox-brand-title truncate">{{ bot_display_name or 'KiwiKiwi' }}</div>
     </div>
   </div>
 

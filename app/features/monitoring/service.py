@@ -86,6 +86,21 @@ class MonitoringService:
         bot_ready_at = getattr(bot, "ready_at", None)
         bot_latency = getattr(bot, "latency", 0.0)
 
+        bot_avatar_url = ""
+        bot_display_name = "KiwiKiwi"
+        if bot_user is not None:
+            avatar_asset = getattr(bot_user, "display_avatar", None)
+            if avatar_asset is not None:
+                with_size = getattr(avatar_asset, "with_size", None)
+                sized = with_size(128) if callable(with_size) else avatar_asset
+                bot_avatar_url = str(getattr(sized, "url", "") or getattr(avatar_asset, "url", "") or "")
+            bot_display_name = str(
+                getattr(bot_user, "display_name", "")
+                or getattr(bot_user, "name", "")
+                or str(bot_user)
+                or "KiwiKiwi"
+            )
+
         guilds_list = [
             {"id": str(guild.id), "name": guild.name, "member_count": guild.member_count or 0}
             for guild in sorted(bot_guilds, key=lambda item: item.name.lower())
@@ -95,6 +110,8 @@ class MonitoringService:
             "bot": {
                 "online": bot_ready,
                 "username": str(bot_user) if bot_user else "Đang khởi động...",
+                "display_name": bot_display_name,
+                "avatar_url": bot_avatar_url,
                 "bot_id": str(bot_user.id) if bot_user else "",
                 "ping_ms": round(bot_latency * 1000, 1) if bot_ready else None,
                 "uptime_seconds": uptime_sec,

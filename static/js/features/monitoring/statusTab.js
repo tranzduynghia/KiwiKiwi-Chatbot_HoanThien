@@ -123,6 +123,49 @@ export function createStatusTabController() {
     areaEl.setAttribute("d", areaPath);
   }
 
+  function syncAvatarElement(imgId, fallbackId, url, altName) {
+    const imgEl = document.getElementById(imgId);
+    const fallbackEl = document.getElementById(fallbackId);
+    if (!imgEl || !fallbackEl) return;
+
+    const cleanUrl = String(url || "").trim();
+    if (!cleanUrl) {
+      imgEl.classList.add("hidden");
+      fallbackEl.classList.remove("hidden");
+      return;
+    }
+    if (altName) imgEl.alt = altName;
+    if (imgEl.dataset.loadedSrc !== cleanUrl) {
+      imgEl.dataset.loadedSrc = cleanUrl;
+      imgEl.src = cleanUrl;
+    }
+    if (!imgEl.dataset.hasError) {
+      imgEl.classList.remove("hidden");
+      fallbackEl.classList.add("hidden");
+    }
+  }
+
+  function bindAvatarFallbacks() {
+    [
+      ["brand-bot-avatar", "brand-bot-avatar-fallback"],
+      ["presence-preview-avatar", "presence-preview-avatar-fallback"],
+    ].forEach(([imgId, fallbackId]) => {
+      const imgEl = document.getElementById(imgId);
+      const fallbackEl = document.getElementById(fallbackId);
+      if (!imgEl || !fallbackEl) return;
+      imgEl.addEventListener("error", () => {
+        imgEl.dataset.hasError = "1";
+        imgEl.classList.add("hidden");
+        fallbackEl.classList.remove("hidden");
+      });
+      imgEl.addEventListener("load", () => {
+        delete imgEl.dataset.hasError;
+        imgEl.classList.remove("hidden");
+        fallbackEl.classList.add("hidden");
+      });
+    });
+  }
+
   async function loadStatus(checkGemini = false, { silent = false } = {}) {
     if (checkGemini) {
       if (isFetchingGemini && silent) return;
@@ -154,9 +197,13 @@ export function createStatusTabController() {
         if (stOnlineEl.innerHTML !== onlineHtml) stOnlineEl.innerHTML = onlineHtml;
       }
 
+      const botDisplayName = data.bot.display_name || data.bot.username || "KiwiKiwi";
       setTextIfChanged("st-ping", data.bot.ping_ms !== null ? `${data.bot.ping_ms} ms` : "—");
       setTextIfChanged("st-botname", data.bot.username || "—");
-      if (data.bot.username) setTextIfChanged("presence-preview-botname", data.bot.username);
+      setTextIfChanged("brand-bot-name", botDisplayName);
+      setTextIfChanged("presence-preview-botname", botDisplayName);
+      syncAvatarElement("brand-bot-avatar", "brand-bot-avatar-fallback", data.bot.avatar_url, botDisplayName);
+      syncAvatarElement("presence-preview-avatar", "presence-preview-avatar-fallback", data.bot.avatar_url, botDisplayName);
       setTextIfChanged("st-uptime", data.bot.uptime_human || "0s");
       setTextIfChanged("st-guilds", String(data.bot.guild_count ?? 0));
       setTextIfChanged("st-version", `v${data.bot.version} · py ${data.bot.python_version}`);
@@ -296,6 +343,7 @@ export function createStatusTabController() {
   }
 
   function bindEvents() {
+    bindAvatarFallbacks();
     document.getElementById("btn-refresh-status").addEventListener("click", () => loadStatus(false, { silent: false }));
     document.getElementById("btn-check-gemini").addEventListener("click", () => loadStatus(true, { silent: false }));
     document.getElementById("btn-clear-cd").addEventListener("click", async () => {

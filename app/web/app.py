@@ -37,6 +37,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             auth_deps=container.auth_deps,
             oauth_service=container.oauth_service,
             sync_coordinator=container.sync_coordinator,
+            get_bot=get_bot,
         )
     )
     app.include_router(

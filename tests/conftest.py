@@ -229,7 +229,19 @@ class FakeBot:
     """Mô phỏng client Discord tối thiểu phục vụ API `/health`, `/api/status` và tra cứu vai trò/người dùng."""
 
     def __init__(self):
-        self.user = SimpleNamespace(id=999999999999999999, __str__=lambda _s: "KiwiKiwi#0001")
+        bot_avatar = SimpleNamespace(
+            url="https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128",
+            with_size=lambda size: SimpleNamespace(
+                url=f"https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size={size}"
+            ),
+        )
+        self.user = SimpleNamespace(
+            id=999999999999999999,
+            name="KiwiKiwi",
+            display_name="KiwiKiwi",
+            display_avatar=bot_avatar,
+            __str__=lambda _s: "KiwiKiwi#0001",
+        )
         role_mod = SimpleNamespace(id=501, name="Moderator", color=SimpleNamespace(value=0xE11D48, __str__=lambda _s: "#e11d48"))
         role_vip = SimpleNamespace(id=502, name="VIP", color=SimpleNamespace(value=0x3B82F6, __str__=lambda _s: "#3b82f6"))
         role_everyone = SimpleNamespace(id=500, name="@everyone", color=SimpleNamespace(value=0, __str__=lambda _s: "#000000"))

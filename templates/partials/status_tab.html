@@ -327,7 +327,17 @@
         <div class="text-xs text-[#8b95a7] mb-2">Xem trước trên Discord</div>
         <div class="rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 flex items-center gap-3.5">
           <div class="relative shrink-0">
-            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-rose-800 border border-[#2a3140] flex items-center justify-center text-white font-bold text-base">
+            <img
+              id="presence-preview-avatar"
+              src="{{ bot_avatar_url or '' }}"
+              alt="{{ bot_display_name or 'KiwiKiwi' }}"
+              class="w-12 h-12 rounded-full object-cover border border-[#2a3140] bg-[#131720] {{ '' if bot_avatar_url else 'hidden' }}"
+            />
+            <div
+              id="presence-preview-avatar-fallback"
+              class="w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-rose-800 border border-[#2a3140] flex items-center justify-center text-white font-bold text-base {{ 'hidden' if bot_avatar_url else '' }}"
+              aria-hidden="true"
+            >
               🤖
             </div>
             <span
@@ -337,7 +347,7 @@
           </div>
           <div class="min-w-0 flex-1">
             <div class="flex items-center gap-1.5 flex-wrap">
-              <span id="presence-preview-botname" class="text-sm font-semibold text-white truncate">KiwiKiwi</span>
+              <span id="presence-preview-botname" class="text-sm font-semibold text-white truncate">{{ bot_display_name or 'KiwiKiwi' }}</span>
               <span class="px-1.5 py-0.5 rounded bg-[#5865F2] text-white text-[9px] font-bold tracking-wide">APP</span>
             </div>
             <div id="presence-preview-activity" class="text-xs text-[#8b95a7] mt-0.5 break-words">
