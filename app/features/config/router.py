@@ -41,6 +41,7 @@ def create_config_router(
             {"ask": clean_ask, "session": clean_session},
             updated_by=actor,
             actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(user),
             section="ask",
             summary="Cập nhật cấu hình /ask & phiên chat",
         )
@@ -60,6 +61,7 @@ def create_config_router(
             },
             updated_by=actor,
             actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(user),
             section="prompt",
             summary="Cập nhật System Instruction / OCR Instruction",
         )

@@ -157,7 +157,21 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert len(detail_session["messages"]) == 2
         assert client.get("/api/sessions/nonexistent-id").status_code == 404
 
-        # Kiểm tra Audit Log đã ghi nhận toàn bộ thay đổi
+        # Ghi thêm 1 bản ghi Audit Log từ Discord Admin để kiểm tra tự bổ sung avatar Discord
+        await app_container.audit_service.record(
+            actor="Kiwi Tester (discord:777888)",
+            actor_type="discord",
+            action="update_config",
+            section="ask",
+            summary="Chỉnh cooldown từ Discord",
+            changes=[{"field": "ask.user_cooldown", "before": 5.0, "after": 3.0}],
+        )
+
+        # Kiểm tra Audit Log đã ghi nhận toàn bộ thay đổi kèm diff và avatar Discord
         audit_res = client.get("/api/audit-logs")
         assert audit_res.status_code == 200
-        assert len(audit_res.json()["items"]) >= 5
+        audit_items = audit_res.json()["items"]
+        assert len(audit_items) >= 6
+        discord_audit = next(item for item in audit_items if item.get("actor_discord_id") == "777888")
+        assert discord_audit["actor_avatar_url"].startswith("https://cdn.discordapp.com/")
+        assert discord_audit["changes"] == [{"field": "ask.user_cooldown", "before": 5.0, "after": 3.0}]

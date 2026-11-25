@@ -163,6 +163,7 @@ def create_auth_router(
                 role=payload.role,
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
             )
             return {"ok": True, "item": created, "sync": sync_coordinator.sync_status()}
         except (ValueError, RuntimeError) as exc:
@@ -181,6 +182,7 @@ def create_auth_router(
                 payload.password,
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
             )
             if not updated:
                 raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
@@ -200,6 +202,7 @@ def create_auth_router(
                 current_admin=admin,
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

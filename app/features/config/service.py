@@ -43,6 +43,7 @@ class ConfigService:
         updated_by: str = "dashboard",
         *,
         actor_type: str = "dashboard",
+        actor_meta: dict[str, Any] | None = None,
         section: str = "config",
         summary: str = "Cập nhật cấu hình bot",
     ) -> dict[str, Any]:
@@ -62,6 +63,7 @@ class ConfigService:
             await self._audit.record(
                 actor=updated_by,
                 actor_type=actor_type,
+                actor_meta=actor_meta,
                 action="update_config",
                 section=section,
                 summary=f"{summary} ({len(changes)} thay đổi)",

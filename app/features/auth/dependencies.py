@@ -37,6 +37,21 @@ class AuthDependencies:
             return f"{display} (discord:{user.get('discord_id')})", "discord"
         return str(user.get("username") or "dashboard"), "password"
 
+    @staticmethod
+    def actor_meta(user: dict[str, Any]) -> dict[str, str]:
+        """Trích xuất siêu dữ liệu hiển thị (avatar, tên hiển thị, Discord ID) của người thao tác."""
+        if user.get("auth_type") == "discord":
+            return {
+                "actor_display_name": str(user.get("display_name") or user.get("username") or "Discord User"),
+                "actor_discord_id": str(user.get("discord_id") or ""),
+                "actor_avatar_url": str(user.get("avatar_url") or ""),
+            }
+        return {
+            "actor_display_name": str(user.get("display_name") or user.get("username") or "dashboard"),
+            "actor_discord_id": "",
+            "actor_avatar_url": "",
+        }
+
     def set_session_cookie(self, response: Response, request: Request, session_data: dict[str, Any]) -> None:
         """Gắn cookie phiên đã ký bảo mật vào HTTP response."""
         response.set_cookie(

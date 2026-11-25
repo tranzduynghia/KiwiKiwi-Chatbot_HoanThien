@@ -26,9 +26,10 @@ class AuditService:
         summary: str,
         changes: Optional[list[dict[str, Any]]] = None,
         timestamp: Optional[str] = None,
+        actor_meta: Optional[dict[str, Any]] = None,
         flush: bool = True,
     ) -> dict[str, Any]:
-        """Ghi một bản ghi Audit Log sau khi loại bỏ trường nhạy cảm và cắt gọn giá trị dài."""
+        """Ghi một bản ghi Audit Log sau khi loại bỏ trường nhạy cảm và kèm thông tin avatar người thao tác."""
         safe_changes = []
         for change in changes or []:
             field = str(change.get("field", ""))
@@ -39,10 +40,14 @@ class AuditService:
                 "before": sanitize_audit_value(change.get("before")),
                 "after": sanitize_audit_value(change.get("after")),
             })
+        meta = actor_meta or {}
         doc = {
             "at": timestamp or datetime.now(timezone.utc).isoformat(),
             "actor": actor,
             "actor_type": actor_type,
+            "actor_display_name": str(meta.get("actor_display_name") or actor),
+            "actor_discord_id": str(meta.get("actor_discord_id") or ""),
+            "actor_avatar_url": str(meta.get("actor_avatar_url") or ""),
             "action": action,
             "section": section,
             "summary": summary,

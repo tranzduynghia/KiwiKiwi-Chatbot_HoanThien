@@ -44,6 +44,7 @@ def create_models_router(
             {"models": clean_models},
             updated_by=actor,
             actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(user),
             section="models",
             summary="Cập nhật cấu hình Model Gemini",
         )

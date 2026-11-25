@@ -40,6 +40,7 @@ def create_permissions_router(
                 can_status=payload.can_status,
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
             )
             return {"ok": True, "item": doc, "sync": sync_coordinator.sync_status()}
         except ValueError as exc:
@@ -56,7 +57,12 @@ def create_permissions_router(
                 detail="Không thể tự xóa quyền của chính bạn đang đăng nhập.",
             )
         actor, actor_type = auth_deps.actor_label(admin)
-        deleted = await permission_service.delete_permission(user_id, actor=actor, actor_type=actor_type)
+        deleted = await permission_service.delete_permission(
+            user_id,
+            actor=actor,
+            actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(admin),
+        )
         if not deleted:
             raise HTTPException(status_code=404, detail="Không tìm thấy Discord User ID này.")
         return {"ok": True}

@@ -46,6 +46,7 @@ class PermissionService:
         can_status: bool = False,
         actor: Optional[str] = None,
         actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Thêm hoặc cập nhật quyền cho một Discord User ID kèm ghi Audit Log và đồng bộ Atlas."""
         uid = str(user_id).strip()
@@ -73,6 +74,7 @@ class PermissionService:
             await self._audit.record(
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=actor_meta,
                 action="discord_perm_upsert",
                 section="discord_permissions",
                 summary=f"{'Cập nhật' if before else 'Thêm'} quyền cho Discord ID {uid}",
@@ -90,6 +92,7 @@ class PermissionService:
         *,
         actor: Optional[str] = None,
         actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
     ) -> bool:
         """Xóa phân quyền của một Discord User ID khỏi RAM và MongoDB Atlas."""
         uid = str(user_id).strip()
@@ -102,6 +105,7 @@ class PermissionService:
             await self._audit.record(
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=actor_meta,
                 action="discord_perm_delete",
                 section="discord_permissions",
                 summary=f"Xóa phân quyền Discord ID {uid}",

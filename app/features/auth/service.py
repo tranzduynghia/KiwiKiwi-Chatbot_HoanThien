@@ -51,6 +51,7 @@ class AuthService:
         *,
         actor: Optional[str] = None,
         actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         """Tạo tài khoản Dashboard mới với mật khẩu băm scrypt."""
         uname = username.strip().lower()
@@ -79,6 +80,7 @@ class AuthService:
             await self._audit.record(
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=actor_meta,
                 action="user_create",
                 section="dashboard_users",
                 summary=f"Tạo tài khoản Dashboard '{uname}' (vai trò: {role})",
@@ -100,6 +102,7 @@ class AuthService:
         *,
         actor: Optional[str] = None,
         actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
     ) -> bool:
         """Đổi mật khẩu tài khoản hiện có (mật khẩu luôn được băm scrypt, không ghi vào Audit Log)."""
         uname = username.strip().lower()
@@ -118,6 +121,7 @@ class AuthService:
             await self._audit.record(
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=actor_meta,
                 action="user_password_change",
                 section="dashboard_users",
                 summary=f"Đổi mật khẩu tài khoản '{uname}' (mật khẩu được ẩn)",
@@ -135,6 +139,7 @@ class AuthService:
         current_admin: Optional[dict[str, Any]] = None,
         actor: Optional[str] = None,
         actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
     ) -> bool:
         """Xóa tài khoản Dashboard, chặn tự xóa chính mình hoặc xóa Admin cuối cùng của hệ thống."""
         uname = username.strip().lower()
@@ -156,6 +161,7 @@ class AuthService:
             await self._audit.record(
                 actor=actor,
                 actor_type=actor_type,
+                actor_meta=actor_meta,
                 action="user_delete",
                 section="dashboard_users",
                 summary=f"Xóa tài khoản Dashboard '{uname}'",

@@ -89,6 +89,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         create_audit_router(
             audit_service=container.audit_service,
             auth_deps=container.auth_deps,
+            get_bot=get_bot,
         )
     )
     return app
