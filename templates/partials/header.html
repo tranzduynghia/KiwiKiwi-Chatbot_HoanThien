@@ -1,0 +1,37 @@
+<!-- Phần đầu trang hiển thị trạng thái kết nối, tài khoản đang đăng nhập và thanh chuyển tab -->
+<header class="sticky top-0 z-30 bg-slate-950/90 backdrop-blur border-b border-slate-800">
+  <div class="max-w-6xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="text-xl">🤖</span>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="font-semibold text-base tracking-tight">KiwiKiwi Bot Dashboard</h1>
+          <span id="hdr-status-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">Đang tải...</span>
+        </div>
+        <p id="hdr-updated" class="text-[11px] text-slate-500">MongoDB Atlas Real-Time Config</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2 text-xs bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full">
+        {% if user.avatar_url %}
+        <img src="{{ user.avatar_url }}" alt="" class="w-5 h-5 rounded-full" />
+        {% endif %}
+        <span class="font-medium text-slate-200">{{ user.display_name }}</span>
+        <span class="px-1.5 py-0.5 rounded text-[10px] {{ 'bg-indigo-500/20 text-indigo-300' if user.is_admin else 'bg-slate-800 text-slate-400' }}">
+          {{ 'Admin' if user.is_admin else 'Operator' }}
+        </span>
+      </div>
+      <a href="/auth/logout" class="btn-ghost text-xs">Đăng xuất</a>
+    </div>
+  </div>
+
+  <!-- Thanh chọn tab tính năng -->
+  <div class="max-w-6xl mx-auto px-4 pb-2.5 flex flex-wrap gap-1.5">
+    <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="status" data-active="true">📊 Trạng thái Bot</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="ask">⚙️ Cấu hình /ask</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="prompt">💬 System Instruction</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="models">✨ Model Gemini</button>
+    <button class="tab-btn px-3 py-1.5 rounded-lg text-xs font-medium border border-transparent text-slate-400 hover:text-slate-200" data-tab="perms">🔐 Phân quyền &amp; Admin</button>
+  </div>
+</header>

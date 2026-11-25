@@ -1,0 +1,120 @@
+<!-- Tab 1: Giám sát trạng thái Bot, RAM/CPU, Gemini API, MongoDB Atlas và thống kê sử dụng -->
+<section id="tab-status" class="tab-panel space-y-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="text-lg font-semibold">Giám sát trạng thái Bot</h2>
+      <p class="text-xs text-slate-400">Thông số hoạt động trực tiếp từ tiến trình bot hiện tại</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="inline-flex items-center gap-2 text-xs text-slate-400 mr-2 cursor-pointer">
+        <input id="auto-refresh-toggle" type="checkbox" checked class="accent-indigo-500" />
+        Tự làm mới (5s)
+      </label>
+      <button id="btn-check-gemini" class="btn-ghost">🔌 Kiểm tra Gemini API</button>
+      <button id="btn-refresh-status" class="btn-primary">↻ Làm mới</button>
+    </div>
+  </div>
+
+  <!-- Các thẻ chỉ số KPI tổng quan -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="card p-4">
+      <div class="text-xs text-slate-400">Trạng thái &amp; Ping</div>
+      <div class="mt-2 flex items-baseline justify-between">
+        <span id="st-online" class="text-lg font-semibold">—</span>
+        <span id="st-ping" class="text-sm font-mono text-indigo-300">— ms</span>
+      </div>
+      <div id="st-botname" class="text-xs text-slate-500 mt-1 truncate">—</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs text-slate-400">Uptime &amp; Server</div>
+      <div class="mt-2 flex items-baseline justify-between">
+        <span id="st-uptime" class="text-lg font-semibold font-mono">—</span>
+        <span id="st-guilds" class="text-sm text-emerald-300">— server</span>
+      </div>
+      <div id="st-version" class="text-xs text-slate-500 mt-1 truncate">—</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs text-slate-400">RAM Container</div>
+      <div class="mt-2 flex items-baseline justify-between">
+        <span id="st-ram" class="text-base font-semibold font-mono">—</span>
+        <span id="st-ram-pct" class="text-xs text-slate-300">—%</span>
+      </div>
+      <div class="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+        <div id="st-ram-bar" class="h-full bg-indigo-500 transition-all" style="width:0%"></div>
+      </div>
+      <div id="st-ram-rss" class="text-[11px] text-slate-500 mt-1">Tiến trình: —</div>
+    </div>
+    <div class="card p-4">
+      <div class="text-xs text-slate-400">CPU &amp; Luồng</div>
+      <div class="mt-2 flex items-baseline justify-between">
+        <span id="st-cpu" class="text-lg font-semibold font-mono">—%</span>
+        <span id="st-threads" class="text-xs text-slate-400">— luồng</span>
+      </div>
+      <div id="st-requests-brief" class="text-xs text-slate-500 mt-1">Request hôm nay: —</div>
+    </div>
+  </div>
+
+  <!-- Trạng thái Gemini API và MongoDB Atlas -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="card p-5 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="font-medium text-sm">🔌 Gemini API &amp; Chuỗi Auto</h3>
+        <div class="flex gap-1.5">
+          <button id="btn-refresh-models-st" class="btn-ghost text-xs">Tải lại Model</button>
+          <button id="btn-clear-cd" class="btn-ghost text-xs">Xóa Cooldown</button>
+        </div>
+      </div>
+      <div id="st-gemini-check" class="text-xs text-slate-400">Bấm "Kiểm tra Gemini API" để đo độ trễ trực tiếp.</div>
+      <div>
+        <div class="text-xs text-slate-400 mb-1.5">Chuỗi Auto đang áp dụng:</div>
+        <div id="st-auto-chain" class="flex flex-wrap items-center gap-1.5 text-xs"></div>
+      </div>
+      <div id="st-gemini-meta" class="text-xs text-slate-500">—</div>
+    </div>
+
+    <div class="card p-5 space-y-3">
+      <div class="flex items-center justify-between">
+        <h3 class="font-medium text-sm">🗄️ MongoDB Atlas</h3>
+        <span id="st-db-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">—</span>
+      </div>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+          <div class="text-[11px] text-slate-400">Ping</div>
+          <div id="st-db-ms" class="text-sm font-mono font-semibold mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+          <div class="text-[11px] text-slate-400">Phiên hoạt động</div>
+          <div id="st-db-active" class="text-sm font-mono font-semibold mt-0.5">—</div>
+        </div>
+        <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
+          <div class="text-[11px] text-slate-400">Đã lưu trữ</div>
+          <div id="st-db-archived" class="text-sm font-mono font-semibold mt-0.5">—</div>
+        </div>
+      </div>
+      <div>
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span>Dung lượng sử dụng</span>
+          <span id="st-db-storage">—</span>
+        </div>
+        <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div id="st-db-bar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thống kê sử dụng và danh sách Server Discord -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="card p-5 space-y-2.5">
+      <h3 class="font-medium text-sm">📈 Thống kê sử dụng</h3>
+      <div id="st-usage-summary" class="text-xs text-slate-300">—</div>
+      <div id="st-usage-models" class="text-xs text-slate-400">—</div>
+      <div id="st-usage-features" class="text-xs text-slate-400">—</div>
+      <div id="st-usage-err" class="text-xs text-rose-300/90"></div>
+    </div>
+    <div class="card p-5 space-y-2.5">
+      <h3 class="font-medium text-sm">🏠 Danh sách Server Discord</h3>
+      <div id="st-guild-list" class="max-h-40 overflow-y-auto divide-y divide-slate-800/80 text-xs"></div>
+    </div>
+  </div>
+</section>

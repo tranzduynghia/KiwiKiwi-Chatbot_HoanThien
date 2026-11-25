@@ -1,0 +1,123 @@
+<!-- Tab 2: Cấu hình lệnh /ask và phiên chat lưu trên MongoDB Atlas -->
+<section id="tab-ask" class="tab-panel hidden space-y-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="text-lg font-semibold">Cấu hình lệnh /ask &amp; Phiên chat</h2>
+      <p class="text-xs text-slate-400">Mọi thông số lưu trực tiếp vào MongoDB Atlas và áp dụng ngay không cần restart bot</p>
+    </div>
+    <button id="btn-save-ask" class="btn-primary">💾 Lưu cấu hình /ask</button>
+  </div>
+
+  <form id="form-ask" class="space-y-5">
+    <div class="card p-5 space-y-4">
+      <h3 class="font-medium text-sm text-indigo-300">Tốc độ, Giới hạn &amp; Mặc định lệnh /ask</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Cooldown mỗi người (giây)</label>
+          <input id="ask-cooldown" type="number" step="0.5" min="0" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Request song song tối đa</label>
+          <input id="ask-concurrent" type="number" min="1" max="50" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Dung lượng file tối đa (MB)</label>
+          <input id="ask-max-file-mb" type="number" step="0.5" min="1" max="50" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Timeout gọi Gemini (giây)</label>
+          <input id="ask-timeout" type="number" min="15" max="600" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Số lần thử lại khi 500/503</label>
+          <input id="ask-retries" type="number" min="1" max="10" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Mức Thinking mặc định</label>
+          <select id="ask-default-thinking" class="inp">
+            <option value="">Tắt (bỏ trống)</option>
+            <option value="auto">auto</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Giới hạn ký tự mỗi tin (chunk)</label>
+          <input id="ask-chunk-limit" type="number" min="500" max="1950" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Số tin tối đa trước khi gửi file .md</label>
+          <input id="ask-max-chunks" type="number" min="1" max="20" class="inp" />
+        </div>
+      </div>
+
+      <div class="pt-2 border-t border-slate-800">
+        <div class="text-xs text-slate-400 mb-2">Ngân sách token Thinking cho Gemini 2.5 (low / medium / high)</div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-[11px] text-slate-500 mb-1">Low (tokens)</label>
+            <input id="ask-tb-low" type="number" min="128" class="inp" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-500 mb-1">Medium (tokens)</label>
+            <input id="ask-tb-medium" type="number" min="256" class="inp" />
+          </div>
+          <div>
+            <label class="block text-[11px] text-slate-500 mb-1">High (tokens)</label>
+            <input id="ask-tb-high" type="number" min="512" class="inp" />
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-sm">
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-file" type="checkbox" class="accent-indigo-500" /> Cho phép đính kèm ảnh/PDF</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-ocr" type="checkbox" class="accent-indigo-500" /> Cho phép OCR</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-web" type="checkbox" class="accent-indigo-500" /> Cho phép tra cứu Web</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-allow-thinking" type="checkbox" class="accent-indigo-500" /> Cho phép Thinking</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-default-web" type="checkbox" class="accent-indigo-500" /> Mặc định bật Web Search</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-show-thoughts" type="checkbox" class="accent-indigo-500" /> Hiện Embed tóm tắt suy nghĩ</label>
+        <label class="flex items-center gap-2 cursor-pointer"><input id="ask-show-sources" type="checkbox" class="accent-indigo-500" /> Hiện link nguồn Google Search</label>
+      </div>
+    </div>
+
+    <div class="card p-5 space-y-4">
+      <h3 class="font-medium text-sm text-indigo-300">Cấu hình Phiên chat &amp; Hệ thống (MongoDB)</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Hết hạn phiên sau (giờ)</label>
+          <input id="sess-idle-hours" type="number" step="0.5" min="0.1" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Số tin nhắn nhớ tối đa</label>
+          <input id="sess-max-msgs" type="number" min="2" max="200" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Tổng ký tự lịch sử tối đa</label>
+          <input id="sess-max-chars" type="number" min="1000" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Cắt ngắn mỗi tin lưu (ký tự)</label>
+          <input id="sess-stored-chars" type="number" min="500" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Số lượt tối đa mỗi phiên</label>
+          <input id="sess-max-turns" type="number" min="1" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Chu kỳ quét lưu trữ (phút)</label>
+          <input id="sess-sweep-mins" type="number" step="0.5" min="1" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Quota MongoDB Atlas (MB)</label>
+          <input id="sess-quota-mb" type="number" min="1" class="inp" />
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Ép giới hạn RAM /status (MB, trống = tự đo)</label>
+          <input id="sess-ram-limit" type="number" min="0" placeholder="Tự động" class="inp" />
+        </div>
+      </div>
+    </div>
+  </form>
+</section>

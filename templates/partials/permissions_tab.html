@@ -1,0 +1,103 @@
+<!-- Tab 5: Quản lý phân quyền Discord User ID và tài khoản Dashboard -->
+<section id="tab-perms" class="tab-panel hidden space-y-5">
+  <div>
+    <h2 class="text-lg font-semibold">Phân quyền Discord &amp; Tài khoản Quản trị</h2>
+    <p class="text-xs text-slate-400">Quy định Discord User ID nào là Admin, được dùng <code>/status</code> trên Discord, và được vào Dashboard quản lý</p>
+  </div>
+
+  {% if not user.is_admin %}
+  <div class="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+    ℹ️ Bạn đang đăng nhập với quyền <strong>Operator</strong> (chỉ xem). Chỉ tài khoản <strong>Admin</strong> mới có thể thêm/sửa/xóa quyền.
+  </div>
+  {% endif %}
+
+  <!-- Bảng phân quyền theo Discord User ID -->
+  <div class="card p-5 space-y-4">
+    <h3 class="font-medium text-sm text-indigo-300">Phân quyền theo Discord User ID</h3>
+
+    {% if user.is_admin %}
+    <form id="form-add-discord-perm" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
+      <div class="sm:col-span-3">
+        <label class="block text-[11px] text-slate-400 mb-1">Discord User ID</label>
+        <input id="dp-uid" type="text" required placeholder="1240503090185109536" class="inp font-mono" />
+      </div>
+      <div class="sm:col-span-3">
+        <label class="block text-[11px] text-slate-400 mb-1">Tên gợi nhớ</label>
+        <input id="dp-label" type="text" placeholder="VD: Chủ bot / Mod" class="inp" />
+      </div>
+      <div class="sm:col-span-4 flex flex-wrap gap-3 pb-2 text-xs">
+        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+          <input id="dp-admin" type="checkbox" class="accent-indigo-500" /> Admin
+        </label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+          <input id="dp-dash" type="checkbox" class="accent-indigo-500" /> Vào Dashboard
+        </label>
+        <label class="inline-flex items-center gap-1.5 cursor-pointer">
+          <input id="dp-status" type="checkbox" checked class="accent-indigo-500" /> Dùng /status
+        </label>
+      </div>
+      <div class="sm:col-span-2">
+        <button type="submit" class="btn-primary w-full">+ Thêm / Lưu</button>
+      </div>
+    </form>
+    {% endif %}
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-slate-800 text-slate-400">
+            <th class="py-2 pr-3">Discord User ID</th>
+            <th class="py-2 pr-3">Ghi chú</th>
+            <th class="py-2 pr-3 text-center">Admin toàn quyền</th>
+            <th class="py-2 pr-3 text-center">Vào Dashboard</th>
+            <th class="py-2 pr-3 text-center">Dùng /status</th>
+            <th class="py-2 text-right">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="discord-perms-tbody" class="divide-y divide-slate-800/70"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Bảng tài khoản đăng nhập truyền thống Username & Mật khẩu -->
+  <div class="card p-5 space-y-4">
+    <h3 class="font-medium text-sm text-indigo-300">Tài khoản đăng nhập Dashboard (Username &amp; Mật khẩu)</h3>
+
+    {% if user.is_admin %}
+    <form id="form-add-user" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
+      <div class="sm:col-span-3">
+        <label class="block text-[11px] text-slate-400 mb-1">Tên đăng nhập</label>
+        <input id="nu-username" type="text" required placeholder="admin2" class="inp" />
+      </div>
+      <div class="sm:col-span-4">
+        <label class="block text-[11px] text-slate-400 mb-1">Mật khẩu (tối thiểu 6 ký tự)</label>
+        <input id="nu-password" type="password" required minlength="6" placeholder="••••••••" class="inp" />
+      </div>
+      <div class="sm:col-span-3">
+        <label class="block text-[11px] text-slate-400 mb-1">Vai trò</label>
+        <select id="nu-role" class="inp">
+          <option value="admin">Admin (toàn quyền)</option>
+          <option value="operator">Operator (chỉ cấu hình)</option>
+        </select>
+      </div>
+      <div class="sm:col-span-2">
+        <button type="submit" class="btn-primary w-full">+ Tạo tài khoản</button>
+      </div>
+    </form>
+    {% endif %}
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-slate-800 text-slate-400">
+            <th class="py-2 pr-3">Tên đăng nhập</th>
+            <th class="py-2 pr-3">Vai trò</th>
+            <th class="py-2 pr-3">Đăng nhập gần nhất</th>
+            <th class="py-2 text-right">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody" class="divide-y divide-slate-800/70"></tbody>
+      </table>
+    </div>
+  </div>
+</section>

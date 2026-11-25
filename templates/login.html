@@ -7,6 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+  <!-- Khung đăng nhập chính -->
   <div class="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-7">
     <div class="text-center mb-6">
       <div class="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-indigo-500/15 border border-indigo-500/30 text-2xl mb-3">
@@ -16,12 +17,14 @@
       <p class="text-sm text-slate-400 mt-1">Quản trị &amp; cấu hình bot theo thời gian thực</p>
     </div>
 
+    <!-- Cảnh báo khi chưa kết nối MongoDB Atlas -->
     {% if not db_connected %}
     <div class="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
       ⚠️ Bot chưa kết nối MongoDB Atlas (<code>MONGODB_URI</code>). Hãy kiểm tra biến môi trường trước khi đăng nhập.
     </div>
     {% endif %}
 
+    <!-- Thông báo lỗi từ server hoặc client -->
     {% if error %}
     <div id="server-error" class="mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">
       {{ error }}
@@ -30,6 +33,7 @@
 
     <div id="client-error" class="hidden mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm"></div>
 
+    <!-- Biểu mẫu đăng nhập bằng tên đăng nhập và mật khẩu -->
     <form id="login-form" class="space-y-4">
       <div>
         <label class="block text-xs font-medium text-slate-300 mb-1.5" for="username">Tên đăng nhập</label>
@@ -69,6 +73,7 @@
       <div class="relative flex justify-center text-xs"><span class="bg-slate-900 px-3 text-slate-500">hoặc</span></div>
     </div>
 
+    <!-- Đăng nhập bằng Discord OAuth2 -->
     {% if discord_oauth_enabled %}
     <a
       href="/auth/discord"
@@ -96,38 +101,7 @@
     {% endif %}
   </div>
 
-  <script>
-    const form = document.getElementById("login-form");
-    const errBox = document.getElementById("client-error");
-    const btn = document.getElementById("submit-btn");
-
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      errBox.classList.add("hidden");
-      btn.disabled = true;
-      btn.textContent = "Đang xác thực...";
-      try {
-        const res = await fetch("/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            username: document.getElementById("username").value.trim(),
-            password: document.getElementById("password").value,
-          }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(data.detail || "Đăng nhập thất bại.");
-        }
-        window.location.href = "/dashboard";
-      } catch (err) {
-        errBox.textContent = err.message;
-        errBox.classList.remove("hidden");
-      } finally {
-        btn.disabled = false;
-        btn.textContent = "Đăng nhập";
-      }
-    });
-  </script>
+  <!-- Module xử lý đăng nhập tách riêng -->
+  <script type="module" src="/static/js/features/auth/login.js"></script>
 </body>
 </html>

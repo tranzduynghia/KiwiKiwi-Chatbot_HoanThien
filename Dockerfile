@@ -19,8 +19,10 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
  && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|fastapi|uvicorn|httpx|pydantic)==" || true) \
  && rm -f /tmp/pypi-*.json
 
-COPY bot.py config_store.py dashboard.py init_admin.py ./
+COPY bot.py init_admin.py ./
+COPY app/ ./app/
 COPY templates/ ./templates/
+COPY static/ ./static/
 
 RUN useradd --create-home botuser
 USER botuser
