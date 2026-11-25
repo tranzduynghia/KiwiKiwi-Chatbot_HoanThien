@@ -59,29 +59,40 @@ def sanitize_ask_and_session(
 
 
 ALLOWED_PRESENCE_STATUSES = ("online", "idle", "dnd", "invisible")
-ALLOWED_ACTIVITY_TYPES = ("none", "playing", "listening", "watching", "competing", "custom")
+ALLOWED_ACTIVITY_TYPES = ("none", "playing", "listening", "watching", "competing")
 
 
 def sanitize_presence_config(
     status: str,
     activity_type: str,
     activity_text: str,
+    custom_status: str = "",
 ) -> dict[str, str]:
-    """Kiểm tra hợp lệ trạng thái trực tuyến, loại hoạt động và cắt gọn nội dung hiển thị Discord."""
+    """Kiểm tra hợp lệ trạng thái trực tuyến, Custom Status (bong bóng chữ) và hoạt động chính của bot."""
     clean_status = str(status or "online").strip().lower()
     if clean_status not in ALLOWED_PRESENCE_STATUSES:
         raise ValueError("Trạng thái hiển thị không hợp lệ (chỉ nhận online, idle, dnd, invisible).")
 
-    clean_type = str(activity_type or "listening").strip().lower()
-    if clean_type not in ALLOWED_ACTIVITY_TYPES:
-        raise ValueError("Loại hoạt động không hợp lệ (playing, listening, watching, competing, custom, none).")
-
+    clean_type = str(activity_type or "none").strip().lower()
+    clean_custom = str(custom_status or "").strip()[:128]
     clean_text = str(activity_text or "").strip()[:128]
+
+    # Tương thích ngược nếu client cũ gửi activity_type="custom": chuyển nội dung sang custom_status
+    if clean_type == "custom":
+        if not clean_custom and clean_text:
+            clean_custom = clean_text
+        clean_type = "none"
+        clean_text = ""
+
+    if clean_type not in ALLOWED_ACTIVITY_TYPES:
+        raise ValueError("Loại hoạt động chính không hợp lệ (none, playing, listening, watching, competing).")
+
     if clean_type == "none":
         clean_text = ""
 
     return {
         "status": clean_status,
+        "custom_status": clean_custom,
         "activity_type": clean_type,
         "activity_text": clean_text,
     }

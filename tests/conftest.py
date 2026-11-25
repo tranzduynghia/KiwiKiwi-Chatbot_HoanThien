@@ -259,12 +259,18 @@ class FakeBot:
             name="Test Guild",
             member_count=42,
             roles=[role_everyone, role_mod, role_vip],
+            me=SimpleNamespace(activities=(), status=None),
             get_member=lambda uid: self._members.get(uid),
         )
         self.guilds = [guild]
         self.latency = 0.045
         self.ready_at = 1700000000.0
         self.presence_updates: list[tuple[Any, Any]] = []
+        self.gateway_payloads: list[dict[str, Any]] = []
+        self.ws = SimpleNamespace(send_as_json=self._send_gateway_json)
+
+    async def _send_gateway_json(self, payload: dict[str, Any]):
+        self.gateway_payloads.append(payload)
 
     def get_user(self, uid: int):
         return self._members.get(uid)

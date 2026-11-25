@@ -1,7 +1,7 @@
 /**
  * Bộ điều khiển thẻ "Bot Presence & Status":
  * - Chọn trạng thái trực tuyến (online / idle / dnd / invisible) kèm chấm màu
- * - Chọn loại hoạt động (Playing / Listening to / Watching / Competing in / Custom Status / None)
+ * - Tùy chỉnh song song Custom Status (bong bóng chữ cạnh avatar) VÀ Hoạt động chính (None / Playing / Listening to / Watching / Competing in)
  * - Xem trước trực tiếp giao diện hồ sơ Discord và gọi PUT /api/config/presence để áp dụng tức thì
  */
 
@@ -19,7 +19,6 @@ const ACTIVITY_PREFIX = {
   listening: "Listening to",
   watching: "Watching",
   competing: "Competing in",
-  custom: "",
   none: "",
 };
 
@@ -33,14 +32,18 @@ export function createPresenceCardController({ onConfigSaved }) {
   }
 
   function renderPreview() {
+    const customEl = document.getElementById("presence-custom-status");
     const typeEl = document.getElementById("presence-activity-type");
     const textEl = document.getElementById("presence-activity-text");
     const dotEl = document.getElementById("presence-preview-dot");
+    const customWrapEl = document.getElementById("presence-preview-custom-wrap");
+    const customTextEl = document.getElementById("presence-preview-custom-text");
     const activityEl = document.getElementById("presence-preview-activity");
     const statusLabelEl = document.getElementById("presence-preview-status-label");
     if (!typeEl || !textEl || !dotEl || !activityEl || !statusLabelEl) return;
 
-    const activityType = typeEl.value || "listening";
+    const customVal = customEl ? customEl.value.trim() : "";
+    const activityType = typeEl.value || "none";
     const textVal = textEl.value.trim();
     textEl.disabled = activityType === "none";
 
@@ -48,23 +51,60 @@ export function createPresenceCardController({ onConfigSaved }) {
     dotEl.className = `w-3.5 h-3.5 rounded-full ${meta.dotClass} border-2 border-[#0a0d12] absolute -bottom-0.5 -right-0.5 transition-colors duration-200`;
     statusLabelEl.textContent = meta.label;
 
-    if (activityType === "none" || !textVal) {
-      activityEl.innerHTML = '<span class="text-[#5e6778] italic">Không hiển thị hoạt động</span>';
-    } else if (activityType === "custom") {
-      activityEl.innerHTML = `<span class="text-slate-200">${escapeHtml(textVal)}</span>`;
-    } else {
+    // Hiển thị hoặc ẩn bong bóng Custom Status cạnh avatar
+    if (customWrapEl && customTextEl) {
+      if (customVal) {
+        customWrapEl.classList.remove("hidden");
+        customTextEl.textContent = customVal;
+      } else {
+        customWrapEl.classList.add("hidden");
+        customTextEl.textContent = "";
+      }
+    }
+
+    // Hiển thị dòng Hoạt động chính (có thể song song cùng bong bóng Custom Status)
+    const hasPrimaryActivity = activityType !== "none" && Boolean(textVal);
+    if (hasPrimaryActivity) {
       const prefix = ACTIVITY_PREFIX[activityType] || "Listening to";
+      activityEl.classList.remove("hidden");
       activityEl.innerHTML = `${escapeHtml(prefix)} <strong class="text-slate-200 font-medium">${escapeHtml(textVal)}</strong>`;
+    } else if (customVal) {
+      activityEl.classList.add("hidden");
+      activityEl.innerHTML = "";
+    } else {
+      activityEl.classList.remove("hidden");
+      activityEl.innerHTML = '<span class="text-[#5e6778] italic">Không hiển thị hoạt động</span>';
     }
   }
 
   function fill(config) {
     const presence = config?.presence || {};
     selectedStatus = STATUS_META[presence.status] ? presence.status : "online";
+
+    const customEl = document.getElementById("presence-custom-status");
     const typeEl = document.getElementById("presence-activity-type");
     const textEl = document.getElementById("presence-activity-text");
-    if (typeEl) typeEl.value = presence.activity_type || "listening";
-    if (textEl) textEl.value = presence.activity_text ?? "m!help";
+
+    let customVal = presence.custom_status ?? "";
+    let activityType = presence.activity_type || "listening";
+    let activityText = presence.activity_text ?? "m!help";
+
+    // Tương thích ngược với cấu hình cũ từng lưu activity_type === "custom"
+    if (activityType === "custom") {
+      if (!customVal && activityText) {
+        customVal = activityText;
+      }
+      activityType = "none";
+      activityText = "";
+    }
+
+    if (!Object.prototype.hasOwnProperty.call(ACTIVITY_PREFIX, activityType)) {
+      activityType = "none";
+    }
+
+    if (customEl) customEl.value = customVal;
+    if (typeEl) typeEl.value = activityType;
+    if (textEl) textEl.value = activityText;
 
     updateStatusButtons();
     renderPreview();
@@ -89,15 +129,18 @@ export function createPresenceCardController({ onConfigSaved }) {
       });
     }
 
+    const customEl = document.getElementById("presence-custom-status");
     const typeEl = document.getElementById("presence-activity-type");
     const textEl = document.getElementById("presence-activity-text");
+    if (customEl) customEl.addEventListener("input", renderPreview);
     if (typeEl) typeEl.addEventListener("change", renderPreview);
     if (textEl) textEl.addEventListener("input", renderPreview);
 
     const saveBtn = document.getElementById("btn-save-presence");
     if (saveBtn) {
       saveBtn.addEventListener("click", async () => {
-        const activityType = typeEl ? typeEl.value : "listening";
+        const customStatus = customEl ? customEl.value.trim() : "";
+        const activityType = typeEl ? typeEl.value : "none";
         const activityText = textEl ? textEl.value.trim() : "";
         saveBtn.disabled = true;
         try {
@@ -105,6 +148,7 @@ export function createPresenceCardController({ onConfigSaved }) {
             method: "PUT",
             body: JSON.stringify({
               status: selectedStatus,
+              custom_status: customStatus,
               activity_type: activityType,
               activity_text: activityText,
             }),

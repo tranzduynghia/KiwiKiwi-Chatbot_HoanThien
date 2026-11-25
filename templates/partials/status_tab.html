@@ -243,14 +243,14 @@
       <div>
         <h3 class="font-semibold text-sm text-white">🎭 Trạng thái hiển thị &amp; Hoạt động Bot (Discord Presence)</h3>
         <p class="text-[11px] text-[#8b95a7] mt-0.5">
-          Tùy chỉnh trạng thái online và dòng hoạt động (VD: Listening to m!help) — áp dụng tức thì, lưu MongoDB Atlas và ghi Audit Log
+          Đặt đồng thời Bong bóng Custom Status và Hoạt động chính (VD: Ngôi nhà nhỏ của KiwiKiwi~ + Listening to m!help) — áp dụng tức thì, lưu MongoDB Atlas và ghi Audit Log
         </p>
       </div>
       <button type="button" id="btn-save-presence" class="btn-primary">✨ Cập nhật trạng thái</button>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      <!-- Cột cấu hình (7/12): Chọn trạng thái Online + Loại hoạt động + Nội dung -->
+      <!-- Cột cấu hình (7/12): Trạng thái Online + Custom Status (bong bóng chữ) + Hoạt động chính -->
       <div class="lg:col-span-7 space-y-4">
         <!-- Bộ chọn Trạng thái hiển thị kèm chấm màu -->
         <div>
@@ -295,21 +295,38 @@
           </div>
         </div>
 
-        <!-- Loại hoạt động & Nội dung -->
+        <!-- Custom Status độc lập (Bong bóng chữ cạnh avatar) -->
+        <div>
+          <div class="flex items-center justify-between gap-2 mb-1.5">
+            <label class="block text-xs text-[#8b95a7]" for="presence-custom-status">
+              💬 Custom Status (Bong bóng chữ)
+            </label>
+            <span class="text-[10px] text-[#5e6778]">Tùy chọn · Hiển thị cạnh avatar</span>
+          </div>
+          <input
+            id="presence-custom-status"
+            type="text"
+            maxlength="128"
+            value=""
+            placeholder="VD: Ngôi nhà nhỏ của KiwiKiwi~"
+            class="inp"
+          />
+        </div>
+
+        <!-- Hoạt động chính độc lập (Primary Activity) -->
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
           <div class="sm:col-span-5">
-            <label class="block text-xs text-[#8b95a7] mb-1.5" for="presence-activity-type">Loại hoạt động</label>
+            <label class="block text-xs text-[#8b95a7] mb-1.5" for="presence-activity-type">Hoạt động chính</label>
             <select id="presence-activity-type" class="inp">
-              <option value="listening">Listening to (Đang nghe)</option>
+              <option value="none">None (Không hiển thị)</option>
               <option value="playing">Playing (Đang chơi)</option>
+              <option value="listening" selected>Listening to (Đang nghe)</option>
               <option value="watching">Watching (Đang xem)</option>
               <option value="competing">Competing in (Thi đấu)</option>
-              <option value="custom">Custom Status (Tùy chỉnh)</option>
-              <option value="none">Không hiển thị hoạt động</option>
             </select>
           </div>
           <div class="sm:col-span-7">
-            <label class="block text-xs text-[#8b95a7] mb-1.5" for="presence-activity-text">Nội dung hiển thị</label>
+            <label class="block text-xs text-[#8b95a7] mb-1.5" for="presence-activity-text">Nội dung hoạt động chính</label>
             <input
               id="presence-activity-text"
               type="text"
@@ -322,39 +339,55 @@
         </div>
       </div>
 
-      <!-- Cột xem trước trực tiếp (5/12): Mô phỏng thẻ hồ sơ bot trên Discord -->
+      <!-- Cột xem trước trực tiếp (5/12): Mô phỏng thẻ hồ sơ Discord kèm bong bóng Custom Status + dòng hoạt động chính -->
       <div class="lg:col-span-5">
         <div class="text-xs text-[#8b95a7] mb-2">Xem trước trên Discord</div>
-        <div class="rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 flex items-center gap-3.5">
-          <div class="relative shrink-0">
-            <img
-              id="presence-preview-avatar"
-              src="{{ bot_avatar_url or '' }}"
-              alt="{{ bot_display_name or 'KiwiKiwi' }}"
-              class="w-12 h-12 rounded-full object-cover border border-[#2a3140] bg-[#131720] {{ '' if bot_avatar_url else 'hidden' }}"
-            />
-            <div
-              id="presence-preview-avatar-fallback"
-              class="w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-rose-800 border border-[#2a3140] flex items-center justify-center text-white font-bold text-base {{ 'hidden' if bot_avatar_url else '' }}"
-              aria-hidden="true"
-            >
-              🤖
+        <div class="rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-3">
+          <div class="flex items-start gap-3.5">
+            <!-- Avatar bot + chấm trạng thái -->
+            <div class="relative shrink-0 mt-0.5">
+              <img
+                id="presence-preview-avatar"
+                src="{{ bot_avatar_url or '' }}"
+                alt="{{ bot_display_name or 'KiwiKiwi' }}"
+                class="w-12 h-12 rounded-full object-cover border border-[#2a3140] bg-[#131720] {{ '' if bot_avatar_url else 'hidden' }}"
+              />
+              <div
+                id="presence-preview-avatar-fallback"
+                class="w-12 h-12 rounded-full bg-gradient-to-br from-rose-500 to-rose-800 border border-[#2a3140] flex items-center justify-center text-white font-bold text-base {{ 'hidden' if bot_avatar_url else '' }}"
+                aria-hidden="true"
+              >
+                🤖
+              </div>
+              <span
+                id="presence-preview-dot"
+                class="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-[#0a0d12] absolute -bottom-0.5 -right-0.5 transition-colors duration-200"
+              ></span>
             </div>
-            <span
-              id="presence-preview-dot"
-              class="w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-[#0a0d12] absolute -bottom-0.5 -right-0.5 transition-colors duration-200"
-            ></span>
-          </div>
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5 flex-wrap">
-              <span id="presence-preview-botname" class="text-sm font-semibold text-white truncate">{{ bot_display_name or 'KiwiKiwi' }}</span>
-              <span class="px-1.5 py-0.5 rounded bg-[#5865F2] text-white text-[9px] font-bold tracking-wide">APP</span>
-            </div>
-            <div id="presence-preview-activity" class="text-xs text-[#8b95a7] mt-0.5 break-words">
-              Listening to <strong class="text-slate-200 font-medium">m!help</strong>
-            </div>
-            <div id="presence-preview-status-label" class="text-[10px] text-[#5e6778] mt-1">
-              Trực tuyến (online)
+
+            <!-- Thông tin hồ sơ + Bong bóng chữ + Dòng hoạt động phụ -->
+            <div class="min-w-0 flex-1 space-y-1.5">
+              <!-- Bong bóng Custom Status giống Discord (ẩn tự động khi để trống) -->
+              <div id="presence-preview-custom-wrap" class="hidden pl-2">
+                <div class="relative inline-flex items-center max-w-full px-3 py-1.5 rounded-2xl bg-[#181d27] border border-[#2a3140] text-xs text-slate-100 shadow-sm">
+                  <span class="w-2 h-2 rounded-full bg-[#181d27] border border-[#2a3140] absolute -left-2 bottom-2" aria-hidden="true"></span>
+                  <span class="w-1.5 h-1.5 rounded-full bg-[#181d27] border border-[#2a3140] absolute -left-3.5 bottom-1" aria-hidden="true"></span>
+                  <span id="presence-preview-custom-text" class="break-words leading-snug"></span>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <span id="presence-preview-botname" class="text-sm font-semibold text-white truncate">{{ bot_display_name or 'KiwiKiwi' }}</span>
+                <span class="px-1.5 py-0.5 rounded bg-[#5865F2] text-white text-[9px] font-bold tracking-wide">APP</span>
+              </div>
+
+              <div id="presence-preview-activity" class="text-xs text-[#8b95a7] break-words">
+                Listening to <strong class="text-slate-200 font-medium">m!help</strong>
+              </div>
+
+              <div id="presence-preview-status-label" class="text-[10px] text-[#5e6778]">
+                Trực tuyến (online)
+              </div>
             </div>
           </div>
         </div>

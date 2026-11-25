@@ -78,6 +78,7 @@ def create_config_router(
                 payload.status,
                 payload.activity_type,
                 payload.activity_text,
+                custom_status=payload.custom_status,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

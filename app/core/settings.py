@@ -174,6 +174,7 @@ def build_default_config() -> dict[str, Any]:
         },
         "presence": {
             "status": "online",
+            "custom_status": "",
             "activity_type": "listening",
             "activity_text": "m!help",
         },

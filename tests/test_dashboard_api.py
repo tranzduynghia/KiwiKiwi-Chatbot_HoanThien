@@ -87,11 +87,43 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert prompt_res.status_code == 200
         assert prompt_res.json()["config"]["append_current_date"] is False
 
-        # Kiểm tra cập nhật trạng thái hiển thị & hoạt động Discord (Presence)
+        # Kiểm tra cập nhật ĐỒNG THỜI Custom Status (bong bóng chữ) + Hoạt động chính (Listening to)
+        dual_presence_res = client.put(
+            "/api/config/presence",
+            json={
+                "status": "online",
+                "custom_status": "Ngôi nhà nhỏ của KiwiKiwi~",
+                "activity_type": "listening",
+                "activity_text": "m!help",
+            },
+        )
+        assert dual_presence_res.status_code == 200
+        dual_json = dual_presence_res.json()
+        assert dual_json["applied_live"] is True
+        assert dual_json["config"]["presence"] == {
+            "status": "online",
+            "custom_status": "Ngôi nhà nhỏ của KiwiKiwi~",
+            "activity_type": "listening",
+            "activity_text": "m!help",
+        }
+        assert len(fake_bot.gateway_payloads) == 1
+        gw_payload = fake_bot.gateway_payloads[-1]
+        assert gw_payload["op"] == 3
+        assert gw_payload["d"]["status"] == "online"
+        gw_activities = gw_payload["d"]["activities"]
+        assert len(gw_activities) == 2
+        assert gw_activities[0]["type"] == 4
+        assert gw_activities[0]["state"] == "Ngôi nhà nhỏ của KiwiKiwi~"
+        assert gw_activities[1]["type"] == 2
+        assert gw_activities[1]["name"] == "m!help"
+        assert len(fake_bot.guilds[0].me.activities) == 2
+
+        # Kiểm tra cập nhật chỉ Hoạt động chính (không có bong bóng chữ)
         presence_res = client.put(
             "/api/config/presence",
             json={
                 "status": "dnd",
+                "custom_status": "",
                 "activity_type": "watching",
                 "activity_text": "m!help · KiwiKiwi",
             },
@@ -101,6 +133,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert presence_json["applied_live"] is True
         assert presence_json["config"]["presence"] == {
             "status": "dnd",
+            "custom_status": "",
             "activity_type": "watching",
             "activity_text": "m!help · KiwiKiwi",
         }
@@ -112,7 +145,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         # Từ chối trạng thái không hợp lệ
         assert client.put(
             "/api/config/presence",
-            json={"status": "invalid_status", "activity_type": "listening", "activity_text": "m!help"},
+            json={"status": "invalid_status", "custom_status": "", "activity_type": "listening", "activity_text": "m!help"},
         ).status_code == 400
 
         models_res = client.put(

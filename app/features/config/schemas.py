@@ -22,8 +22,9 @@ class PromptConfigPayload(BaseModel):
 
 
 class PresenceConfigPayload(BaseModel):
-    """Payload cập nhật trạng thái trực tuyến và hoạt động hiển thị của bot trên Discord."""
+    """Payload cập nhật đồng thời trạng thái trực tuyến, Custom Status (bong bóng chữ) và hoạt động chính trên Discord."""
 
     status: str = Field(default="online", max_length=20)
+    custom_status: str = Field(default="", max_length=128)
     activity_type: str = Field(default="listening", max_length=20)
     activity_text: str = Field(default="", max_length=128)
