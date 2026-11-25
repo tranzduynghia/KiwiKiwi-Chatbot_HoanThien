@@ -1,14 +1,14 @@
-"""Router FastAPI quản lý API đọc/cập nhật cấu hình /ask, phiên chat và System Instruction."""
+"""Router FastAPI quản lý API đọc/cập nhật cấu hình /ask, phiên chat, System Instruction và Bot Presence."""
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.sync import WriteBehindSyncCoordinator
-from app.features.config.schemas import AskConfigPayload, PromptConfigPayload
+from app.features.config.schemas import AskConfigPayload, PresenceConfigPayload, PromptConfigPayload
 from app.features.config.service import ConfigService
-from app.features.config.validators import sanitize_ask_and_session
+from app.features.config.validators import sanitize_ask_and_session, sanitize_presence_config
 
 
 def create_config_router(
@@ -16,8 +16,9 @@ def create_config_router(
     sync_coordinator: WriteBehindSyncCoordinator,
     get_models_snapshot: Callable[[], Awaitable[dict[str, Any]]],
     auth_deps: Any,
+    apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
 ) -> APIRouter:
-    """Tạo router cho các endpoint `/api/config`, `/api/config/ask`, `/api/config/prompt`."""
+    """Tạo router cho `/api/config`, `/api/config/ask`, `/api/config/prompt` và `/api/config/presence`."""
     router = APIRouter(tags=["config"])
 
     @router.get("/api/config")
@@ -66,5 +67,40 @@ def create_config_router(
             summary="Cập nhật System Instruction / OCR Instruction",
         )
         return {"ok": True, "config": updated, "sync": sync_coordinator.sync_status()}
+
+    @router.put("/api/config/presence")
+    async def api_update_presence_config(
+        payload: PresenceConfigPayload,
+        user: dict[str, Any] = Depends(auth_deps.require_user),
+    ):
+        try:
+            clean_presence = sanitize_presence_config(
+                payload.status,
+                payload.activity_type,
+                payload.activity_text,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        actor, actor_type = auth_deps.actor_label(user)
+        updated = await config_service.update_config(
+            {"presence": clean_presence},
+            updated_by=actor,
+            actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(user),
+            section="presence",
+            summary="Cập nhật trạng thái hiển thị & hoạt động Bot",
+        )
+
+        applied_live = False
+        if apply_presence_fn is not None:
+            applied_live = bool(await apply_presence_fn(clean_presence))
+
+        return {
+            "ok": True,
+            "applied_live": applied_live,
+            "config": updated,
+            "sync": sync_coordinator.sync_status(),
+        }
 
     return router

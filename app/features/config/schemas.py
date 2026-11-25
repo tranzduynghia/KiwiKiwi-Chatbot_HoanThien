@@ -19,3 +19,11 @@ class PromptConfigPayload(BaseModel):
     system_prompt: str = Field(..., min_length=1, max_length=20000)
     ocr_instruction: str = Field(..., min_length=1, max_length=10000)
     append_current_date: bool = True
+
+
+class PresenceConfigPayload(BaseModel):
+    """Payload cập nhật trạng thái trực tuyến và hoạt động hiển thị của bot trên Discord."""
+
+    status: str = Field(default="online", max_length=20)
+    activity_type: str = Field(default="listening", max_length=20)
+    activity_text: str = Field(default="", max_length=128)

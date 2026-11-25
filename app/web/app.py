@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from app.bot.presence import apply_bot_presence
 from app.features.audit.router import create_audit_router
 from app.features.auth.router import create_auth_router
 from app.features.config.router import create_config_router
@@ -60,6 +61,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             sync_coordinator=container.sync_coordinator,
             get_models_snapshot=container.model_registry.build_snapshot,
             auth_deps=container.auth_deps,
+            apply_presence_fn=lambda presence_cfg: apply_bot_presence(get_bot(), presence_cfg),
         )
     )
     app.include_router(

@@ -5,6 +5,7 @@
 import { apiRequest, showToast } from "./core/api.js";
 import { createAuditTabController } from "./features/audit/auditTab.js";
 import { createAskConfigTabController } from "./features/config/askConfigTab.js";
+import { createPresenceCardController } from "./features/config/presenceCard.js";
 import { createPromptConfigTabController } from "./features/config/promptConfigTab.js";
 import { createModelsTabController } from "./features/models/modelsTab.js";
 import { createStatusTabController } from "./features/monitoring/statusTab.js";
@@ -27,6 +28,7 @@ const sessionsTab = createSessionsTabController();
 const auditTab = createAuditTabController();
 
 let askConfigTab;
+let presenceCard;
 let promptConfigTab;
 let modelsTab;
 
@@ -40,6 +42,7 @@ async function loadConfig() {
     }
 
     askConfigTab.fill(cfg);
+    presenceCard.fill(cfg);
     promptConfigTab.fill(cfg);
     modelsTab.fill(cfg, data.models_runtime);
   } catch (err) {
@@ -53,6 +56,7 @@ async function refreshAll() {
 }
 
 askConfigTab = createAskConfigTabController({ onConfigSaved: loadConfig });
+presenceCard = createPresenceCardController({ onConfigSaved: loadConfig });
 promptConfigTab = createPromptConfigTabController({
   defaultSystemPrompt: bootstrap.defaultSystemPrompt || "",
   defaultOcrInstruction: bootstrap.defaultOcrInstruction || "",
@@ -271,6 +275,7 @@ function bindShellControls() {
 bindShellControls();
 statusTab.bindEvents();
 askConfigTab.bindEvents();
+presenceCard.bindEvents();
 promptConfigTab.bindEvents();
 modelsTab.bindEvents();
 permissionsTab.bindEvents();

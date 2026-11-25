@@ -14,6 +14,7 @@ from discord import app_commands
 from google import genai
 
 from app.bot.error_handler import register_error_handler
+from app.bot.presence import apply_bot_presence
 from app.core.settings import BOT_VERSION
 from app.core.utils import format_bytes
 from app.features.chat.commands import register_chat_commands
@@ -169,11 +170,12 @@ class AskBot(discord.Client):
             await asyncio.sleep(1)
 
     async def on_ready(self) -> None:
-        """Ghi nhận thời điểm sẵn sàng và kích hoạt dọn lệnh riêng một lần sau khi đăng nhập Discord."""
+        """Ghi nhận thời điểm sẵn sàng, khôi phục trạng thái Presence từ MongoDB và dọn lệnh riêng."""
         if not self._cleaned_guild_cmds:
             self._cleaned_guild_cmds = True
             self.loop.create_task(self.cleanup_guild_commands())
         self.ready_at = self.ready_at or time.time()
+        await apply_bot_presence(self, self.container.config_repo.presence_cfg())
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self) -> None:

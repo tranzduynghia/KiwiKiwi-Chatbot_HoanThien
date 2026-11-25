@@ -84,6 +84,34 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert prompt_res.status_code == 200
         assert prompt_res.json()["config"]["append_current_date"] is False
 
+        # Kiểm tra cập nhật trạng thái hiển thị & hoạt động Discord (Presence)
+        presence_res = client.put(
+            "/api/config/presence",
+            json={
+                "status": "dnd",
+                "activity_type": "watching",
+                "activity_text": "m!help · KiwiKiwi",
+            },
+        )
+        assert presence_res.status_code == 200
+        presence_json = presence_res.json()
+        assert presence_json["applied_live"] is True
+        assert presence_json["config"]["presence"] == {
+            "status": "dnd",
+            "activity_type": "watching",
+            "activity_text": "m!help · KiwiKiwi",
+        }
+        assert len(fake_bot.presence_updates) == 1
+        applied_status, applied_activity = fake_bot.presence_updates[-1]
+        assert str(applied_status) == "dnd"
+        assert applied_activity is not None and applied_activity.name == "m!help · KiwiKiwi"
+
+        # Từ chối trạng thái không hợp lệ
+        assert client.put(
+            "/api/config/presence",
+            json={"status": "invalid_status", "activity_type": "listening", "activity_text": "m!help"},
+        ).status_code == 400
+
         models_res = client.put(
             "/api/config/models",
             json={

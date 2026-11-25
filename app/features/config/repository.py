@@ -101,6 +101,10 @@ class ConfigRepository:
         """Trả về nhánh cấu hình danh sách model Gemini hiện hành."""
         return self._config.get("models", {})
 
+    def presence_cfg(self) -> dict[str, Any]:
+        """Trả về nhánh cấu hình trạng thái hiển thị & hoạt động Discord của bot."""
+        return self._config.get("presence", {})
+
     def model_override(self, model_id: str) -> dict[str, Any]:
         """Lấy cấu hình ghi đè (tên hiển thị, tag, ẩn/hiện) của một model cụ thể."""
         overrides = self.models_cfg().get("overrides") or {}

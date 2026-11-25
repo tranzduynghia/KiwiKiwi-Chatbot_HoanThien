@@ -156,6 +156,7 @@ export function createStatusTabController() {
 
       setTextIfChanged("st-ping", data.bot.ping_ms !== null ? `${data.bot.ping_ms} ms` : "—");
       setTextIfChanged("st-botname", data.bot.username || "—");
+      if (data.bot.username) setTextIfChanged("presence-preview-botname", data.bot.username);
       setTextIfChanged("st-uptime", data.bot.uptime_human || "0s");
       setTextIfChanged("st-guilds", String(data.bot.guild_count ?? 0));
       setTextIfChanged("st-version", `v${data.bot.version} · py ${data.bot.python_version}`);

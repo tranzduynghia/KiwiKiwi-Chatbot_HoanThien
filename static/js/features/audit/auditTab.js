@@ -12,6 +12,7 @@ const SECTION_LABELS = {
   ask: "Cấu hình /ask",
   prompt: "System Instruction",
   models: "Model Gemini",
+  presence: "Trạng thái Bot (Presence)",
   discord_permissions: "Phân quyền Discord",
   dashboard_users: "Tài khoản Dashboard",
   config: "Cấu hình chung",

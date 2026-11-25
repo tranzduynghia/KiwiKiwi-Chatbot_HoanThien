@@ -56,3 +56,32 @@ def sanitize_ask_and_session(
     }
 
     return clean_ask, clean_session
+
+
+ALLOWED_PRESENCE_STATUSES = ("online", "idle", "dnd", "invisible")
+ALLOWED_ACTIVITY_TYPES = ("none", "playing", "listening", "watching", "competing", "custom")
+
+
+def sanitize_presence_config(
+    status: str,
+    activity_type: str,
+    activity_text: str,
+) -> dict[str, str]:
+    """Kiểm tra hợp lệ trạng thái trực tuyến, loại hoạt động và cắt gọn nội dung hiển thị Discord."""
+    clean_status = str(status or "online").strip().lower()
+    if clean_status not in ALLOWED_PRESENCE_STATUSES:
+        raise ValueError("Trạng thái hiển thị không hợp lệ (chỉ nhận online, idle, dnd, invisible).")
+
+    clean_type = str(activity_type or "listening").strip().lower()
+    if clean_type not in ALLOWED_ACTIVITY_TYPES:
+        raise ValueError("Loại hoạt động không hợp lệ (playing, listening, watching, competing, custom, none).")
+
+    clean_text = str(activity_text or "").strip()[:128]
+    if clean_type == "none":
+        clean_text = ""
+
+    return {
+        "status": clean_status,
+        "activity_type": clean_type,
+        "activity_text": clean_text,
+    }

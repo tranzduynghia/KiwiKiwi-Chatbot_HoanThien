@@ -172,6 +172,11 @@ def build_default_config() -> dict[str, Any]:
             "model_refresh_hours": max(0.25, parse_float_env("MODEL_REFRESH_HOURS", 6.0)),
             "overrides": {},
         },
+        "presence": {
+            "status": "online",
+            "activity_type": "listening",
+            "activity_text": "m!help",
+        },
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",
     }

@@ -612,3 +612,10 @@ body.sidebar-collapsed .ox-main-wrapper {
   transition: all 300ms ease-out;
 }
 
+/* Trạng thái đang chọn của nút Trạng thái hiển thị Bot (Presence) */
+.presence-status-btn[data-selected="true"] {
+  background-color: #1c2230;
+  border-color: var(--ox-accent);
+  color: #ffffff;
+}
+

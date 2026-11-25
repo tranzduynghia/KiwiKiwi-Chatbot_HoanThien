@@ -252,9 +252,13 @@ class FakeBot:
         self.guilds = [guild]
         self.latency = 0.045
         self.ready_at = 1700000000.0
+        self.presence_updates: list[tuple[Any, Any]] = []
 
     def get_user(self, uid: int):
         return self._members.get(uid)
+
+    async def change_presence(self, *, status=None, activity=None):
+        self.presence_updates.append((status, activity))
 
     def is_ready(self) -> bool:
         return True
