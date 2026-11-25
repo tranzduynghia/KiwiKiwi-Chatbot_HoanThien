@@ -178,11 +178,27 @@ class AskBot(discord.Client):
             await asyncio.sleep(1)
 
     async def on_ready(self) -> None:
-        """Ghi nhận thời điểm sẵn sàng, khôi phục trạng thái Presence từ MongoDB và dọn lệnh riêng."""
+        """Ghi nhận thời điểm sẵn sàng, lưu avatar bot vào `bot_metrics`, khôi phục Presence và dọn lệnh riêng."""
         if not self._cleaned_guild_cmds:
             self._cleaned_guild_cmds = True
             self.loop.create_task(self.cleanup_guild_commands())
         self.ready_at = self.ready_at or time.time()
+
+        # Lưu ảnh đại diện và tên hiển thị thực tế của bot vào MongoDB để trang /login hiển thị ngay cả lúc khởi động
+        if self.user is not None:
+            avatar_asset = getattr(self.user, "display_avatar", None)
+            avatar_url = ""
+            if avatar_asset is not None:
+                with_size = getattr(avatar_asset, "with_size", None)
+                sized = with_size(128) if callable(with_size) else avatar_asset
+                avatar_url = str(getattr(sized, "url", "") or getattr(avatar_asset, "url", "") or "")
+            bot_name = str(
+                getattr(self.user, "display_name", "")
+                or getattr(self.user, "name", "")
+                or "KiwiKiwi"
+            )
+            await self.container.usage_stats.save_bot_branding(avatar_url, bot_name)
+
         await apply_bot_presence(self, self.container.config_repo.presence_cfg())
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 

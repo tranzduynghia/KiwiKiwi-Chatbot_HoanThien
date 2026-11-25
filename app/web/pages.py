@@ -12,6 +12,7 @@ from app.core.settings import DEFAULT_OCR_INSTRUCTION, DEFAULT_SYSTEM_PROMPT
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.auth.dependencies import AuthDependencies
 from app.features.auth.oauth import DiscordOAuthService
+from app.features.monitoring.stats import UsageStats
 
 # Mã phiên bản tài nguyên tĩnh giúp trình duyệt luôn nạp bản JS/CSS mới nhất sau mỗi lần deploy
 ASSET_VERSION = str(int(time.time()))
@@ -36,6 +37,20 @@ def _extract_bot_branding(bot: Any) -> tuple[str, str]:
     return avatar_url, display_name
 
 
+async def _resolve_bot_branding(
+    bot: Any,
+    usage_stats: Optional[UsageStats],
+) -> tuple[str, str]:
+    """Ưu tiên lấy avatar trực tiếp từ Discord client; nếu đang khởi động thì dùng bản đã lưu trong `bot_metrics`."""
+    avatar_url, display_name = _extract_bot_branding(bot)
+    if avatar_url:
+        return avatar_url, display_name
+    if usage_stats is not None:
+        cached_url, cached_name = await usage_stats.get_cached_bot_branding()
+        return cached_url or avatar_url, cached_name or display_name
+    return avatar_url, display_name
+
+
 def _render_template(templates: Jinja2Templates, request: Request, name: str, context: dict[str, Any]):
     """Hỗ trợ tương thích cả phiên bản Starlette/FastAPI cũ và mới khi gọi TemplateResponse."""
     try:
@@ -51,6 +66,7 @@ def create_pages_router(
     oauth_service: DiscordOAuthService,
     sync_coordinator: WriteBehindSyncCoordinator,
     get_bot: Optional[Callable[[], Any]] = None,
+    usage_stats: Optional[UsageStats] = None,
 ) -> APIRouter:
     """Tạo router giao diện HTML cho trang gốc, trang đăng nhập và trang quản trị Dashboard."""
     router = APIRouter(tags=["pages"])
@@ -67,7 +83,10 @@ def create_pages_router(
         user = await auth_deps.get_current_user(request)
         if user:
             return RedirectResponse(url="/dashboard", status_code=302)
-        bot_avatar_url, bot_display_name = _extract_bot_branding(get_bot() if callable(get_bot) else None)
+        bot_avatar_url, bot_display_name = await _resolve_bot_branding(
+            get_bot() if callable(get_bot) else None,
+            usage_stats,
+        )
         return _render_template(
             templates,
             request,
@@ -87,7 +106,10 @@ def create_pages_router(
         user = await auth_deps.get_current_user(request)
         if not user:
             return RedirectResponse(url="/login", status_code=302)
-        bot_avatar_url, bot_display_name = _extract_bot_branding(get_bot() if callable(get_bot) else None)
+        bot_avatar_url, bot_display_name = await _resolve_bot_branding(
+            get_bot() if callable(get_bot) else None,
+            usage_stats,
+        )
         return _render_template(
             templates,
             request,

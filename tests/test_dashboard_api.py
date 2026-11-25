@@ -37,6 +37,8 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         login_html = client.get("/login")
         assert login_html.status_code == 200
         assert "/static/js/features/auth/login.js" in login_html.text
+        assert "id=\"login-bot-avatar\"" in login_html.text
+        assert "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128" in login_html.text
 
         # 3) Đăng nhập quyền Operator -> đọc được config nhưng bị chặn 403 ở API quản trị phân quyền & Test Watchdog
         op_login = client.post("/auth/login", json={"username": "operator1", "password": "OperPass123!"})
@@ -275,3 +277,33 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         discord_audit = next(item for item in audit_items if item.get("actor_discord_id") == "777888")
         assert discord_audit["actor_avatar_url"].startswith("https://cdn.discordapp.com/")
         assert discord_audit["changes"] == [{"field": "ask.user_cooldown", "before": 5.0, "after": 3.0}]
+
+
+@pytest.mark.asyncio
+async def test_login_page_uses_cached_bot_avatar_from_mongodb_and_official_clyde_svg(
+    app_container, fake_db, monkeypatch
+):
+    """Trang /login vẫn hiển thị avatar bot từ `bot_metrics` khi bot chưa ready và dùng logo Discord Clyde chính thức."""
+    monkeypatch.setenv("DISCORD_CLIENT_ID", "1234567890")
+    monkeypatch.setenv("DISCORD_CLIENT_SECRET", "super-secret-oauth")
+
+    app_container.usage_stats.attach_db(fake_db)
+    await app_container.usage_stats.save_bot_branding(
+        "https://cdn.discordapp.com/avatars/999999999999999999/persisted.png?size=128",
+        "KiwiKiwi",
+    )
+    # Xóa cache RAM để buộc trang /login đọc lại từ MongoDB `bot_metrics` (`runtime_snapshot`)
+    app_container.usage_stats.bot_avatar_url = ""
+    stored = await fake_db["bot_metrics"].find_one({"_id": "runtime_snapshot"})
+    assert stored["bot_avatar_url"] == "https://cdn.discordapp.com/avatars/999999999999999999/persisted.png?size=128"
+    assert stored["bot_name"] == "KiwiKiwi"
+
+    # Mô phỏng giai đoạn khởi động khi bot chưa kết nối Discord (get_bot -> None)
+    web_app = create_dashboard_app(app_container, get_bot=lambda: None)
+    with TestClient(web_app) as client:
+        res = client.get("/login")
+        assert res.status_code == 200
+        assert "https://cdn.discordapp.com/avatars/999999999999999999/persisted.png?size=128" in res.text
+        assert 'id="login-bot-avatar"' in res.text
+        assert 'viewBox="0 0 127.14 96.36"' in res.text
+        assert "Đăng nhập với Discord" in res.text

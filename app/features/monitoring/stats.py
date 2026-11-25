@@ -25,6 +25,8 @@ class UsageStats:
         self.last_error: Optional[tuple[float, str]] = None
         self._dirty: bool = False
         self.collection: Any = None
+        self.bot_avatar_url: str = ""
+        self.bot_name: str = "KiwiKiwi"
 
     @property
     def dirty(self) -> bool:
@@ -32,8 +34,50 @@ class UsageStats:
         return self._dirty
 
     def attach_db(self, db: Any) -> None:
-        """Gắn collection `bot_metrics` trên MongoDB Atlas để lưu ảnh chụp thống kê khi cần."""
+        """Gắn collection `bot_metrics` trên MongoDB Atlas để lưu ảnh chụp thống kê và thông tin nhận diện bot."""
         self.collection = db["bot_metrics"] if db is not None else None
+
+    async def save_bot_branding(self, bot_avatar_url: str, bot_name: str) -> None:
+        """Lưu `bot_avatar_url` và `bot_name` vào tài liệu `runtime_snapshot` trên `bot_metrics` khi bot sẵn sàng."""
+        clean_url = str(bot_avatar_url or "").strip()
+        clean_name = str(bot_name or "KiwiKiwi").strip() or "KiwiKiwi"
+        if clean_url:
+            self.bot_avatar_url = clean_url
+        self.bot_name = clean_name
+        if self.collection is None:
+            return
+        try:
+            await self.collection.update_one(
+                {"_id": "runtime_snapshot"},
+                {
+                    "$set": {
+                        "bot_avatar_url": self.bot_avatar_url,
+                        "bot_name": self.bot_name,
+                        "branding_updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+                upsert=True,
+            )
+        except Exception as exc:
+            log.warning("Không thể lưu bot_avatar_url vào bot_metrics: %s", exc)
+
+    async def get_cached_bot_branding(self) -> tuple[str, str]:
+        """Lấy `bot_avatar_url` và `bot_name` đã lưu từ RAM hoặc MongoDB `bot_metrics` (dùng khi bot đang khởi động)."""
+        if self.bot_avatar_url:
+            return self.bot_avatar_url, self.bot_name
+        if self.collection is not None:
+            try:
+                doc = await self.collection.find_one({"_id": "runtime_snapshot"})
+                if doc:
+                    url = str(doc.get("bot_avatar_url") or "").strip()
+                    name = str(doc.get("bot_name") or "").strip() or "KiwiKiwi"
+                    if url:
+                        self.bot_avatar_url = url
+                    if name:
+                        self.bot_name = name
+            except Exception as exc:
+                log.warning("Không đọc được bot_avatar_url từ bot_metrics: %s", exc)
+        return self.bot_avatar_url, self.bot_name
 
     def roll_day(self) -> None:
         """Tự động đặt lại bộ đếm theo ngày khi sang ngày mới theo múi giờ Pacific (mốc reset quota Gemini)."""
@@ -84,6 +128,10 @@ class UsageStats:
             return 0
         payload = self.to_dict()
         payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+        if self.bot_avatar_url:
+            payload["bot_avatar_url"] = self.bot_avatar_url
+        if self.bot_name:
+            payload["bot_name"] = self.bot_name
         await self.collection.update_one(
             {"_id": "runtime_snapshot"},
             {"$set": payload},
