@@ -123,6 +123,28 @@ class FakeCollection:
         self.docs.append(copy.deepcopy(doc))
         return SimpleNamespace(inserted_id=doc.get("_id"))
 
+    async def insert_many(self, docs: list[dict[str, Any]], ordered: bool = False):
+        if self.fail_writes:
+            raise ConnectionError("Mô phỏng lỗi ghi lô MongoDB")
+        inserted_ids = []
+        for doc in docs:
+            self.docs.append(copy.deepcopy(doc))
+            inserted_ids.append(doc.get("_id"))
+        return SimpleNamespace(inserted_ids=inserted_ids)
+
+    async def bulk_write(self, requests: list[Any], ordered: bool = False):
+        if self.fail_writes:
+            raise ConnectionError("Mô phỏng lỗi bulk_write MongoDB")
+        modified = 0
+        for req in requests:
+            flt = getattr(req, "_filter", None)
+            doc = getattr(req, "_doc", None)
+            upsert = bool(getattr(req, "_upsert", False))
+            if flt is not None and doc is not None:
+                await self.update_one(flt, doc, upsert=upsert)
+                modified += 1
+        return SimpleNamespace(modified_count=modified)
+
     async def replace_one(self, flt: dict[str, Any], replacement: dict[str, Any], upsert: bool = False):
         if self.fail_writes:
             raise ConnectionError("Mô phỏng lỗi ghi MongoDB")

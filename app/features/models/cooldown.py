@@ -68,3 +68,11 @@ class ModelCooldownTracker:
         count = len(self._cooldowns)
         self._cooldowns.clear()
         return count
+
+    def purge_expired(self) -> int:
+        """Chỉ xóa các mục cooldown model đã hết hạn nhằm giải phóng RAM mà không làm mất cooldown còn hiệu lực."""
+        now = time.monotonic()
+        expired = [mid for mid, until in self._cooldowns.items() if until <= now]
+        for mid in expired:
+            self._cooldowns.pop(mid, None)
+        return len(expired)

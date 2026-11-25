@@ -1,11 +1,14 @@
 """Kho lưu trữ phiên chat (`sessions`) và kho lưu trữ vĩnh viễn (`archives`) trên MongoDB Atlas."""
 from __future__ import annotations
 
+import copy
 import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+
+from pymongo import UpdateOne
 
 from app.core.concurrency import UserLockManager
 from app.core.database import MongoDatabaseManager
@@ -13,6 +16,9 @@ from app.features.config.repository import ConfigRepository
 from app.features.sessions.history import clip_stored_text
 
 log = logging.getLogger("gemini-bot.sessions")
+
+MAX_SESSION_CACHE_ENTRIES = 200
+MAX_PENDING_TURNS = 200
 
 
 class SessionRepository:
@@ -32,11 +38,68 @@ class SessionRepository:
         self.ok: bool = False
         self.index_ok: bool = False
         self.last_error: Optional[str] = None
+        # Bộ đệm đọc lịch sử phiên gần đây (có thể dọn an toàn ở Bước 3) và hàng đợi lượt chưa ghi được lên Atlas
+        self._session_cache: dict[int, dict[str, Any]] = {}
+        self._pending_turns: list[dict[str, Any]] = []
 
     @property
     def enabled(self) -> bool:
         """Kiểm tra bộ nhớ phiên đã được bật qua `MONGODB_URI` hay chưa."""
         return self._db_manager.enabled
+
+    @property
+    def pending_turn_count(self) -> int:
+        """Số lượt hỏi đáp chưa đồng bộ xong đang nằm trong bộ đệm RAM."""
+        return len(self._pending_turns)
+
+    def _remember_session_cache(self, user_id: int, doc: dict[str, Any]) -> None:
+        """Lưu bản sao phiên gần nhất vào bộ đệm RAM có giới hạn kích thước."""
+        self._session_cache[user_id] = copy.deepcopy(doc)
+        if len(self._session_cache) > MAX_SESSION_CACHE_ENTRIES:
+            oldest_key = next(iter(self._session_cache))
+            self._session_cache.pop(oldest_key, None)
+
+    def purge_cache(self) -> int:
+        """Bước 3 Watchdog: xóa toàn bộ bộ đệm lịch sử phiên trong RAM (không làm mất cấu hình bot)."""
+        count = len(self._session_cache)
+        self._session_cache.clear()
+        return count
+
+    def _enqueue_pending_turn(self, entry: dict[str, Any]) -> None:
+        """Đưa lượt hỏi đáp chưa ghi được lên Atlas vào hàng đợi RAM để đồng bộ bù qua `bulk_write`."""
+        self._pending_turns.append(copy.deepcopy(entry))
+        if len(self._pending_turns) > MAX_PENDING_TURNS:
+            self._pending_turns = self._pending_turns[-MAX_PENDING_TURNS:]
+
+    async def flush_pending_bulk(self) -> int:
+        """Bước 2 Watchdog: đồng bộ hàng loạt (`bulk_write`) mọi lượt chat đang nằm trong bộ đệm RAM lên Atlas."""
+        if self.sessions_col is None or self.archives_col is None or not self._pending_turns:
+            return 0
+
+        pending = list(self._pending_turns)
+        archive_ops = [
+            UpdateOne(item["archive_filter"], item["archive_update"], upsert=True)
+            for item in pending
+        ]
+        session_ops = [
+            UpdateOne(item["session_filter"], item["session_update"], upsert=True)
+            for item in pending
+        ]
+
+        archive_bulk = getattr(self.archives_col, "bulk_write", None)
+        session_bulk = getattr(self.sessions_col, "bulk_write", None)
+        if callable(archive_bulk) and callable(session_bulk):
+            await archive_bulk(archive_ops, ordered=False)
+            await session_bulk(session_ops, ordered=False)
+        else:
+            for item in pending:
+                await self.archives_col.update_one(item["archive_filter"], item["archive_update"], upsert=True)
+                await self.sessions_col.update_one(item["session_filter"], item["session_update"], upsert=True)
+
+        self._pending_turns = self._pending_turns[len(pending):]
+        self.ok = True
+        self.last_error = None
+        return len(pending)
 
     async def _run(self, make_coro, default=None):
         """Thực thi thao tác MongoDB có bắt lỗi an toàn để bot vẫn trả lời ngay cả khi DB gặp sự cố."""
@@ -72,12 +135,19 @@ class SessionRepository:
         self.index_ok = bool(await self._run(_create_indexes))
 
     async def attach_db(self, db: Any) -> None:
-        """Gắn collections `sessions` và `archives` từ database đã kết nối."""
+        """Gắn collections `sessions` và `archives` từ database đã kết nối và đồng bộ bù các lượt đang chờ."""
         self.sessions_col = db["sessions"]
         self.archives_col = db["archives"]
         self.index_ok = False
         await self.ensure_indexes()
         if self.ok:
+            if self._pending_turns:
+                try:
+                    flushed = await self.flush_pending_bulk()
+                    if flushed:
+                        log.info("Đã đồng bộ bù %d lượt chat từ bộ đệm RAM lên MongoDB Atlas.", flushed)
+                except Exception as exc:
+                    log.warning("Chưa đồng bộ bù được lượt chat chờ: %s", exc)
             idle_hours = self._config.session_cfg().get("session_idle_hours", 2)
             log.info(
                 "Đã kết nối MongoDB Atlas (db=%s), phiên tự lưu trữ sau %g giờ",
@@ -98,6 +168,7 @@ class SessionRepository:
             query["expire_at"] = {"$lte": now}
         doc = await self._run(lambda: self.sessions_col.find_one(query))
         if not doc:
+            self._session_cache.pop(user_id, None)
             return None
 
         session_id = doc.get("session_id") or uuid.uuid4().hex
@@ -126,12 +197,14 @@ class SessionRepository:
         )
         if res is None:
             return None
+        self._session_cache.pop(user_id, None)
         return {"session_id": session_id, "turns": doc.get("turns", 0)}
 
     async def load(self, user_id: int) -> Optional[dict[str, Any]]:
         """Tải phiên hiện tại của người dùng; tự lưu trữ và làm mới nếu quá hạn nghỉ hoặc vượt số lượt."""
         doc = await self._run(lambda: self.sessions_col.find_one({"_id": user_id}))
         if not doc:
+            self._session_cache.pop(user_id, None)
             return None
         scfg = self._config.session_cfg()
         ttl = timedelta(hours=float(scfg.get("session_idle_hours", 2.0)))
@@ -143,6 +216,7 @@ class SessionRepository:
         if doc.get("turns", 0) >= max_turns:
             await self.end_session(user_id, "max_turns")
             return None
+        self._remember_session_cache(user_id, doc)
         return doc
 
     async def archive_expired(self) -> int:
@@ -170,7 +244,7 @@ class SessionRepository:
         model_id: str,
         user_meta: Optional[dict[str, Any]] = None,
     ) -> Optional[int]:
-        """Lưu lượt hỏi đáp vào cả kho lưu trữ vĩnh viễn (`archives`) và ngữ cảnh phiên (`sessions`)."""
+        """Lưu lượt hỏi đáp vào `archives` và `sessions`; nếu Atlas tạm lỗi thì đệm RAM chờ `bulk_write`."""
         await self.ensure_indexes()
         scfg = self._config.session_cfg()
         ttl = timedelta(hours=float(scfg.get("session_idle_hours", 2.0)))
@@ -188,39 +262,53 @@ class SessionRepository:
                 if field in user_meta and user_meta[field] is not None:
                     archive_set[field] = user_meta[field]
 
-        archive_res = await self._run(
-            lambda: self.archives_col.update_one(
-                {"_id": session_id},
-                {
-                    "$push": {
-                        "messages": {
-                            "$each": [
-                                {"role": "user", "text": user_text, "at": now},
-                                {"role": "model", "text": model_text, "at": now, "model": model_id},
-                            ]
-                        }
-                    },
-                    "$set": archive_set,
-                    "$inc": {"turns": 1},
-                    "$setOnInsert": {
-                        "user_id": user_id,
-                        "user_id_str": str(user_id),
-                        "created_at": created_at,
-                        "ended_at": None,
-                        "end_reason": None,
-                    },
-                },
-                upsert=True,
-            )
-        )
-        if archive_res is None:
-            return None
+        archive_filter = {"_id": session_id}
+        archive_update = {
+            "$push": {
+                "messages": {
+                    "$each": [
+                        {"role": "user", "text": user_text, "at": now},
+                        {"role": "model", "text": model_text, "at": now, "model": model_id},
+                    ]
+                }
+            },
+            "$set": archive_set,
+            "$inc": {"turns": 1},
+            "$setOnInsert": {
+                "user_id": user_id,
+                "user_id_str": str(user_id),
+                "created_at": created_at,
+                "ended_at": None,
+                "end_reason": None,
+            },
+        }
 
         expire_at = now + ttl
         ctx_messages = [
             {"role": "user", "text": clip_stored_text(user_text, max_stored_chars)},
             {"role": "model", "text": clip_stored_text(model_text, max_stored_chars)},
         ]
+        session_filter = {"_id": user_id}
+        session_update = {
+            "$push": {"messages": {"$each": ctx_messages, "$slice": -max_hist_msgs}},
+            "$set": {"last_active": now, "expire_at": expire_at, "session_id": session_id},
+            "$inc": {"turns": 1},
+            "$setOnInsert": {"created_at": created_at},
+        }
+
+        archive_res = await self._run(
+            lambda: self.archives_col.update_one(archive_filter, archive_update, upsert=True)
+        )
+        if archive_res is None:
+            # Atlas tạm lỗi -> đưa vào hàng đợi RAM để MemoryWatchdog Bước 2 xả hàng loạt bằng bulk_write
+            self._enqueue_pending_turn({
+                "archive_filter": archive_filter,
+                "archive_update": archive_update,
+                "session_filter": session_filter,
+                "session_update": session_update,
+            })
+            return None
+
         if is_fresh:
             turns = 1
             new_doc = {
@@ -233,21 +321,36 @@ class SessionRepository:
                 "expire_at": expire_at,
             }
             sess_res = await self._run(lambda: self.sessions_col.replace_one({"_id": user_id}, new_doc, upsert=True))
+            if sess_res is not None:
+                self._remember_session_cache(user_id, new_doc)
         else:
             turns = session_doc.get("turns", 0) + 1
             sess_res = await self._run(
-                lambda: self.sessions_col.update_one(
-                    {"_id": user_id},
-                    {
-                        "$push": {"messages": {"$each": ctx_messages, "$slice": -max_hist_msgs}},
-                        "$set": {"last_active": now, "expire_at": expire_at, "session_id": session_id},
-                        "$inc": {"turns": 1},
-                        "$setOnInsert": {"created_at": created_at},
-                    },
-                    upsert=True,
-                )
+                lambda: self.sessions_col.update_one(session_filter, session_update, upsert=True)
             )
-        return turns if sess_res is not None else None
+            if sess_res is not None:
+                updated_msgs = (list(session_doc.get("messages") or []) + ctx_messages)[-max_hist_msgs:]
+                self._remember_session_cache(
+                    user_id,
+                    {
+                        "_id": user_id,
+                        "session_id": session_id,
+                        "messages": updated_msgs,
+                        "turns": turns,
+                        "created_at": created_at,
+                        "last_active": now,
+                        "expire_at": expire_at,
+                    },
+                )
+        if sess_res is None:
+            self._enqueue_pending_turn({
+                "archive_filter": archive_filter,
+                "archive_update": archive_update,
+                "session_filter": session_filter,
+                "session_update": session_update,
+            })
+            return None
+        return turns
 
     async def active_count(self) -> Optional[int]:
         """Đếm số phiên còn hạn đang hoạt động trong collection `sessions`."""

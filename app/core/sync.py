@@ -76,16 +76,20 @@ class WriteBehindSyncCoordinator:
             await repo.attach_db(db)
         await self.flush_pending()
 
-    async def flush_pending(self) -> dict[str, Any]:
-        """Đẩy toàn bộ dữ liệu đệm trong RAM lên MongoDB Atlas và giải phóng RAM ngay khi thành công."""
+    async def flush_pending_with_counts(self) -> dict[str, int]:
+        """Đẩy toàn bộ dữ liệu đệm trong RAM lên MongoDB Atlas và trả về số mục đã đồng bộ theo từng kho."""
+        counts: dict[str, int] = {}
         if not self.connected or self.pending_count == 0:
-            return self.sync_status()
+            return counts
 
         async with self._lock:
             flushed_total = 0
             try:
                 for repo in self._repositories:
-                    flushed_total += await repo.flush_pending()
+                    flushed = await repo.flush_pending()
+                    if flushed:
+                        counts[repo.sync_key] = counts.get(repo.sync_key, 0) + flushed
+                        flushed_total += flushed
                 if flushed_total > 0:
                     self.last_flush_at = datetime.now(timezone.utc).isoformat()
                     self.last_flush_error = None
@@ -101,4 +105,9 @@ class WriteBehindSyncCoordinator:
                     self.last_flush_error,
                 )
 
+        return counts
+
+    async def flush_pending(self) -> dict[str, Any]:
+        """Đẩy toàn bộ dữ liệu đệm trong RAM lên MongoDB Atlas và giải phóng RAM ngay khi thành công."""
+        await self.flush_pending_with_counts()
         return self.sync_status()

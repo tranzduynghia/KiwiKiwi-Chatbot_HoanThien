@@ -13,10 +13,11 @@ def create_sessions_router(
     session_repo: SessionRepository,
     get_bot: Callable[[], Any],
     auth_deps: Any,
+    user_lookup: Optional[DiscordUserLookupService] = None,
 ) -> APIRouter:
     """Tạo router cho `/api/sessions/filters`, `/api/sessions/search` và `/api/sessions/{chat_id}`."""
     router = APIRouter(tags=["sessions"])
-    lookup = DiscordUserLookupService()
+    lookup = user_lookup or DiscordUserLookupService()
 
     @router.get("/api/sessions/filters")
     async def api_session_filters(_user: dict[str, Any] = Depends(auth_deps.require_user)):

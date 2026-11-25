@@ -22,6 +22,16 @@ class UserCooldownTracker:
         now = time.monotonic()
         self._last_used[user_id] = now
         if len(self._last_used) > self._max_entries:
-            stale_keys = [key for key, ts in self._last_used.items() if now - ts > self._stale_seconds]
-            for key in stale_keys:
-                self._last_used.pop(key, None)
+            self.purge_stale()
+
+    def purge_stale(self, *, force_all: bool = False) -> int:
+        """Dọn các mục cooldown cũ quá hạn (hoặc toàn bộ nếu ép buộc) để tiết kiệm RAM."""
+        if force_all:
+            count = len(self._last_used)
+            self._last_used.clear()
+            return count
+        now = time.monotonic()
+        stale_keys = [key for key, ts in self._last_used.items() if now - ts > self._stale_seconds]
+        for key in stale_keys:
+            self._last_used.pop(key, None)
+        return len(stale_keys)

@@ -111,3 +111,9 @@ class DiscordUserLookupService:
 
         self._user_cache[uid] = (now, profile)
         return profile
+
+    def clear_cache(self) -> int:
+        """Xóa toàn bộ bộ đệm hồ sơ Discord trong RAM và trả về số mục đã giải phóng."""
+        count = len(self._user_cache)
+        self._user_cache.clear()
+        return count

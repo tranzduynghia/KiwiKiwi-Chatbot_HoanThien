@@ -93,6 +93,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             session_repo=container.session_repo,
             get_bot=get_bot,
             auth_deps=container.auth_deps,
+            user_lookup=container.user_lookup,
         )
     )
     app.include_router(
@@ -100,6 +101,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             audit_service=container.audit_service,
             auth_deps=container.auth_deps,
             get_bot=get_bot,
+            user_lookup=container.user_lookup,
         )
     )
     return app

@@ -16,10 +16,11 @@ def create_audit_router(
     audit_service: AuditService,
     auth_deps: Any,
     get_bot: Optional[Callable[[], Any]] = None,
+    user_lookup: Optional[DiscordUserLookupService] = None,
 ) -> APIRouter:
     """Tạo router cho nhóm API `/api/audit-logs`."""
     router = APIRouter(tags=["audit"])
-    lookup = DiscordUserLookupService()
+    lookup = user_lookup or DiscordUserLookupService()
 
     @router.get("/api/audit-logs")
     async def api_audit_logs(

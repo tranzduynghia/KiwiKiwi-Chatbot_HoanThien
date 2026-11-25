@@ -9,6 +9,7 @@ from typing import Any, Optional
 import discord
 
 from app.core.database import MongoDatabaseManager
+from app.core.memory_watchdog import MemoryWatchdog
 from app.core.settings import BOT_VERSION
 from app.core.sync import WriteBehindSyncCoordinator
 from app.core.utils import format_duration
@@ -33,6 +34,7 @@ class MonitoringService:
         db_manager: MongoDatabaseManager,
         sync_coordinator: WriteBehindSyncCoordinator,
         usage_stats: UsageStats,
+        memory_watchdog: Optional[MemoryWatchdog] = None,
         start_time: Optional[float] = None,
     ):
         self._config = config_repo
@@ -42,6 +44,7 @@ class MonitoringService:
         self._db = db_manager
         self._sync = sync_coordinator
         self._stats = usage_stats
+        self._memory_watchdog = memory_watchdog
         self.start_time = start_time if start_time is not None else time.time()
 
     def uptime_seconds(self) -> float:
@@ -106,6 +109,12 @@ class MonitoringService:
             for guild in sorted(bot_guilds, key=lambda item: item.name.lower())
         ]
 
+        watchdog_status = (
+            self._memory_watchdog.status_snapshot()
+            if self._memory_watchdog is not None
+            else None
+        )
+
         return {
             "bot": {
                 "online": bot_ready,
@@ -130,6 +139,7 @@ class MonitoringService:
                 "ram_percent": ram_pct,
                 "cpu_percent": proc_metrics["cpu_percent"],
                 "threads": proc_metrics["threads"],
+                "memory_watchdog": watchdog_status,
             },
             "gemini": {
                 "discovered_count": len(self._models.text),

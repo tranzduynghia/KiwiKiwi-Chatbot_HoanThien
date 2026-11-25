@@ -56,6 +56,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert "/static/js/dashboard.js" in dash_html.text
         assert "id=\"tab-status\"" in dash_html.text
         assert "id=\"tab-models\"" in dash_html.text
+        assert "id=\"st-ram-reserve\"" in dash_html.text
         assert "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128" in dash_html.text
 
         status_res = client.get("/api/status?check_gemini=1")
@@ -65,6 +66,11 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert status_json["bot"]["display_name"] == "KiwiKiwi"
         assert status_json["bot"]["avatar_url"] == "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128"
         assert status_json["gemini"]["check"]["ok"] is True
+        wd_json = status_json["resources"]["memory_watchdog"]
+        assert wd_json["reserve_ready"] is True
+        assert wd_json["trigger_threshold_mb"] == 464.0
+        assert wd_json["recover_threshold_mb"] == 400.0
+        assert "Sẵn sàng" in wd_json["status_label"]
 
         ask_res = client.put(
             "/api/config/ask",

@@ -15,6 +15,7 @@ const SECTION_LABELS = {
   presence: "Trạng thái Bot (Presence)",
   discord_permissions: "Phân quyền Discord",
   dashboard_users: "Tài khoản Dashboard",
+  system: "Hệ thống & Bộ nhớ",
   config: "Cấu hình chung",
 };
 

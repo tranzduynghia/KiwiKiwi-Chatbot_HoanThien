@@ -36,6 +36,8 @@ class AskBot(discord.Client):
         self._cleaned_guild_cmds = False
         self._web_server: Optional[uvicorn.Server] = None
         self._web_task: Optional[asyncio.Task] = None
+        self._memory_watchdog_task: Optional[asyncio.Task] = None
+        self.container.memory_watchdog.attach_bot(self)
         self._register_commands()
 
     def _register_commands(self) -> None:
@@ -73,7 +75,7 @@ class AskBot(discord.Client):
         register_error_handler(self.tree)
 
     async def setup_hook(self) -> None:
-        """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, tải model và đồng bộ slash commands."""
+        """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, tải model, bật MemoryWatchdog và đồng bộ slash commands."""
         settings = self.container.settings
         await self.start_web()  # Mở cổng sớm để nền tảng host (Northflank/Render) nhận diện service
         await self.init_database()  # Kết nối MongoDB + nạp cấu hình động trước khi sync & chạy
@@ -82,6 +84,9 @@ class AskBot(discord.Client):
         self.loop.create_task(self.model_refresher())
         self.loop.create_task(self.session_sweeper())
         self.loop.create_task(self.config_sync_worker())
+        self._memory_watchdog_task = self.loop.create_task(
+            self.container.memory_watchdog.run_forever(self.is_closed)
+        )
 
         if settings.guild_id:
             guild = discord.Object(id=int(settings.guild_id))
@@ -125,6 +130,7 @@ class AskBot(discord.Client):
         db = await self.container.db_manager.connect()
         if db is None:
             return
+        self.container.usage_stats.attach_db(db)
         await self.container.session_repo.attach_db(db)
         await self.container.sync_coordinator.attach_db(db)
         await self.container.session_repo.archive_expired()
@@ -145,6 +151,8 @@ class AskBot(discord.Client):
                     await self.init_database()
                 if self.container.sync_coordinator.connected and self.container.sync_coordinator.pending_count > 0:
                     await self.container.sync_coordinator.flush_pending()
+                if self.container.session_repo.ok and self.container.session_repo.pending_turn_count > 0:
+                    await self.container.session_repo.flush_pending_bulk()
             except Exception as exc:
                 log.warning("Lỗi vòng lặp đồng bộ bộ đệm RAM -> MongoDB Atlas: %s", exc)
 
@@ -179,8 +187,10 @@ class AskBot(discord.Client):
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self) -> None:
-        """Dừng tác vụ luân phiên Presence, máy chủ Web Dashboard, MongoDB Atlas và đóng client Discord an toàn."""
+        """Dừng MemoryWatchdog, tác vụ luân phiên Presence, Web Dashboard, MongoDB Atlas và đóng client Discord."""
         stop_presence_rotation(self)
+        if self._memory_watchdog_task is not None and not self._memory_watchdog_task.done():
+            self._memory_watchdog_task.cancel()
         if self._web_server is not None:
             self._web_server.should_exit = True
         if self._web_task is not None:

@@ -45,9 +45,22 @@ class AuditRepository:
             self._pending_audits = self._pending_audits[-MAX_PENDING_AUDITS:]
 
     async def flush_pending(self) -> int:
-        """Đẩy lần lượt từng bản ghi Audit Log trong RAM lên MongoDB và giải phóng ngay khỏi RAM."""
+        """Đẩy toàn bộ Audit Log đang chờ trong RAM lên MongoDB theo lô (`insert_many`) và giải phóng ngay."""
         if not self.connected or not self._pending_audits:
             return 0
+        batch = []
+        for item in self._pending_audits:
+            audit_doc = copy.deepcopy(item)
+            audit_doc.pop("pending", None)
+            batch.append(audit_doc)
+
+        insert_many_fn = getattr(self.collection, "insert_many", None)
+        if callable(insert_many_fn) and len(batch) > 1:
+            await insert_many_fn(batch, ordered=False)
+            flushed = len(batch)
+            self._pending_audits.clear()
+            return flushed
+
         flushed = 0
         while self._pending_audits:
             audit_doc = copy.deepcopy(self._pending_audits[0])

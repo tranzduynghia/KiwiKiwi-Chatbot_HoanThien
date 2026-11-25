@@ -222,6 +222,27 @@ export function createStatusTabController() {
         }`;
       }
       setTextIfChanged("st-ram-rss", `Tiến trình: ${res.ram_rss_mb} MB`);
+      const wd = res.memory_watchdog;
+      if (wd) {
+        const reserveEl = document.getElementById("st-ram-reserve");
+        if (reserveEl) {
+          const icon = wd.state === "cleaning" ? "🚨" : wd.reserve_ready ? "🛡️" : "⚠️";
+          const nextLabel = `${icon} ${wd.status_label}`;
+          if (reserveEl.textContent !== nextLabel) reserveEl.textContent = nextLabel;
+          reserveEl.className = `font-medium truncate transition-colors duration-200 ${
+            wd.state === "cleaning"
+              ? "text-rose-400"
+              : wd.reserve_ready
+                ? "text-emerald-400"
+                : "text-amber-300"
+          }`;
+        }
+        const metaText =
+          wd.emergency_count > 0
+            ? `Đã cứu OOM: ${wd.emergency_count} lần`
+            : `Ngưỡng ${Math.round(wd.trigger_threshold_mb)}MB`;
+        setTextIfChanged("st-ram-watchdog-meta", metaText);
+      }
       setTextIfChanged("st-cpu", `${res.cpu_percent}% CPU`);
       setTextIfChanged("st-threads", `${res.threads} luồng`);
       setTextIfChanged("st-requests-brief", `Hôm nay: ${data.stats.today_total} req · Tổng: ${data.stats.total} req`);
