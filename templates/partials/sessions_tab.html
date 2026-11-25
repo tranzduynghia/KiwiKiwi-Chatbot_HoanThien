@@ -61,15 +61,15 @@
     </div>
   </form>
 
-  <!-- Bảng báo cáo phiên chat kèm Avatar người dùng + Mã chat + Nội dung tin nhắn + Thời gian -->
+  <!-- Bảng báo cáo tổng hợp: mỗi phiên chat (session_id) hiển thị đúng 1 dòng tóm tắt -->
   <div class="card p-5 space-y-4">
     <div class="overflow-x-auto">
       <table class="w-full text-left text-xs border-collapse">
         <thead>
           <tr class="border-b border-[#1e232e] text-[#8b95a7]">
-            <th class="py-2.5 pr-4 w-72">Người dùng &amp; Mã chat (Chat ID)</th>
-            <th class="py-2.5 pr-4">Nội dung tin nhắn</th>
-            <th class="py-2.5 text-right w-44 whitespace-nowrap">Thời gian &amp; Chi tiết</th>
+            <th class="py-2.5 pr-4 w-72">Người dùng &amp; Mã phiên (Chat ID)</th>
+            <th class="py-2.5 pr-4">Xem trước câu hỏi đầu tiên</th>
+            <th class="py-2.5 text-right w-44 whitespace-nowrap">Thời gian phiên</th>
           </tr>
         </thead>
         <tbody id="sessions-search-tbody" class="divide-y divide-[#1e232e]/80">

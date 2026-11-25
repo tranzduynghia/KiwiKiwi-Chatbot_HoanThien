@@ -91,25 +91,37 @@ async def test_session_repository_search_messages(app_container, fake_db):
         },
     )
 
-    # Duyệt toàn bộ mà không cần nhập ID hay từ khóa
-    all_res = await app_container.session_repo.search_messages()
-    assert all_res["total"] == 4
-    assert len(all_res["items"]) == 4
+    # Thêm lượt thứ 2 vào cùng phiên của Alice -> vẫn phải gom thành đúng 1 dòng theo session_id
+    alice_doc = await app_container.session_repo.load(1001)
+    await app_container.session_repo.save_turn(
+        1001,
+        "Câu hỏi thứ 2 trong cùng phiên",
+        "Trả lời lượt 2.",
+        alice_doc,
+        "gemini-2.5-flash",
+    )
 
-    # Lọc theo username
+    # Duyệt toàn bộ: chỉ 2 dòng (mỗi phiên 1 dòng dù có 6 tin nhắn)
+    all_res = await app_container.session_repo.search_messages()
+    assert all_res["total"] == 2
+    assert len(all_res["items"]) == 2
+
+    # Lọc theo username -> 1 phiên duy nhất, preview là câu hỏi đầu tiên của người dùng
     alice_res = await app_container.session_repo.search_messages(username="alice")
-    assert alice_res["total"] == 2
-    assert all(item["avatar_url"].endswith("alice.png") for item in alice_res["items"])
+    assert alice_res["total"] == 1
+    assert alice_res["items"][0]["avatar_url"].endswith("alice.png")
+    assert alice_res["items"][0]["preview"] == "Hướng dẫn cài đặt Python"
+    assert alice_res["items"][0]["turns"] == 2
+    assert alice_res["items"][0]["message_count"] == 4
 
     # Lọc theo vai trò server (ID hoặc tên vai trò)
     role_res = await app_container.session_repo.search_messages(server_role="902")
-    assert role_res["total"] == 2
-    assert all(item["username"] == "bob_user" for item in role_res["items"])
+    assert role_res["total"] == 1
+    assert role_res["items"][0]["username"] == "bob_user"
 
     # Lọc kết hợp từ khóa + vai trò model + user_id
     model_only = await app_container.session_repo.search_messages(query="python", role="model", user_id="1001")
     assert model_only["total"] == 1
-    assert model_only["items"][0]["role"] == "model"
-    assert "Python 3.12" in model_only["items"][0]["content"]
+    assert model_only["items"][0]["preview"] == "Hướng dẫn cài đặt Python"
 
 

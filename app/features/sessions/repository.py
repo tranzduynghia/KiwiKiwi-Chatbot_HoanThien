@@ -330,10 +330,15 @@ class SessionRepository:
         )
 
         query_lower = clean_query.lower()
-        matched_rows: list[dict[str, Any]] = []
+        seen_session_ids: set[str] = set()
+        matched_sessions: list[dict[str, Any]] = []
 
         for doc in docs or []:
             chat_id = str(doc.get("_id") or "")
+            if not chat_id or chat_id in seen_session_ids:
+                continue
+            seen_session_ids.add(chat_id)
+
             uid_str = str(doc.get("user_id_str") or doc.get("user_id") or "")
             session_status = "active" if doc.get("ended_at") is None else "archived"
             fallback_dt = doc.get("last_active") or doc.get("created_at")
@@ -369,6 +374,7 @@ class SessionRepository:
                 if not role_hit:
                     continue
 
+            messages = doc.get("messages") or []
             meta_matched = bool(
                 query_lower
                 and (
@@ -379,39 +385,63 @@ class SessionRepository:
                 )
             )
 
-            for msg in doc.get("messages") or []:
-                msg_role = str(msg.get("role") or "")
-                if clean_role and msg_role != clean_role:
+            # Kiểm tra phiên có khớp bộ lọc loại tin (user/model) và từ khóa nội dung hay không
+            if clean_role or (query_lower and not meta_matched):
+                msg_matched = False
+                for msg in messages:
+                    msg_role = str(msg.get("role") or "")
+                    if clean_role and msg_role != clean_role:
+                        continue
+                    msg_text = str(msg.get("text") or "")
+                    if not query_lower or meta_matched or query_lower in msg_text.lower():
+                        msg_matched = True
+                        break
+                if not msg_matched:
                     continue
-                msg_text = str(msg.get("text") or "")
-                if query_lower and not meta_matched and query_lower not in msg_text.lower():
-                    continue
 
-                raw_at = msg.get("at") or fallback_dt
-                if isinstance(raw_at, datetime):
-                    ts_iso = raw_at.isoformat()
-                else:
-                    ts_iso = str(raw_at) if raw_at else ""
+            # Lấy câu hỏi đầu tiên của người dùng làm bản xem trước ngắn gọn cho bảng tổng hợp
+            first_user_msg = next(
+                (str(m.get("text") or "").strip() for m in messages if m.get("role") == "user" and m.get("text")),
+                "",
+            )
+            if not first_user_msg and messages:
+                first_user_msg = str(messages[0].get("text") or "").strip()
+            preview_single_line = " ".join(first_user_msg.split())
+            preview = (
+                preview_single_line
+                if len(preview_single_line) <= 140
+                else preview_single_line[:140] + "…"
+            )
 
-                matched_rows.append({
-                    "chat_id": chat_id,
-                    "chat_id_short": chat_id[:8] if chat_id else "—",
-                    "user_id": uid_str,
-                    "username": doc_username,
-                    "display_name": doc_display or doc_username or uid_str,
-                    "avatar_url": doc_avatar,
-                    "server_roles": doc_roles,
-                    "role": msg_role or "user",
-                    "model": msg.get("model"),
-                    "content": msg_text,
-                    "timestamp": ts_iso,
-                    "session_status": session_status,
-                })
+            if isinstance(fallback_dt, datetime):
+                ts_iso = fallback_dt.isoformat()
+            else:
+                ts_iso = str(fallback_dt) if fallback_dt else ""
 
-        # Sắp xếp mới nhất lên đầu rồi phân trang
-        matched_rows.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
-        total = len(matched_rows)
-        page_items = matched_rows[safe_offset : safe_offset + capped_limit]
+            created_dt = doc.get("created_at")
+            created_iso = created_dt.isoformat() if isinstance(created_dt, datetime) else (str(created_dt) if created_dt else "")
+
+            matched_sessions.append({
+                "chat_id": chat_id,
+                "chat_id_short": chat_id[:8],
+                "user_id": uid_str,
+                "username": doc_username,
+                "display_name": doc_display or doc_username or uid_str,
+                "avatar_url": doc_avatar,
+                "server_roles": doc_roles,
+                "preview": preview or "(Phiên chat trống)",
+                "content": preview or "(Phiên chat trống)",
+                "turns": int(doc.get("turns") or 0),
+                "message_count": len(messages),
+                "timestamp": ts_iso,
+                "created_at": created_iso,
+                "session_status": session_status,
+            })
+
+        # Sắp xếp phiên mới nhất lên đầu rồi phân trang
+        matched_sessions.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+        total = len(matched_sessions)
+        page_items = matched_sessions[safe_offset : safe_offset + capped_limit]
         return {
             "items": page_items,
             "total": total,

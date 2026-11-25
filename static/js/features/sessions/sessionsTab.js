@@ -157,22 +157,24 @@ export function createSessionsTabController() {
               const isModel = msg.role === "model";
               const ts = msg.timestamp ? new Date(msg.timestamp).toLocaleString("vi-VN") : "—";
               return `
-                <div class="rounded-lg border p-3.5 ${
-                  isModel
-                    ? "bg-[#131720] border-[#252b38]"
-                    : "bg-[#101622] border-sky-500/25"
-                }">
-                  <div class="flex items-center justify-between gap-2 mb-1.5 text-[11px]">
-                    <div class="flex items-center gap-2">
-                      ${
-                        isModel
-                          ? `<span class="px-1.5 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium">AI${msg.model ? ` · ${escapeHtml(msg.model)}` : ""}</span>`
-                          : '<span class="px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30 font-medium">User</span>'
-                      }
+                <div class="flex ${isModel ? "justify-start" : "justify-end"}">
+                  <div class="w-full max-w-[92%] rounded-xl border p-3.5 ${
+                    isModel
+                      ? "bg-[#131720] border-rose-500/25"
+                      : "bg-[#101828] border-sky-500/30"
+                  }">
+                    <div class="flex items-center justify-between gap-2 mb-1.5 text-[11px]">
+                      <div class="flex items-center gap-2">
+                        ${
+                          isModel
+                            ? `<span class="px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium">🤖 Bot AI${msg.model ? ` · ${escapeHtml(msg.model)}` : ""}</span>`
+                            : `<span class="px-2 py-0.5 rounded-full bg-sky-500/15 text-sky-300 border border-sky-500/30 font-medium">👤 ${escapeHtml(displayName)}</span>`
+                        }
+                      </div>
+                      <span class="font-mono text-[#5e6778]">${escapeHtml(ts)}</span>
                     </div>
-                    <span class="font-mono text-[#5e6778]">${escapeHtml(ts)}</span>
+                    <div class="text-xs text-slate-200 whitespace-pre-wrap break-words leading-relaxed">${highlightMatch(msg.content, activeKeyword)}</div>
                   </div>
-                  <div class="text-xs text-slate-200 whitespace-pre-wrap break-words leading-relaxed">${highlightMatch(msg.content, activeKeyword)}</div>
                 </div>
               `;
             })
@@ -220,7 +222,7 @@ export function createSessionsTabController() {
     params.set("offset", String(currentOffset));
 
     tbody.innerHTML =
-      '<tr><td colspan="3" class="py-6 text-center text-[#8b95a7]">Đang tải dữ liệu từ MongoDB Atlas...</td></tr>';
+      '<tr><td colspan="3" class="py-6 text-center text-[#8b95a7]">Đang tải danh sách phiên chat từ MongoDB Atlas...</td></tr>';
 
     try {
       const data = await apiRequest(`/api/sessions/search?${params.toString()}`);
@@ -231,12 +233,12 @@ export function createSessionsTabController() {
       const hasMore = Boolean(data.has_more);
 
       if (countEl) {
-        countEl.textContent = `${total} kết quả`;
+        countEl.textContent = `${total} phiên chat`;
       }
       if (pageInfoEl) {
         const startIdx = total === 0 ? 0 : currentOffset + 1;
         const endIdx = currentOffset + items.length;
-        pageInfoEl.textContent = `Hiển thị ${startIdx}–${endIdx} / ${total} bản ghi`;
+        pageInfoEl.textContent = `Hiển thị ${startIdx}–${endIdx} / ${total} phiên chat`;
       }
       if (prevBtn) prevBtn.disabled = currentOffset <= 0;
       if (nextBtn) nextBtn.disabled = !hasMore;
@@ -244,7 +246,7 @@ export function createSessionsTabController() {
       if (!items.length) {
         const emptyMsg = data.db_connected === false
           ? "Chưa kết nối MongoDB Atlas hoặc bộ nhớ phiên đang tắt."
-          : "Không tìm thấy tin nhắn nào khớp với điều kiện lọc.";
+          : "Không tìm thấy phiên chat nào khớp với điều kiện lọc.";
         tbody.innerHTML = `<tr><td colspan="3" class="py-6 text-center text-[#5e6778]">${escapeHtml(emptyMsg)}</td></tr>`;
         return;
       }
@@ -252,19 +254,22 @@ export function createSessionsTabController() {
       tbody.innerHTML = items
         .map((item) => {
           const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleString("vi-VN") : "—";
-          const isModel = item.role === "model";
-          const roleBadge = isModel
-            ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-500/15 text-rose-300 border border-rose-500/30">AI${item.model ? ` · ${escapeHtml(item.model)}` : ""}</span>`
-            : '<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-sky-500/15 text-sky-300 border border-sky-500/30">User</span>';
           const statusLabel = item.session_status === "active"
             ? '<span class="text-[10px] text-emerald-400">● Đang chạy</span>'
             : '<span class="text-[10px] text-[#5e6778]">Lưu trữ</span>';
 
           const displayName = item.display_name || item.username || "Người dùng Discord";
           const usernameLine = item.username ? `@${item.username}` : "";
+          const previewText = item.preview || item.content || "(Phiên chat trống)";
+          const turnsCount = Number(item.turns || 0);
+          const msgCount = Number(item.message_count || 0);
 
           return `
-            <tr class="hover:bg-[#181d28]/70 align-top">
+            <tr
+              data-view-chat-id="${escapeHtml(item.chat_id)}"
+              class="hover:bg-[#181d28]/80 align-top cursor-pointer transition-colors"
+              title="Bấm để xem toàn bộ hội thoại phiên #${escapeHtml(item.chat_id_short)}"
+            >
               <td class="py-3 pr-4">
                 <div class="flex items-start gap-3">
                   ${renderAvatar(item)}
@@ -272,12 +277,7 @@ export function createSessionsTabController() {
                     <div class="font-medium text-slate-100 truncate">${escapeHtml(displayName)}</div>
                     ${usernameLine ? `<div class="text-[11px] text-[#8b95a7] truncate">${escapeHtml(usernameLine)}</div>` : ""}
                     <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                      <button
-                        type="button"
-                        data-view-chat-id="${escapeHtml(item.chat_id)}"
-                        title="Xem toàn bộ hội thoại #${escapeHtml(item.chat_id)}"
-                        class="font-mono text-[11px] text-rose-300 hover:text-rose-200 bg-[#0a0d12] border border-[#1e232e] px-1.5 py-0.5 rounded transition cursor-pointer"
-                      >#${escapeHtml(item.chat_id_short)}</button>
+                      <span class="font-mono text-[11px] text-rose-300 bg-[#0a0d12] border border-[#1e232e] px-1.5 py-0.5 rounded">#${escapeHtml(item.chat_id_short)}</span>
                       <button
                         type="button"
                         data-copy-chat-id="${escapeHtml(item.chat_id)}"
@@ -292,12 +292,11 @@ export function createSessionsTabController() {
                 </div>
               </td>
               <td class="py-3 pr-4">
-                <div class="mb-1.5 flex items-center gap-2">${roleBadge}</div>
-                <div
-                  data-view-chat-id="${escapeHtml(item.chat_id)}"
-                  class="text-slate-200 whitespace-pre-wrap break-words leading-relaxed max-h-48 overflow-y-auto pr-1 cursor-pointer hover:text-white"
-                  title="Bấm để xem chi tiết phiên chat"
-                >${highlightMatch(item.content, q)}</div>
+                <div class="text-slate-200 leading-relaxed line-clamp-2 break-words">${highlightMatch(previewText, q)}</div>
+                <div class="mt-1.5 flex items-center gap-2 text-[10px] text-[#8b95a7] font-mono">
+                  <span class="px-1.5 py-0.5 rounded bg-[#0a0d12] border border-[#1e232e]">${turnsCount} lượt</span>
+                  <span class="px-1.5 py-0.5 rounded bg-[#0a0d12] border border-[#1e232e]">${msgCount} tin nhắn</span>
+                </div>
               </td>
               <td class="py-3 text-right whitespace-nowrap">
                 <div class="font-mono text-[#8b95a7]">${escapeHtml(timeStr)}</div>

@@ -132,19 +132,21 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         role_names = [r["name"] for r in filters_res.json()["server_roles"]]
         assert "Moderator" in role_names
 
-        # Duyệt toàn bộ không cần nhập ID + kiểm tra tự bổ sung avatar & username từ Discord client
+        # Duyệt toàn bộ không cần nhập ID -> đúng 1 dòng tóm tắt cho 1 session_id + tự bổ sung avatar & username
         browse_res = client.get("/api/sessions/search")
         assert browse_res.status_code == 200
         browse_json = browse_res.json()
-        assert browse_json["total"] == 2
+        assert browse_json["total"] == 1
         assert browse_json["items"][0]["username"] == "kiwi_tester"
+        assert browse_json["items"][0]["preview"] == "Kiểm tra từ khóa KiwiKiwi"
+        assert browse_json["items"][0]["message_count"] == 2
         assert browse_json["items"][0]["avatar_url"].startswith("https://cdn.discordapp.com/")
 
         # Lọc theo username và server_role
         filtered_res = client.get("/api/sessions/search?username=kiwi_tester&server_role=501")
         assert filtered_res.status_code == 200
-        assert filtered_res.json()["total"] == 2
-        assert all({"chat_id", "content", "timestamp", "avatar_url"} <= set(row.keys()) for row in filtered_res.json()["items"])
+        assert filtered_res.json()["total"] == 1
+        assert all({"chat_id", "preview", "timestamp", "avatar_url"} <= set(row.keys()) for row in filtered_res.json()["items"])
 
         # Kiểm tra API xem chi tiết phiên chat (mở Modal không chuyển hướng)
         chat_id = browse_json["items"][0]["chat_id"]
