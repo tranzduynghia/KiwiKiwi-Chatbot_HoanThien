@@ -3,25 +3,40 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>KiwiKiwi Bot Dashboard</title>
+  <meta name="description" content="KiwiKiwi Bot Admin Dashboard — Quản trị cấu hình, model Gemini, phân quyền và giám sát thời gian thực." />
+  <title>KiwiKiwi · Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/static/css/dashboard.css" />
 </head>
-<body class="min-h-screen bg-slate-950 text-slate-100">
-  <!-- Thanh tiêu đề và điều hướng tab -->
-  {% include "partials/header.html" %}
+<body class="ox-body">
+  <!-- Lớp phủ nền tối khi mở sidebar trên thiết bị di động -->
+  <div id="sidebar-backdrop" class="ox-sidebar-backdrop"></div>
 
-  <!-- Thông báo nhanh dạng Toast -->
-  <div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm px-4 py-3 rounded-xl text-sm shadow-xl border"></div>
+  <div class="ox-shell">
+    <!-- Thanh điều hướng bên trái theo bố cục Oxfin Dark Admin -->
+    {% include "partials/sidebar.html" %}
 
-  <!-- Nội dung chính chia theo từng tab tính năng -->
-  <main class="max-w-6xl mx-auto px-4 py-6 space-y-6">
-    {% include "partials/status_tab.html" %}
-    {% include "partials/ask_config_tab.html" %}
-    {% include "partials/prompt_config_tab.html" %}
-    {% include "partials/models_tab.html" %}
-    {% include "partials/permissions_tab.html" %}
-  </main>
+    <div class="ox-main-wrapper">
+      <!-- Thanh công cụ trên cùng -->
+      {% include "partials/header.html" %}
+
+      <!-- Thông báo nhanh dạng Toast -->
+      <div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm px-4 py-3 rounded-xl text-sm shadow-2xl border"></div>
+
+      <!-- Nội dung chính chia theo từng tab tính năng -->
+      <main class="p-5 lg:p-6 max-w-[1440px] w-full mx-auto space-y-5">
+        {% include "partials/status_tab.html" %}
+        {% include "partials/ask_config_tab.html" %}
+        {% include "partials/prompt_config_tab.html" %}
+        {% include "partials/models_tab.html" %}
+        {% include "partials/permissions_tab.html" %}
+        {% include "partials/audit_tab.html" %}
+      </main>
+    </div>
+  </div>
 
   <!-- Dữ liệu khởi tạo từ server cho các module JavaScript -->
   <script id="dashboard-bootstrap" type="application/json">

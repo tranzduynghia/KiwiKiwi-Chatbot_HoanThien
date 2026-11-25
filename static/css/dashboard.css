@@ -1,72 +1,517 @@
-/* Các lớp giao diện dùng chung cho Web Dashboard KiwiKiwi Bot */
+/* ==========================================================================
+   Hệ thống thiết kế Oxfin Dark Admin Dashboard cho KiwiKiwi Bot
+   Bảng màu: Obsidian (#0d1015), Carbon Card (#131720), Viền mảnh (#1f2430),
+   Điểm nhấn thương hiệu Crimson (#e11d48) & đồ thị đường Amber (#facc15)
+   ========================================================================== */
 
-.tab-btn[data-active="true"] {
-  background-color: rgb(79 70 229 / 0.18);
-  color: #a5b4fc;
-  border-color: rgb(99 102 241 / 0.45);
+:root {
+  --ox-bg: #0c0f14;
+  --ox-sidebar: #0e1117;
+  --ox-topbar: #0e1117;
+  --ox-surface: #131720;
+  --ox-surface-hover: #181d28;
+  --ox-input: #0a0d12;
+  --ox-border: #1e232e;
+  --ox-border-strong: #2a3140;
+  --ox-text: #f1f5f9;
+  --ox-text-muted: #8b95a7;
+  --ox-text-dim: #5e6778;
+  --ox-accent: #e11d48;
+  --ox-accent-hover: #f43f5e;
+  --ox-amber: #facc15;
+  --ox-green: #22c55e;
+  --ox-blue: #3b82f6;
+  --ox-sidebar-width: 244px;
 }
 
+* {
+  box-sizing: border-box;
+}
+
+body.ox-body {
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background-color: var(--ox-bg);
+  color: var(--ox-text);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Thanh cuộn tối giản */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--ox-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: #262c3a;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #374054;
+}
+
+/* ==========================================================================
+   Khung bố cục Sidebar + Topbar + Main Content
+   ========================================================================== */
+
+.ox-shell {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--ox-bg);
+}
+
+.ox-sidebar {
+  width: var(--ox-sidebar-width);
+  flex-shrink: 0;
+  background-color: var(--ox-sidebar);
+  border-right: 1px solid var(--ox-border);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  transition: transform 0.22s ease, width 0.22s ease;
+}
+
+.ox-main-wrapper {
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--ox-sidebar-width);
+  display: flex;
+  flex-direction: column;
+  transition: margin-left 0.22s ease;
+}
+
+/* Trạng thái thu gọn sidebar trên màn hình lớn */
+body.sidebar-collapsed .ox-sidebar {
+  transform: translateX(-100%);
+}
+body.sidebar-collapsed .ox-main-wrapper {
+  margin-left: 0;
+}
+
+/* Đáp ứng màn hình nhỏ / di động */
+.ox-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 35;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+@media (max-width: 1023px) {
+  .ox-sidebar {
+    transform: translateX(-100%);
+  }
+  .ox-main-wrapper {
+    margin-left: 0;
+  }
+  body.sidebar-mobile-open .ox-sidebar {
+    transform: translateX(0);
+  }
+  body.sidebar-mobile-open .ox-sidebar-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* Khối thương hiệu góc trên bên trái */
+.ox-brand {
+  height: 64px;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--ox-border);
+}
+
+.ox-brand-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+}
+
+/* Mục điều hướng Sidebar */
+.ox-nav {
+  flex: 1;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+}
+
+.tab-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 9999px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--ox-text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+  text-align: left;
+}
+
+.tab-btn svg {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  opacity: 0.78;
+}
+
+.tab-btn:hover {
+  color: #f8fafc;
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+.tab-btn[data-active="true"] {
+  background-color: #212631;
+  color: #ffffff;
+  border-color: #2b3240;
+}
+
+.tab-btn[data-active="true"] svg {
+  opacity: 1;
+  color: #f43f5e;
+}
+
+/* Thanh Topbar cố định */
+.ox-topbar {
+  height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background-color: rgba(14, 17, 23, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--ox-border);
+  padding: 0 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.ox-icon-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background-color: #161b24;
+  border: 1px solid var(--ox-border);
+  color: var(--ox-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.ox-icon-btn:hover {
+  background-color: #1e2431;
+  color: #ffffff;
+  border-color: var(--ox-border-strong);
+}
+
+.ox-notif-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background-color: var(--ox-accent);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Ô tìm kiếm trên Topbar */
+.ox-search-box {
+  position: relative;
+  flex: 1;
+  max-width: 440px;
+}
+
+.ox-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 14px 0 36px;
+  border-radius: 8px;
+  background-color: var(--ox-input);
+  border: 1px solid var(--ox-border);
+  color: var(--ox-text);
+  font-size: 0.82rem;
+  transition: border-color 0.15s ease;
+}
+
+.ox-search-input::placeholder {
+  color: var(--ox-text-dim);
+}
+
+.ox-search-input:focus {
+  outline: none;
+  border-color: #394256;
+}
+
+/* ==========================================================================
+   Thẻ nội dung, nút bấm, trường nhập liệu & bảng
+   ========================================================================== */
+
 .card {
-  background-color: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 0.875rem;
+  background-color: var(--ox-surface);
+  border: 1px solid var(--ox-border);
+  border-radius: 10px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.02) inset;
 }
 
 .inp {
-  background-color: #020617;
-  border: 1px solid #1e293b;
-  border-radius: 0.5rem;
+  background-color: var(--ox-input);
+  border: 1px solid var(--ox-border);
+  border-radius: 8px;
   padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  color: #f1f5f9;
+  font-size: 0.85rem;
+  color: var(--ox-text);
   width: 100%;
+  transition: border-color 0.15s ease;
 }
 
 .inp:focus {
   outline: none;
-  border-color: #6366f1;
+  border-color: var(--ox-accent);
 }
 
 .btn-primary {
-  background-color: #4f46e5;
-  color: #fff;
+  background-color: var(--ox-accent);
+  color: #ffffff;
   font-weight: 500;
-  padding: 0.55rem 1rem;
-  border-radius: 0.5rem;
-  font-size: 0.875rem;
-  transition: background 0.15s;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, transform 0.1s ease;
   cursor: pointer;
 }
 
 .btn-primary:hover {
-  background-color: #6366f1;
+  background-color: var(--ox-accent-hover);
+}
+
+.btn-primary:active {
+  transform: translateY(1px);
 }
 
 .btn-ghost {
-  background-color: #1e293b;
-  color: #e2e8f0;
+  background-color: #181d27;
+  color: #dbe3ef;
   font-weight: 500;
   padding: 0.45rem 0.85rem;
-  border-radius: 0.5rem;
-  font-size: 0.8125rem;
-  transition: background 0.15s;
+  border-radius: 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--ox-border);
+  transition: background-color 0.15s ease, border-color 0.15s ease;
   cursor: pointer;
 }
 
 .btn-ghost:hover {
-  background-color: #334155;
+  background-color: #212836;
+  border-color: var(--ox-border-strong);
 }
 
 .btn-danger {
-  background-color: rgb(225 29 72 / 0.15);
+  background-color: rgba(225, 29, 72, 0.12);
   color: #fda4af;
-  border: 1px solid rgb(225 29 72 / 0.35);
+  border: 1px solid rgba(225, 29, 72, 0.3);
   padding: 0.35rem 0.7rem;
-  border-radius: 0.5rem;
+  border-radius: 7px;
   font-size: 0.75rem;
   cursor: pointer;
+  transition: background-color 0.15s ease;
 }
 
 .btn-danger:hover {
-  background-color: rgb(225 29 72 / 0.28);
+  background-color: rgba(225, 29, 72, 0.24);
+}
+
+/* ==========================================================================
+   Biểu tượng hình thoi đặc trưng Oxfin (Diamond KPI Badges)
+   ========================================================================== */
+
+.ox-kpi-card {
+  background-color: var(--ox-surface);
+  border: 1px solid var(--ox-border);
+  border-radius: 10px;
+  padding: 16px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
+}
+
+.ox-kpi-card:hover {
+  border-color: var(--ox-border-strong);
+  background-color: var(--ox-surface-hover);
+}
+
+.ox-diamond {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  transform: rotate(45deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin: 4px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
+}
+
+.ox-diamond-inner {
+  transform: rotate(-45deg);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ox-diamond-crimson {
+  background: linear-gradient(135deg, #f43f5e 0%, #be123c 100%);
+}
+.ox-diamond-blue {
+  background: linear-gradient(135deg, #38bdf8 0%, #1d4ed8 100%);
+}
+.ox-diamond-lime {
+  background: linear-gradient(135deg, #a3e635 0%, #4d7c0f 100%);
+}
+.ox-diamond-violet {
+  background: linear-gradient(135deg, #a78bfa 0%, #6d28d9 100%);
+}
+.ox-diamond-orange {
+  background: linear-gradient(135deg, #fb923c 0%, #c2410c 100%);
+}
+.ox-diamond-magenta {
+  background: linear-gradient(135deg, #e879f9 0%, #a21caf 100%);
+}
+
+/* ==========================================================================
+   Biểu đồ cột & đường đặc trưng Oxfin
+   ========================================================================== */
+
+.ox-bar-chart {
+  position: relative;
+  height: 196px;
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  padding: 16px 8px 0 34px;
+}
+
+.ox-bar-grid {
+  position: absolute;
+  inset: 16px 8px 0 34px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.ox-bar-grid-line {
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.06);
+  width: 100%;
+  position: relative;
+}
+
+.ox-bar-grid-label {
+  position: absolute;
+  left: -34px;
+  top: -7px;
+  font-size: 10px;
+  color: var(--ox-text-dim);
+  font-family: "JetBrains Mono", monospace;
+}
+
+.ox-bar-col {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.ox-bar-rect {
+  width: 100%;
+  max-width: 44px;
+  min-height: 22px;
+  border-radius: 5px 5px 2px 2px;
+  background: linear-gradient(180deg, #64748b 0%, #475569 100%);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #ffffff;
+  transition: height 0.35s ease, filter 0.15s ease;
+}
+
+.ox-bar-rect:hover {
+  filter: brightness(1.15);
+}
+
+.ox-bar-rect.is-primary {
+  background: linear-gradient(180deg, #f43f5e 0%, #be123c 100%);
+}
+
+/* Thanh tiến trình mảnh kiểu Oxfin */
+.ox-progress-track {
+  width: 100%;
+  height: 5px;
+  border-radius: 9999px;
+  background-color: #1f2532;
+  overflow: hidden;
+}
+
+.ox-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 0.35s ease, background-color 0.25s ease;
+}
+
+/* Avatar góc phải Topbar */
+.ox-avatar-fallback {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #f43f5e 0%, #9f1239 100%);
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }

@@ -1,120 +1,254 @@
-<!-- Tab 1: Giám sát trạng thái Bot, RAM/CPU, Gemini API, MongoDB Atlas và thống kê sử dụng -->
+<!-- Tab 1: Bảng điều khiển tổng quan theo bố cục Oxfin Dark Admin (Biểu đồ cột + 6 thẻ hình thoi + Biểu đồ đường) -->
 <section id="tab-status" class="tab-panel space-y-5">
+  <!-- Tiêu đề và điều khiển làm mới -->
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h2 class="text-lg font-semibold">Giám sát trạng thái Bot</h2>
-      <p class="text-xs text-slate-400">Thông số hoạt động trực tiếp từ tiến trình bot hiện tại</p>
+      <h1 class="text-lg font-semibold tracking-tight text-white">Tổng quan hệ thống Bot</h1>
+      <p class="text-xs text-[#8b95a7]">Giám sát thời gian thực tiến trình Discord Bot, Gemini API và MongoDB Atlas</p>
     </div>
-    <div class="flex items-center gap-2">
-      <label class="inline-flex items-center gap-2 text-xs text-slate-400 mr-2 cursor-pointer">
-        <input id="auto-refresh-toggle" type="checkbox" checked class="accent-indigo-500" />
+    <div class="flex flex-wrap items-center gap-2">
+      <label class="inline-flex items-center gap-2 text-xs text-[#8b95a7] mr-1 cursor-pointer select-none">
+        <input id="auto-refresh-toggle" type="checkbox" checked class="accent-rose-600" />
         Tự làm mới (5s)
       </label>
-      <button id="btn-check-gemini" class="btn-ghost">🔌 Kiểm tra Gemini API</button>
-      <button id="btn-refresh-status" class="btn-primary">↻ Làm mới</button>
+      <button id="btn-check-gemini" type="button" class="btn-ghost">🔌 Kiểm tra Gemini API</button>
+      <button id="btn-refresh-status" type="button" class="btn-primary">↻ Làm mới</button>
     </div>
   </div>
 
-  <!-- Các thẻ chỉ số KPI tổng quan -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="card p-4">
-      <div class="text-xs text-slate-400">Trạng thái &amp; Ping</div>
-      <div class="mt-2 flex items-baseline justify-between">
-        <span id="st-online" class="text-lg font-semibold">—</span>
-        <span id="st-ping" class="text-sm font-mono text-indigo-300">— ms</span>
+  <!-- Lưới chính 2 cột bất đối xứng giống mẫu Oxfin -->
+  <div class="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+    <!-- CỘT TRÁI (7/12): Biểu đồ cột thống kê + 2 thẻ tiến độ RAM & MongoDB -->
+    <div class="xl:col-span-7 space-y-5">
+      <!-- Thẻ biểu đồ cột (kiểu "Tickets" trong Oxfin) -->
+      <div class="card p-5">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-white">Thống kê Yêu cầu &amp; Tính năng</h2>
+            <p id="st-requests-brief" class="text-[11px] text-[#8b95a7] mt-0.5">Request hôm nay: —</p>
+          </div>
+          <span id="st-botname" class="text-xs font-mono text-[#8b95a7] bg-[#0a0d12] border border-[#1e232e] px-2.5 py-1 rounded-md">—</span>
+        </div>
+
+        <!-- Vùng biểu đồ cột -->
+        <div id="ox-usage-chart" class="ox-bar-chart">
+          <div class="ox-bar-grid">
+            <div class="ox-bar-grid-line"><span class="ox-bar-grid-label" id="chart-y-max">10</span></div>
+            <div class="ox-bar-grid-line"><span class="ox-bar-grid-label" id="chart-y-mid">5</span></div>
+            <div class="ox-bar-grid-line"><span class="ox-bar-grid-label">0</span></div>
+          </div>
+          <div id="ox-usage-bars" class="w-full h-full flex items-end justify-around gap-3 relative z-10"></div>
+        </div>
+        <div id="ox-usage-labels" class="flex justify-around gap-3 pl-[34px] pr-2 mt-2 text-[10px] text-[#8b95a7]"></div>
       </div>
-      <div id="st-botname" class="text-xs text-slate-500 mt-1 truncate">—</div>
+
+      <!-- 2 thẻ tiến độ song song (kiểu "Today's Tickets" & "New Tickets" trong Oxfin) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <!-- Thẻ tài nguyên RAM & CPU -->
+        <div class="card p-5 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-white">Tài nguyên RAM &amp; CPU</h3>
+            <span id="st-cpu" class="text-xs font-mono text-amber-400">—% CPU</span>
+          </div>
+          <div class="flex items-baseline justify-between text-xs">
+            <span class="text-[#8b95a7]">RAM Container</span>
+            <span id="st-ram-pct" class="font-mono font-semibold text-white">—%</span>
+          </div>
+          <div class="ox-progress-track">
+            <div id="st-ram-bar" class="ox-progress-fill bg-emerald-500" style="width:0%"></div>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-[#8b95a7] pt-0.5">
+            <span id="st-ram" class="font-mono text-slate-300">—</span>
+            <span id="st-ram-rss">Tiến trình: —</span>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-[#5e6778] border-t border-[#1e232e] pt-2">
+            <span id="st-threads">— luồng</span>
+            <span id="st-version" class="truncate max-w-[170px]">—</span>
+          </div>
+        </div>
+
+        <!-- Thẻ MongoDB Atlas & Dung lượng -->
+        <div class="card p-5 space-y-3">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-white">MongoDB Atlas</h3>
+            <span id="st-db-badge" class="text-[11px] px-2 py-0.5 rounded-full bg-[#181d27] text-[#8b95a7]">—</span>
+          </div>
+          <div class="flex items-baseline justify-between text-xs">
+            <span class="text-[#8b95a7]">Dung lượng lưu trữ</span>
+            <span id="st-db-storage" class="font-mono font-semibold text-white">—</span>
+          </div>
+          <div class="ox-progress-track">
+            <div id="st-db-bar" class="ox-progress-fill bg-rose-500" style="width:0%"></div>
+          </div>
+          <div class="flex items-center justify-between text-[11px] text-[#8b95a7] pt-0.5">
+            <span>Ping: <strong id="st-db-ms" class="font-mono text-slate-200">—</strong></span>
+            <span>Uptime: <strong id="st-uptime" class="font-mono text-slate-200">—</strong></span>
+          </div>
+          <div id="st-sync-detail" class="text-[11px] text-[#5e6778] border-t border-[#1e232e] pt-2 truncate">
+            Bộ đệm RAM: 0 mục chờ đồng bộ
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="card p-4">
-      <div class="text-xs text-slate-400">Uptime &amp; Server</div>
-      <div class="mt-2 flex items-baseline justify-between">
-        <span id="st-uptime" class="text-lg font-semibold font-mono">—</span>
-        <span id="st-guilds" class="text-sm text-emerald-300">— server</span>
+
+    <!-- CỘT PHẢI (5/12): Lưới 3x2 thẻ KPI hình thoi + Biểu đồ đường độ trễ & Chuỗi Auto -->
+    <div class="xl:col-span-5 space-y-5">
+      <!-- 6 thẻ KPI biểu tượng hình thoi đặc trưng của Oxfin -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
+        <!-- 1. Trạng thái & Ping -->
+        <div class="ox-kpi-card">
+          <div class="ox-diamond ox-diamond-crimson">
+            <div class="ox-diamond-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="st-ping" class="text-base font-bold font-mono text-white leading-tight truncate">— ms</div>
+            <div id="st-online" class="text-[11px] text-[#8b95a7] mt-0.5">Đang tải</div>
+          </div>
+        </div>
+
+        <!-- 2. Phiên đang hoạt động -->
+        <div class="ox-kpi-card">
+          <div class="ox-diamond ox-diamond-blue">
+            <div class="ox-diamond-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="st-db-active" class="text-base font-bold font-mono text-white leading-tight">—</div>
+            <div class="text-[11px] text-[#8b95a7] mt-0.5 truncate">Phiên chạy</div>
+          </div>
+        </div>
+
+        <!-- 3. Phiên đã lưu trữ -->
+        <div class="ox-kpi-card">
+          <div class="ox-diamond ox-diamond-lime">
+            <div class="ox-diamond-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polyline points="21 8 21 21 3 21 3 8" />
+                <rect x="1" y="3" width="22" height="5" />
+                <line x1="10" y1="12" x2="14" y2="12" />
+              </svg>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="st-db-archived" class="text-base font-bold font-mono text-white leading-tight">—</div>
+            <div class="text-[11px] text-[#8b95a7] mt-0.5 truncate">Đã lưu trữ</div>
+          </div>
+        </div>
+
+        <!-- 4. Model Gemini phát hiện -->
+        <div class="ox-kpi-card">
+          <div class="ox-diamond ox-diamond-violet">
+            <div class="ox-diamond-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <polygon points="12 2 2 7 12 12 22 7 12 2" />
+                <polyline points="2 17 12 22 22 17" />
+              </svg>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="st-models-count" class="text-base font-bold font-mono text-white leading-tight">—</div>
+            <div class="text-[11px] text-[#8b95a7] mt-0.5 truncate">Model chat</div>
+          </div>
+        </div>
+
+        <!-- 5. Yêu cầu hôm nay -->
+        <div class="ox-kpi-card">
+          <div class="ox-diamond ox-diamond-orange">
+            <div class="ox-diamond-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+              </svg>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="st-today-kpi" class="text-base font-bold font-mono text-white leading-tight">—</div>
+            <div class="text-[11px] text-[#8b95a7] mt-0.5 truncate">Hôm nay</div>
+          </div>
+        </div>
+
+        <!-- 6. Số Server Discord -->
+        <div class="ox-kpi-card">
+          <div class="ox-diamond ox-diamond-magenta">
+            <div class="ox-diamond-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              </svg>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div id="st-guilds" class="text-base font-bold font-mono text-white leading-tight truncate">—</div>
+            <div class="text-[11px] text-[#8b95a7] mt-0.5 truncate">Server</div>
+          </div>
+        </div>
       </div>
-      <div id="st-version" class="text-xs text-slate-500 mt-1 truncate">—</div>
-    </div>
-    <div class="card p-4">
-      <div class="text-xs text-slate-400">RAM Container</div>
-      <div class="mt-2 flex items-baseline justify-between">
-        <span id="st-ram" class="text-base font-semibold font-mono">—</span>
-        <span id="st-ram-pct" class="text-xs text-slate-300">—%</span>
+
+      <!-- Thẻ biểu đồ đường vàng (kiểu "Avg. Response Time" trong Oxfin) + Chuỗi Auto Gemini -->
+      <div class="card p-5 space-y-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Độ trễ &amp; Gemini Auto Chain</h3>
+            <div id="st-gemini-check" class="text-[11px] text-[#8b95a7] mt-0.5">Bấm "Kiểm tra Gemini API" để đo độ trễ trực tiếp.</div>
+          </div>
+          <div class="flex gap-1.5">
+            <button id="btn-refresh-models-st" type="button" class="btn-ghost text-[11px] px-2.5 py-1">Tải lại Model</button>
+            <button id="btn-clear-cd" type="button" class="btn-ghost text-[11px] px-2.5 py-1">Xóa Cooldown</button>
+          </div>
+        </div>
+
+        <!-- Biểu đồ đường cong màu vàng hổ phách -->
+        <div class="bg-[#0a0d12] border border-[#1e232e] rounded-lg p-3">
+          <svg id="ox-latency-svg" viewBox="0 0 360 110" class="w-full h-[110px] overflow-visible" aria-label="Biểu đồ độ trễ">
+            <line x1="28" y1="15" x2="352" y2="15" stroke="#1e232e" stroke-dasharray="3 3" />
+            <line x1="28" y1="52" x2="352" y2="52" stroke="#1e232e" stroke-dasharray="3 3" />
+            <line x1="28" y1="88" x2="352" y2="88" stroke="#1e232e" />
+            <text id="lat-y-max" x="2" y="18" fill="#5e6778" font-size="9" font-family="JetBrains Mono, monospace">100</text>
+            <text id="lat-y-mid" x="2" y="55" fill="#5e6778" font-size="9" font-family="JetBrains Mono, monospace">50</text>
+            <text x="2" y="91" fill="#5e6778" font-size="9" font-family="JetBrains Mono, monospace">0</text>
+            <path id="ox-latency-area" d="" fill="url(#oxAmberGrad)" opacity="0.22" />
+            <path id="ox-latency-path" d="" fill="none" stroke="#facc15" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+            <defs>
+              <linearGradient id="oxAmberGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#facc15" stop-opacity="0.6" />
+                <stop offset="100%" stop-color="#facc15" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <div class="flex items-center justify-between text-[10px] text-[#5e6778] mt-1 font-mono">
+            <span>Discord Ping &amp; MongoDB (ms)</span>
+            <span id="st-gemini-meta">—</span>
+          </div>
+        </div>
+
+        <!-- Chuỗi Auto đang áp dụng -->
+        <div>
+          <div class="text-[11px] text-[#8b95a7] mb-1.5">Chuỗi Auto đang áp dụng:</div>
+          <div id="st-auto-chain" class="flex flex-wrap items-center gap-1.5 text-xs"></div>
+        </div>
       </div>
-      <div class="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
-        <div id="st-ram-bar" class="h-full bg-indigo-500 transition-all" style="width:0%"></div>
-      </div>
-      <div id="st-ram-rss" class="text-[11px] text-slate-500 mt-1">Tiến trình: —</div>
-    </div>
-    <div class="card p-4">
-      <div class="text-xs text-slate-400">CPU &amp; Luồng</div>
-      <div class="mt-2 flex items-baseline justify-between">
-        <span id="st-cpu" class="text-lg font-semibold font-mono">—%</span>
-        <span id="st-threads" class="text-xs text-slate-400">— luồng</span>
-      </div>
-      <div id="st-requests-brief" class="text-xs text-slate-500 mt-1">Request hôm nay: —</div>
     </div>
   </div>
 
-  <!-- Trạng thái Gemini API và MongoDB Atlas -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-    <div class="card p-5 space-y-3">
-      <div class="flex items-center justify-between">
-        <h3 class="font-medium text-sm">🔌 Gemini API &amp; Chuỗi Auto</h3>
-        <div class="flex gap-1.5">
-          <button id="btn-refresh-models-st" class="btn-ghost text-xs">Tải lại Model</button>
-          <button id="btn-clear-cd" class="btn-ghost text-xs">Xóa Cooldown</button>
-        </div>
-      </div>
-      <div id="st-gemini-check" class="text-xs text-slate-400">Bấm "Kiểm tra Gemini API" để đo độ trễ trực tiếp.</div>
-      <div>
-        <div class="text-xs text-slate-400 mb-1.5">Chuỗi Auto đang áp dụng:</div>
-        <div id="st-auto-chain" class="flex flex-wrap items-center gap-1.5 text-xs"></div>
-      </div>
-      <div id="st-gemini-meta" class="text-xs text-slate-500">—</div>
-    </div>
-
-    <div class="card p-5 space-y-3">
-      <div class="flex items-center justify-between">
-        <h3 class="font-medium text-sm">🗄️ MongoDB Atlas</h3>
-        <span id="st-db-badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">—</span>
-      </div>
-      <div class="grid grid-cols-3 gap-2 text-center">
-        <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-          <div class="text-[11px] text-slate-400">Ping</div>
-          <div id="st-db-ms" class="text-sm font-mono font-semibold mt-0.5">—</div>
-        </div>
-        <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-          <div class="text-[11px] text-slate-400">Phiên hoạt động</div>
-          <div id="st-db-active" class="text-sm font-mono font-semibold mt-0.5">—</div>
-        </div>
-        <div class="bg-slate-950 border border-slate-800 rounded-lg p-2.5">
-          <div class="text-[11px] text-slate-400">Đã lưu trữ</div>
-          <div id="st-db-archived" class="text-sm font-mono font-semibold mt-0.5">—</div>
-        </div>
-      </div>
-      <div>
-        <div class="flex justify-between text-xs text-slate-400 mb-1">
-          <span>Dung lượng sử dụng</span>
-          <span id="st-db-storage">—</span>
-        </div>
-        <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-          <div id="st-db-bar" class="h-full bg-emerald-500 transition-all" style="width:0%"></div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Thống kê sử dụng và danh sách Server Discord -->
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+  <!-- Hàng dưới: Chi tiết sử dụng + Danh sách Server Discord -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
     <div class="card p-5 space-y-2.5">
-      <h3 class="font-medium text-sm">📈 Thống kê sử dụng</h3>
+      <h3 class="font-semibold text-sm text-white">📈 Chi tiết thống kê sử dụng</h3>
       <div id="st-usage-summary" class="text-xs text-slate-300">—</div>
-      <div id="st-usage-models" class="text-xs text-slate-400">—</div>
-      <div id="st-usage-features" class="text-xs text-slate-400">—</div>
-      <div id="st-usage-err" class="text-xs text-rose-300/90"></div>
+      <div id="st-usage-models" class="text-xs text-[#8b95a7]">—</div>
+      <div id="st-usage-features" class="text-xs text-[#8b95a7]">—</div>
+      <div id="st-usage-err" class="text-xs text-rose-400"></div>
     </div>
     <div class="card p-5 space-y-2.5">
-      <h3 class="font-medium text-sm">🏠 Danh sách Server Discord</h3>
-      <div id="st-guild-list" class="max-h-40 overflow-y-auto divide-y divide-slate-800/80 text-xs"></div>
+      <h3 class="font-semibold text-sm text-white">🏠 Danh sách Server Discord</h3>
+      <div id="st-guild-list" class="max-h-40 overflow-y-auto divide-y divide-[#1e232e] text-xs"></div>
     </div>
   </div>
 </section>

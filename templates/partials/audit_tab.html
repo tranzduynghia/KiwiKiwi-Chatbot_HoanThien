@@ -1,0 +1,37 @@
+<!-- Tab 6: Nhật ký chỉnh sửa (Audit Log) đọc trực tiếp từ /api/audit-logs -->
+<section id="tab-audit" class="tab-panel hidden space-y-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="text-lg font-semibold text-white">Nhật ký chỉnh sửa (Audit Log)</h2>
+      <p class="text-xs text-[#8b95a7]">Theo dõi mọi thay đổi cấu hình, model và phân quyền (tự ẩn trường nhạy cảm)</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <select id="audit-section-filter" class="inp w-44 py-1.5 text-xs">
+        <option value="">Tất cả chuyên mục</option>
+        <option value="ask">Cấu hình /ask</option>
+        <option value="prompt">System Instruction</option>
+        <option value="models">Model Gemini</option>
+        <option value="discord_permissions">Phân quyền Discord</option>
+        <option value="dashboard_users">Tài khoản Dashboard</option>
+      </select>
+      <button id="btn-refresh-audit" type="button" class="btn-primary">↻ Tải lại</button>
+    </div>
+  </div>
+
+  <div class="card p-5">
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-[#1e232e] text-[#8b95a7]">
+            <th class="py-2.5 pr-3">Thời gian</th>
+            <th class="py-2.5 pr-3">Người thực hiện</th>
+            <th class="py-2.5 pr-3">Chuyên mục</th>
+            <th class="py-2.5 pr-3">Tóm tắt</th>
+            <th class="py-2.5 text-right">Trạng thái</th>
+          </tr>
+        </thead>
+        <tbody id="audit-tbody" class="divide-y divide-[#1e232e]/80"></tbody>
+      </table>
+    </div>
+  </div>
+</section>

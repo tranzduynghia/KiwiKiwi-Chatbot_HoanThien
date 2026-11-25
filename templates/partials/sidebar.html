@@ -1,0 +1,82 @@
+<!-- Thanh điều hướng dọc bên trái theo phong cách Oxfin Dark Admin -->
+<aside id="ox-sidebar" class="ox-sidebar">
+  <!-- Logo thương hiệu kiểu hình thoi đỏ đặc trưng -->
+  <div class="ox-brand">
+    <svg width="30" height="28" viewBox="0 0 36 32" fill="none" aria-hidden="true">
+      <path d="M10.5 3L21 16L10.5 29L0 16L10.5 3Z" fill="#f43f5e" />
+      <path d="M18 3L28.5 16L18 29L7.5 16L18 3Z" fill="#e11d48" fill-opacity="0.82" />
+      <path d="M25.5 3L36 16L25.5 29L15 16L25.5 3Z" fill="#fda4af" fill-opacity="0.72" />
+    </svg>
+    <div class="min-w-0">
+      <div class="ox-brand-title truncate">KiwiKiwi</div>
+    </div>
+  </div>
+
+  <!-- Danh sách các mục tính năng -->
+  <nav class="ox-nav" aria-label="Điều hướng chính">
+    <button type="button" class="tab-btn" data-tab="status" data-active="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 17l6-6 4 4 8-8" />
+        <path d="M17 7h4v4" />
+      </svg>
+      <span>Trạng thái Bot</span>
+    </button>
+
+    <button type="button" class="tab-btn" data-tab="ask">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="4" y1="21" x2="4" y2="14" />
+        <line x1="4" y1="10" x2="4" y2="3" />
+        <line x1="12" y1="21" x2="12" y2="12" />
+        <line x1="12" y1="8" x2="12" y2="3" />
+        <line x1="20" y1="21" x2="20" y2="16" />
+        <line x1="20" y1="12" x2="20" y2="3" />
+        <line x1="2" y1="14" x2="6" y2="14" />
+        <line x1="10" y1="8" x2="14" y2="8" />
+        <line x1="18" y1="16" x2="22" y2="16" />
+      </svg>
+      <span>Cấu hình /ask</span>
+    </button>
+
+    <button type="button" class="tab-btn" data-tab="prompt">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+      <span>System Instruction</span>
+    </button>
+
+    <button type="button" class="tab-btn" data-tab="models">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 2 7 12 12 22 7 12 2" />
+        <polyline points="2 17 12 22 22 17" />
+        <polyline points="2 12 12 17 22 12" />
+      </svg>
+      <span>Model Gemini</span>
+    </button>
+
+    <button type="button" class="tab-btn" data-tab="perms">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+      </svg>
+      <span>Phân quyền &amp; Admin</span>
+    </button>
+
+    <button type="button" class="tab-btn" data-tab="audit">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" />
+        <line x1="16" y1="17" x2="8" y2="17" />
+      </svg>
+      <span>Nhật ký chỉnh sửa</span>
+    </button>
+  </nav>
+
+  <!-- Chân Sidebar hiển thị đồng bộ MongoDB Atlas và phiên bản -->
+  <div class="p-3.5 border-t border-[#1e232e] space-y-2 text-[11px]">
+    <div class="flex items-center justify-between text-[#8b95a7]">
+      <span>MongoDB Sync</span>
+      <span id="sidebar-sync-badge" class="font-mono text-emerald-400">Đã đồng bộ</span>
+    </div>
+    <p id="hdr-updated" class="text-[10px] text-[#5e6778] leading-snug truncate">MongoDB Atlas Real-Time Config</p>
+  </div>
+</aside>
