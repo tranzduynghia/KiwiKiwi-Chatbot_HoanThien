@@ -488,20 +488,25 @@ export function showConfirmModal({
     }));
   }
 
-  // Biểu tượng & màu nút theo mức độ (primary / danger)
+  // Biểu tượng & màu nút theo mức độ (primary / danger / success)
   const isDanger = confirmTone === "danger";
+  const isSuccess = confirmTone === "success";
   if (iconEl) {
     iconEl.textContent = isDanger ? "!" : "✓";
     iconEl.className = `inline-flex items-center justify-center w-7 h-7 rounded-lg border text-sm shrink-0 ${
       isDanger
         ? "bg-rose-500/20 border-rose-500/40 text-rose-300 font-bold"
-        : "bg-rose-500/15 border-rose-500/30 text-rose-300"
+        : isSuccess
+          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-bold"
+          : "bg-rose-500/15 border-rose-500/30 text-rose-300"
     }`;
   }
   submitBtn.className = `${
     isDanger
       ? "px-4 py-2 rounded-lg text-xs font-medium bg-rose-600 hover:bg-rose-500 text-white border border-rose-500/40 transition-colors"
-      : "btn-primary text-xs"
+      : isSuccess
+        ? "px-4 py-2 rounded-lg text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500/40 transition-colors"
+        : "btn-primary text-xs"
   } inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed`;
 
   if (titleEl) titleEl.textContent = title;

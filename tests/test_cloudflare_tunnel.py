@@ -236,13 +236,17 @@ async def test_tunnel_api_hot_reload_token_masking_audit_and_inbound_lock(fake_d
             json={"cf_tunnel_enabled": True, "cf_tunnel_mode": "quick", "tunnel_only_inbound": False},
         ).status_code == 403
 
-        # Admin đăng nhập và kiểm tra giao diện thẻ Cloudflare Tunnel
+        # Admin đăng nhập và kiểm tra giao diện thẻ Cloudflare Tunnel (2 nút xếp dọc + không rò comment HTML)
         client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
         dash = client.get("/dashboard")
         assert dash.status_code == 200
         assert 'id="cf-tunnel-mode"' in dash.text
         assert 'id="cf-tunnel-token"' in dash.text
+        assert 'id="btn-toggle-tunnel"' in dash.text
         assert 'id="btn-save-tunnel"' in dash.text
+        assert "Bật Tunnel" in dash.text
+        assert "Cập nhật Tunnel" in dash.text
+        assert "<!--" not in dash.text
 
         # Bật Named Tunnel -> lưu token trong MongoDB nhưng ẩn trong API response & Audit Log
         secret_token = "eyJ-super-secret-cf-token-xyz"
