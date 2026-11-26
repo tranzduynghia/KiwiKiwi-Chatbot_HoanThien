@@ -440,7 +440,26 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <div class="flex flex-wrap items-center gap-2">
-          <h3 class="font-semibold text-sm text-white">🌐 Cloudflare Tunnel (cloudflared)</h3>
+          <h3 class="font-semibold text-sm text-white inline-flex items-center gap-2">
+            <!-- Biểu tượng đám mây Cloudflare chính thức (SVG inline, không tải tài nguyên ngoài) -->
+            <svg
+              class="w-6 h-6 inline-block align-middle shrink-0"
+              viewBox="0 0 24 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                fill="#F38020"
+                d="M16.5088 16.8447c.1475-.5068.0908-.9707-.1553-1.3154-.2246-.3164-.6045-.499-1.0615-.5205l-8.6592-.1123a.1559.1559 0 0 1-.1333-.0713c-.0283-.042-.0351-.0986-.021-.1553.0278-.084.1123-.1484.2036-.1562l8.7359-.1123c1.0351-.0489 2.1601-.8868 2.5537-1.9136l.499-1.3013c.0215-.0561.0293-.1128.0147-.168-.5625-2.5463-2.835-4.4453-5.5499-4.4453-2.5039 0-4.6284 1.6177-5.3876 3.8614-.4927-.3658-1.1187-.5625-1.794-.499-1.2026.119-2.1665 1.083-2.2861 2.2856-.0283.31-.0069.6128.0635.894C1.5683 13.171 0 14.7754 0 16.752c0 .1748.0142.3515.0352.5214.0141.084.0844.1475.1689.1475h15.9814c.0909 0 .1758-.0635.2032-.1553l.1201-.4209z"
+              />
+              <path
+                fill="#FAAD3F"
+                d="M19.2378 11.4941c-.0771 0-.1543 0-.2314.0074-.0567 0-.1055.042-.1265.0986l-.3374 1.1675c-.1475.5068-.0913.9707.1548 1.3164.2246.3164.6045.498 1.0615.5195l1.8437.1133c.0557 0 .1055.0283.1329.0703.0283.043.0351.1055.0214.1553-.0283.084-.1123.1484-.2031.1553l-1.9209.1123c-1.041.0498-2.1592.8867-2.5528 1.914l-.1406.3584c-.0283.0713.0215.1416.0986.1416h6.5977c.0771 0 .1475-.0498.1689-.1269.1123-.4082.1758-.8369.1758-1.2803 0-2.6162-2.124-4.7227-4.7426-4.7227z"
+              />
+            </svg>
+            <span>Cloudflare Tunnel (cloudflared)</span>
+          </h3>
           <span
             id="cf-status-badge"
             class="text-[11px] font-medium px-2.5 py-0.5 rounded-full border bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
@@ -514,8 +533,22 @@
         <!-- Công tắc Proxy Headers (X-Forwarded-For / X-Forwarded-Proto) -->
         <div class="rounded-lg bg-[#0a0d12] border border-[#1e232e] px-3.5 py-2.5 flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <label for="cf-proxy-headers" class="block text-xs font-medium text-slate-200 cursor-pointer">
-              🌐 Tin cậy Proxy Headers (<code>X-Forwarded-For</code> / <code>X-Forwarded-Proto</code>)
+            <label for="cf-proxy-headers" class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-200 cursor-pointer">
+              <!-- Biểu tượng khiên bảo vệ Proxy Headers (SVG inline) -->
+              <svg
+                class="w-4 h-4 text-sky-400 inline-block align-middle shrink-0"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                <path d="m9 12 2 2 4-4" />
+              </svg>
+              <span>Tin cậy Proxy Headers (<code>X-Forwarded-For</code> / <code>X-Forwarded-Proto</code>)</span>
             </label>
             <p class="text-[11px] text-[#8b95a7] mt-0.5 leading-snug">
               Chỉ áp dụng sau khi xác thực proxy tin cậy (<code>127.0.0.1</code> / <code>TRUSTED_PROXY_IPS</code>); Uvicorn chạy <code>proxy_headers=False</code> để không làm hỏng khóa Tunnel.
