@@ -11,6 +11,7 @@ class AskConfigPayload(BaseModel):
 
     ask: dict[str, Any]
     session: dict[str, Any]
+    changes: Optional[dict[str, dict[str, Any]]] = None
 
 
 class PromptConfigPayload(BaseModel):
@@ -19,6 +20,7 @@ class PromptConfigPayload(BaseModel):
     system_prompt: str = Field(..., min_length=1, max_length=20000)
     ocr_instruction: str = Field(..., min_length=1, max_length=10000)
     append_current_date: bool = True
+    changes: Optional[dict[str, dict[str, Any]]] = None
 
 
 class PresenceConfigPayload(BaseModel):
@@ -29,6 +31,7 @@ class PresenceConfigPayload(BaseModel):
     activity_type: str = Field(default="listening", max_length=20)
     activity_text: str = Field(default="", max_length=128)
     auto_rotate: bool = False
+    changes: Optional[dict[str, dict[str, Any]]] = None
 
 
 class TunnelConfigPayload(BaseModel):
@@ -39,3 +42,4 @@ class TunnelConfigPayload(BaseModel):
     cf_tunnel_token: Optional[str] = Field(default=None, max_length=4096)
     tunnel_only_inbound: bool = False
     clear_token: bool = False
+    changes: Optional[dict[str, dict[str, Any]]] = None

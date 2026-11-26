@@ -47,6 +47,7 @@ def create_models_router(
             actor_meta=auth_deps.actor_meta(user),
             section="models",
             summary="Cập nhật cấu hình Model Gemini",
+            client_changes=payload.changes,
         )
         return {
             "ok": True,

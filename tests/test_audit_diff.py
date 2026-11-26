@@ -1,7 +1,13 @@
 """Kiểm thử tính toán diff và ẩn trường nhạy cảm của tính năng Audit Log."""
 from __future__ import annotations
 
-from app.features.audit.diff import compute_diff, is_sensitive_field, sanitize_audit_value
+from app.features.audit.diff import (
+    compute_diff,
+    is_sensitive_field,
+    mask_secret_preview,
+    merge_client_changes,
+    sanitize_audit_value,
+)
 
 
 def test_sensitive_field_detection():
@@ -38,3 +44,24 @@ def test_sanitize_long_audit_value():
     sanitized = sanitize_audit_value(long_text)
     assert sanitized.endswith("… (600 ký tự)")
     assert len(sanitized) < 530
+
+
+def test_mask_secret_preview_and_merge_client_changes():
+    """Kiểm tra che bí mật dạng tiền tố ngắn (`eyJh•••••`) và gộp `changes` từ Modal không làm lộ plaintext."""
+    assert mask_secret_preview("") == "(trống)"
+    assert mask_secret_preview("abc") == "•••••"
+    assert mask_secret_preview("eyJhIjoi1234567890") == "eyJh•••••"
+    assert mask_secret_preview("eyJh•••••") == "eyJh•••••"
+
+    server_changes = [{"field": "tunnel.cf_tunnel_enabled", "before": False, "after": True}]
+    client_changes = {
+        "tunnel.cf_tunnel_enabled": {"old": False, "new": True},
+        "tunnel.cf_tunnel_token": {"old": "", "new": "eyJhSecretRawValueShouldBeMasked"},
+    }
+    merged = merge_client_changes(server_changes, client_changes)
+    assert len(merged) == 2
+    token_entry = next(item for item in merged if item["field"] == "tunnel.cf_tunnel_token")
+    assert token_entry["masked"] is True
+    assert token_entry["before"] == "(trống)"
+    assert token_entry["after"] == "eyJh•••••"
+    assert "SecretRawValue" not in str(merged)

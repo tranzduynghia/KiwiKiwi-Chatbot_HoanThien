@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from app.core.sync import WriteBehindSyncCoordinator
 from app.core.utils import deep_merge
-from app.features.audit.diff import compute_diff
+from app.features.audit.diff import compute_diff, merge_client_changes
 from app.features.audit.service import AuditService
 from app.features.config.repository import ConfigRepository
 
@@ -46,11 +46,12 @@ class ConfigService:
         actor_meta: dict[str, Any] | None = None,
         section: str = "config",
         summary: str = "Cập nhật cấu hình bot",
+        client_changes: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Lưu tạm trong RAM -> ghi Audit Log -> xả lên MongoDB Atlas -> kích hoạt callback."""
         current = await self._repository.get_config(force=True)
         merged = deep_merge(current, patch)
-        changes = compute_diff(current, merged)
+        changes = merge_client_changes(compute_diff(current, merged), client_changes)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         merged["_id"] = "global"

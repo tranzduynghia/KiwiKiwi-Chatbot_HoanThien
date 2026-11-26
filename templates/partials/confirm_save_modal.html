@@ -1,0 +1,95 @@
+<!-- Hộp thoại xác nhận lưu toàn cục kèm bảng đối chiếu Giá trị cũ -> Giá trị mới và cảnh báo tác động cao -->
+<div
+  id="confirm-save-modal"
+  class="fixed inset-0 z-[60] hidden items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="confirm-save-title"
+>
+  <div class="ox-modal-enter card w-full max-w-3xl max-h-[86vh] flex flex-col shadow-2xl overflow-hidden border border-[#2a3140]">
+    <!-- Tiêu đề hộp thoại -->
+    <div class="p-4 border-b border-[#1e232e] flex items-start justify-between gap-3 bg-[#0e1117]">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-sm shrink-0">
+            ✓
+          </span>
+          <h3 id="confirm-save-title" class="text-sm font-semibold text-white truncate">
+            Xác nhận lưu thay đổi cấu hình
+          </h3>
+        </div>
+        <p id="confirm-save-subtitle" class="text-[11px] text-[#8b95a7] mt-1">
+          Kiểm tra kỹ các trường thay đổi trước khi áp dụng tức thì và ghi Audit Log
+        </p>
+      </div>
+      <button
+        type="button"
+        id="btn-close-confirm-save"
+        class="ox-icon-btn shrink-0"
+        title="Đóng (Esc)"
+        aria-label="Đóng"
+      >
+        ✕
+      </button>
+    </div>
+
+    <!-- Nội dung chính: Biểu ngữ cảnh báo tác động cao + Bảng so sánh Trước / Sau -->
+    <div class="p-4 overflow-y-auto space-y-3.5 flex-1">
+      <!-- Biểu ngữ cảnh báo màu vàng khi phát hiện cài đặt tác động lớn -->
+      <div
+        id="confirm-save-warning"
+        class="hidden rounded-xl bg-amber-500/10 border border-amber-500/35 px-3.5 py-3 text-xs text-amber-200 space-y-1.5"
+        role="alert"
+      >
+        <div class="font-semibold text-amber-300 flex items-center gap-1.5">
+          <span>⚠️</span>
+          <span>Cảnh báo thay đổi có tác động vận hành cao</span>
+        </div>
+        <ul id="confirm-save-warning-list" class="list-disc pl-5 space-y-1 text-[11px] text-amber-100/90 leading-relaxed"></ul>
+      </div>
+
+      <!-- Bảng tóm tắt Giá trị cũ (Before) -> Giá trị mới (After) -->
+      <div class="rounded-xl border border-[#1e232e] bg-[#0a0d12] overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr class="border-b border-[#1e232e] bg-[#10141c] text-[#8b95a7]">
+                <th class="py-2.5 px-3.5 font-medium w-[34%]">Tên cấu hình</th>
+                <th class="py-2.5 px-3.5 font-medium w-[33%]">Giá trị cũ (Before)</th>
+                <th class="py-2.5 px-3.5 font-medium w-[33%]">Giá trị mới (After)</th>
+              </tr>
+            </thead>
+            <tbody id="confirm-save-tbody" class="divide-y divide-[#1e232e]/80"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thanh nút hành động: Hủy bỏ & Xác nhận lưu -->
+    <div class="px-4 py-3 border-t border-[#1e232e] bg-[#0e1117] flex flex-wrap items-center justify-between gap-2">
+      <span id="confirm-save-count" class="text-[11px] text-[#8b95a7] font-mono">0 thay đổi</span>
+      <div class="flex items-center gap-2">
+        <button type="button" id="btn-cancel-confirm-save" class="btn-ghost text-xs">
+          Hủy bỏ
+        </button>
+        <button
+          type="button"
+          id="btn-submit-confirm-save"
+          class="btn-primary text-xs inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          <svg
+            id="confirm-save-spinner"
+            class="hidden animate-spin w-3.5 h-3.5 text-white shrink-0"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+            <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+          </svg>
+          <span id="confirm-save-btn-text">Xác nhận lưu</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

@@ -7,9 +7,11 @@
  */
 
 import { apiRequest, showToast } from "../../core/api.js";
+import { confirmSaveChanges } from "../../core/confirmSave.js";
 
 export function createTunnelCardController({ isAdmin, onConfigSaved }) {
   let hasSavedToken = false;
+  let initialState = null;
 
   function syncModeInputs() {
     const modeEl = document.getElementById("cf-tunnel-mode");
@@ -31,7 +33,8 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const tokenHintEl = document.getElementById("cf-token-hint");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
 
-    if (modeEl) modeEl.value = tunnel.cf_tunnel_mode === "quick" ? "quick" : "named";
+    const loadedMode = tunnel.cf_tunnel_mode === "quick" ? "quick" : "named";
+    if (modeEl) modeEl.value = loadedMode;
     if (tokenEl) {
       tokenEl.value = "";
       tokenEl.placeholder = hasSavedToken
@@ -45,6 +48,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       tokenHintEl.className = `text-[10px] ${hasSavedToken ? "text-emerald-400" : "text-[#5e6778]"}`;
     }
     if (inboundLockEl) inboundLockEl.checked = Boolean(tunnel.tunnel_only_inbound);
+
+    initialState = {
+      tunnel: {
+        cf_tunnel_enabled: Boolean(tunnel.cf_tunnel_enabled),
+        cf_tunnel_mode: loadedMode,
+        cf_tunnel_token: hasSavedToken ? "••••• (đã lưu)" : "",
+        tunnel_only_inbound: Boolean(tunnel.tunnel_only_inbound),
+      },
+    };
 
     syncModeInputs();
   }
@@ -122,8 +134,6 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const modeEl = document.getElementById("cf-tunnel-mode");
     const tokenEl = document.getElementById("cf-tunnel-token");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
-    const saveBtn = document.getElementById("btn-save-tunnel");
-    const stopBtn = document.getElementById("btn-stop-tunnel");
 
     const mode = modeEl ? modeEl.value : "named";
     const tokenVal = tokenEl ? tokenEl.value.trim() : "";
@@ -134,47 +144,58 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       return;
     }
 
-    if (enabled && tunnelOnlyInbound) {
-      const confirmed = window.confirm(
-        "Cảnh báo: Bật 'Chỉ nhận truy cập qua Cloudflare Tunnel' sẽ chặn toàn bộ yêu cầu không có header Cloudflare (Cf-Ray / CF-Connecting-IP). Hãy chắc chắn bạn đang hoặc sẽ truy cập qua tên miền Cloudflare Tunnel. Tiếp tục?"
-      );
-      if (!confirmed) return;
-    }
+    const beforeState = initialState || {
+      tunnel: {
+        cf_tunnel_enabled: false,
+        cf_tunnel_mode: "named",
+        cf_tunnel_token: "",
+        tunnel_only_inbound: false,
+      },
+    };
+    const nextState = {
+      tunnel: {
+        cf_tunnel_enabled: Boolean(enabled),
+        cf_tunnel_mode: mode,
+        cf_tunnel_token: tokenVal || beforeState.tunnel.cf_tunnel_token,
+        tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
+      },
+    };
 
-    if (saveBtn) saveBtn.disabled = true;
-    if (stopBtn) stopBtn.disabled = true;
-    try {
-      const res = await apiRequest("/api/config/tunnel", {
-        method: "PUT",
-        body: JSON.stringify({
-          cf_tunnel_enabled: enabled,
-          cf_tunnel_mode: mode,
-          cf_tunnel_token: tokenVal || null,
-          tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
-        }),
-      });
-      if (res.cloudflare_tunnel) {
-        renderTelemetry(res.cloudflare_tunnel);
-      }
-      if (res.config) {
-        fill(res.config);
-      }
-      if (!enabled) {
-        showToast("⏹ Đã tắt Cloudflare Tunnel và lưu cấu hình vào MongoDB Atlas.");
-      } else if (res.cloudflare_tunnel?.last_error) {
-        showToast(`Đã lưu cấu hình nhưng cloudflared báo lỗi: ${res.cloudflare_tunnel.last_error}`, false);
-      } else if (res.cloudflare_tunnel?.public_url) {
-        showToast(`✅ Cloudflare Quick Tunnel đã chạy: ${res.cloudflare_tunnel.public_url}`);
-      } else {
-        showToast("✅ Đã bật / cập nhật nóng Cloudflare Tunnel và lưu MongoDB Atlas!");
-      }
-      if (onConfigSaved) await onConfigSaved();
-    } catch (err) {
-      showToast(err.message || "Không thể cập nhật cấu hình Cloudflare Tunnel.", false);
-    } finally {
-      if (saveBtn) saveBtn.disabled = !isAdmin;
-      if (stopBtn) stopBtn.disabled = !isAdmin;
-    }
+    await confirmSaveChanges({
+      title: enabled ? "Xác nhận bật / cập nhật Cloudflare Tunnel" : "Xác nhận tắt Cloudflare Tunnel",
+      subtitle: "Tiến trình cloudflared sẽ được áp dụng nóng ngay lập tức mà không cần khởi động lại bot",
+      before: beforeState,
+      after: nextState,
+      confirmLabel: enabled ? "Xác nhận áp dụng" : "Xác nhận tắt Tunnel",
+      onConfirm: async (changes) => {
+        const res = await apiRequest("/api/config/tunnel", {
+          method: "PUT",
+          body: JSON.stringify({
+            cf_tunnel_enabled: enabled,
+            cf_tunnel_mode: mode,
+            cf_tunnel_token: tokenVal || null,
+            tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
+            changes,
+          }),
+        });
+        if (res.cloudflare_tunnel) {
+          renderTelemetry(res.cloudflare_tunnel);
+        }
+        if (res.config) {
+          fill(res.config);
+        }
+        if (!enabled) {
+          showToast("⏹ Đã tắt Cloudflare Tunnel và lưu cấu hình vào MongoDB Atlas.");
+        } else if (res.cloudflare_tunnel?.last_error) {
+          showToast(`Đã lưu cấu hình nhưng cloudflared báo lỗi: ${res.cloudflare_tunnel.last_error}`, false);
+        } else if (res.cloudflare_tunnel?.public_url) {
+          showToast(`✅ Cloudflare Quick Tunnel đã chạy: ${res.cloudflare_tunnel.public_url}`);
+        } else {
+          showToast("✅ Đã bật / cập nhật nóng Cloudflare Tunnel và lưu MongoDB Atlas!");
+        }
+        if (onConfigSaved) await onConfigSaved();
+      },
+    });
   }
 
   function bindEvents() {

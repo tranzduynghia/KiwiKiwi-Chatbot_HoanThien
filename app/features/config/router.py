@@ -67,6 +67,7 @@ def create_config_router(
             actor_meta=auth_deps.actor_meta(user),
             section="ask",
             summary="Cập nhật cấu hình /ask & phiên chat",
+            client_changes=payload.changes,
         )
         return {"ok": True, "config": _mask_config_secrets(updated), "sync": sync_coordinator.sync_status()}
 
@@ -87,6 +88,7 @@ def create_config_router(
             actor_meta=auth_deps.actor_meta(user),
             section="prompt",
             summary="Cập nhật System Instruction / OCR Instruction",
+            client_changes=payload.changes,
         )
         return {"ok": True, "config": _mask_config_secrets(updated), "sync": sync_coordinator.sync_status()}
 
@@ -114,6 +116,7 @@ def create_config_router(
             actor_meta=auth_deps.actor_meta(user),
             section="presence",
             summary="Cập nhật trạng thái hiển thị & hoạt động Bot",
+            client_changes=payload.changes,
         )
 
         applied_live = False
@@ -162,6 +165,7 @@ def create_config_router(
             actor_meta=auth_deps.actor_meta(user),
             section="tunnel",
             summary=action_summary,
+            client_changes=payload.changes,
         )
 
         tunnel_status: Optional[dict[str, Any]] = None

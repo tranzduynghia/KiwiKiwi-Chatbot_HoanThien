@@ -4,6 +4,7 @@
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { confirmSaveChanges } from "../../core/confirmSave.js";
 
 export function createPermissionsTabController({ isAdmin }) {
   let discordPermsById = new Map();
@@ -88,7 +89,7 @@ export function createPermissionsTabController({ isAdmin }) {
       });
     }
 
-    // Ủy quyền thay đổi checkbox và nút xóa trên bảng Discord Permissions
+    // Ủy quyền thay đổi checkbox phân quyền Discord (có xác nhận Before/After, hoàn tác nếu hủy)
     const discordTbody = document.getElementById("discord-perms-tbody");
     discordTbody.addEventListener("change", async (event) => {
       const checkbox = event.target.closest("input[data-perm]");
@@ -99,6 +100,11 @@ export function createPermissionsTabController({ isAdmin }) {
       const existing = discordPermsById.get(uid);
       if (!existing) return;
 
+      const beforePerm = {
+        is_admin: Boolean(existing.is_admin),
+        can_dashboard: Boolean(existing.can_dashboard || existing.is_admin),
+        can_status: Boolean(existing.can_status || existing.is_admin),
+      };
       const updated = {
         user_id: uid,
         label: existing.label || "",
@@ -107,12 +113,27 @@ export function createPermissionsTabController({ isAdmin }) {
         can_status: Boolean(existing.can_status),
         [checkbox.dataset.perm]: checkbox.checked,
       };
-      try {
-        await apiRequest("/api/permissions/discord", { method: "POST", body: JSON.stringify(updated) });
-        showToast(`✅ Đã cập nhật quyền cho Discord ID ${uid}.`);
-        await loadPermissions();
-      } catch (err) {
-        showToast(err.message, false);
+      const afterPerm = {
+        is_admin: Boolean(updated.is_admin),
+        can_dashboard: Boolean(updated.can_dashboard || updated.is_admin),
+        can_status: Boolean(updated.can_status || updated.is_admin),
+      };
+
+      const outcome = await confirmSaveChanges({
+        title: `Xác nhận đổi quyền Discord ID ${uid}`,
+        subtitle: "Thay đổi phân quyền sẽ áp dụng ngay và được lưu vào Audit Log",
+        before: beforePerm,
+        after: afterPerm,
+        onConfirm: async (changes) => {
+          await apiRequest("/api/permissions/discord", {
+            method: "POST",
+            body: JSON.stringify({ ...updated, changes }),
+          });
+          showToast(`✅ Đã cập nhật quyền cho Discord ID ${uid}.`);
+          await loadPermissions();
+        },
+      });
+      if (!outcome.confirmed) {
         await loadPermissions();
       }
     });
@@ -138,24 +159,47 @@ export function createPermissionsTabController({ isAdmin }) {
     if (formAddDiscordPerm) {
       formAddDiscordPerm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        try {
-          await apiRequest("/api/permissions/discord", {
-            method: "POST",
-            body: JSON.stringify({
-              user_id: document.getElementById("dp-uid").value.trim(),
-              label: document.getElementById("dp-label").value.trim(),
-              is_admin: document.getElementById("dp-admin").checked,
-              can_dashboard: document.getElementById("dp-dash").checked,
-              can_status: document.getElementById("dp-status").checked,
-            }),
-          });
-          formAddDiscordPerm.reset();
-          document.getElementById("dp-status").checked = true;
-          showToast("✅ Đã lưu phân quyền Discord ID!");
-          await loadPermissions();
-        } catch (err) {
-          showToast(err.message, false);
-        }
+        const uid = document.getElementById("dp-uid").value.trim();
+        const existing = discordPermsById.get(uid);
+        const payload = {
+          user_id: uid,
+          label: document.getElementById("dp-label").value.trim(),
+          is_admin: document.getElementById("dp-admin").checked,
+          can_dashboard: document.getElementById("dp-dash").checked,
+          can_status: document.getElementById("dp-status").checked,
+        };
+        const beforeState = existing
+          ? {
+              user_id: existing.user_id,
+              label: existing.label || "",
+              is_admin: Boolean(existing.is_admin),
+              can_dashboard: Boolean(existing.can_dashboard),
+              can_status: Boolean(existing.can_status),
+            }
+          : {
+              user_id: "",
+              label: "",
+              is_admin: false,
+              can_dashboard: false,
+              can_status: false,
+            };
+
+        await confirmSaveChanges({
+          title: existing ? `Xác nhận cập nhật Discord ID ${uid}` : `Xác nhận thêm Discord ID ${uid}`,
+          subtitle: "Kiểm tra các quyền được cấp trước khi lưu vào MongoDB Atlas",
+          before: beforeState,
+          after: payload,
+          onConfirm: async (changes) => {
+            await apiRequest("/api/permissions/discord", {
+              method: "POST",
+              body: JSON.stringify({ ...payload, changes }),
+            });
+            formAddDiscordPerm.reset();
+            document.getElementById("dp-status").checked = true;
+            showToast("✅ Đã lưu phân quyền Discord ID!");
+            await loadPermissions();
+          },
+        });
       });
     }
 
@@ -164,21 +208,26 @@ export function createPermissionsTabController({ isAdmin }) {
     if (formAddUser) {
       formAddUser.addEventListener("submit", async (event) => {
         event.preventDefault();
-        try {
-          await apiRequest("/api/permissions/users", {
-            method: "POST",
-            body: JSON.stringify({
-              username: document.getElementById("nu-username").value.trim(),
-              password: document.getElementById("nu-password").value,
-              role: document.getElementById("nu-role").value,
-            }),
-          });
-          formAddUser.reset();
-          showToast("✅ Đã tạo tài khoản Dashboard mới!");
-          await loadPermissions();
-        } catch (err) {
-          showToast(err.message, false);
-        }
+        const payload = {
+          username: document.getElementById("nu-username").value.trim(),
+          password: document.getElementById("nu-password").value,
+          role: document.getElementById("nu-role").value,
+        };
+        await confirmSaveChanges({
+          title: "Xác nhận tạo tài khoản Dashboard mới",
+          subtitle: "Mật khẩu được che an toàn trong bản xem trước và băm scrypt trên server",
+          before: { username: "", role: "", password: "" },
+          after: payload,
+          onConfirm: async (changes) => {
+            await apiRequest("/api/permissions/users", {
+              method: "POST",
+              body: JSON.stringify({ ...payload, changes }),
+            });
+            formAddUser.reset();
+            showToast("✅ Đã tạo tài khoản Dashboard mới!");
+            await loadPermissions();
+          },
+        });
       });
     }
 
@@ -193,15 +242,19 @@ export function createPermissionsTabController({ isAdmin }) {
       if (btn.dataset.action === "change-password") {
         const newPassword = prompt(`Nhập mật khẩu mới cho '${username}' (tối thiểu 6 ký tự):`);
         if (!newPassword) return;
-        try {
-          await apiRequest(`/api/permissions/users/${encodeURIComponent(username)}/password`, {
-            method: "PUT",
-            body: JSON.stringify({ password: newPassword }),
-          });
-          showToast(`🔑 Đã đổi mật khẩu cho ${username}.`);
-        } catch (err) {
-          showToast(err.message, false);
-        }
+        await confirmSaveChanges({
+          title: `Xác nhận đổi mật khẩu cho '${username}'`,
+          subtitle: "Mật khẩu mới sẽ có hiệu lực ngay ở lần đăng nhập kế tiếp",
+          before: { password: "••••• (đã lưu)" },
+          after: { password: newPassword },
+          onConfirm: async (changes) => {
+            await apiRequest(`/api/permissions/users/${encodeURIComponent(username)}/password`, {
+              method: "PUT",
+              body: JSON.stringify({ password: newPassword, changes }),
+            });
+            showToast(`🔑 Đã đổi mật khẩu cho ${username}.`);
+          },
+        });
       } else if (btn.dataset.action === "delete-user") {
         if (!confirm(`Xóa tài khoản '${username}'?`)) return;
         try {

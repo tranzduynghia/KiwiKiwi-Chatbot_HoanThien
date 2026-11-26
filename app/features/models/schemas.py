@@ -1,7 +1,7 @@
 """Schema Pydantic cho API cấu hình Model Gemini."""
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -18,3 +18,4 @@ class ModelsConfigPayload(BaseModel):
     extra_models: list[str] = Field(default_factory=list)
     model_refresh_hours: float = 6.0
     overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    changes: Optional[dict[str, dict[str, Any]]] = None

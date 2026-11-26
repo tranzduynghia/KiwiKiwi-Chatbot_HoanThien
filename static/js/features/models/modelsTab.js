@@ -4,6 +4,7 @@
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { confirmSaveChanges } from "../../core/confirmSave.js";
 
 const DEFAULT_FALLBACK_MODELS = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-4-hydrogen"];
 
@@ -12,6 +13,30 @@ export function createModelsTabController({ onRefreshAll }) {
   let currentModelsRuntime = null;
   let autoChainState = [];
   let overridesState = {};
+  let initialState = null;
+
+  function splitCsv(raw) {
+    return String(raw || "")
+      .split(/[,\n]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function readFormState() {
+    return {
+      models: {
+        default_text_model: document.getElementById("mod-default-text").value.trim(),
+        auto_model_chain: [...autoChainState],
+        auto_last_model: document.getElementById("mod-auto-last").value.trim(),
+        fallback_text: [...(currentConfig?.models?.fallback_text || DEFAULT_FALLBACK_MODELS)],
+        hidden_models: splitCsv(document.getElementById("mod-hidden-patterns").value),
+        hide_pro_models: document.getElementById("mod-hide-pro").checked,
+        extra_models: splitCsv(document.getElementById("mod-extra").value),
+        model_refresh_hours: Number(document.getElementById("mod-refresh-hours").value),
+        overrides: JSON.parse(JSON.stringify(overridesState)),
+      },
+    };
+  }
 
   function setOverride(modelId, key, value) {
     if (!overridesState[modelId]) {
@@ -152,6 +177,7 @@ export function createModelsTabController({ onRefreshAll }) {
 
     renderAutoChain();
     renderModelsTable();
+    initialState = readFormState();
   }
 
   async function refreshModelsFromApi() {
@@ -225,30 +251,21 @@ export function createModelsTabController({ onRefreshAll }) {
     document.getElementById("btn-refresh-models-st").addEventListener("click", refreshModelsFromApi);
 
     document.getElementById("btn-save-models").addEventListener("click", async () => {
-      try {
-        const splitCsv = (raw) =>
-          raw
-            .split(/[,\n]+/)
-            .map((item) => item.trim())
-            .filter(Boolean);
-
-        const payload = {
-          default_text_model: document.getElementById("mod-default-text").value.trim(),
-          auto_model_chain: autoChainState,
-          auto_last_model: document.getElementById("mod-auto-last").value.trim(),
-          fallback_text: currentConfig?.models?.fallback_text || DEFAULT_FALLBACK_MODELS,
-          hidden_models: splitCsv(document.getElementById("mod-hidden-patterns").value),
-          hide_pro_models: document.getElementById("mod-hide-pro").checked,
-          extra_models: splitCsv(document.getElementById("mod-extra").value),
-          model_refresh_hours: Number(document.getElementById("mod-refresh-hours").value),
-          overrides: overridesState,
-        };
-        await apiRequest("/api/config/models", { method: "PUT", body: JSON.stringify(payload) });
-        showToast("✅ Đã lưu cấu hình Model Gemini (áp dụng ngay)!");
-        await onRefreshAll();
-      } catch (err) {
-        showToast(err.message, false);
-      }
+      const nextState = readFormState();
+      await confirmSaveChanges({
+        title: "Xác nhận lưu cấu hình Model Gemini",
+        subtitle: "Chuỗi Auto Chain, danh sách model ẩn và ghi đè hiển thị sẽ áp dụng ngay",
+        before: initialState || {},
+        after: nextState,
+        onConfirm: async (changes) => {
+          await apiRequest("/api/config/models", {
+            method: "PUT",
+            body: JSON.stringify({ ...nextState.models, changes }),
+          });
+          showToast("✅ Đã lưu cấu hình Model Gemini (áp dụng ngay)!");
+          await onRefreshAll();
+        },
+      });
     });
   }
 

@@ -1,6 +1,8 @@
 """Schema Pydantic cho API quản lý phân quyền theo Discord User ID."""
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -12,3 +14,4 @@ class DiscordPermissionPayload(BaseModel):
     is_admin: bool = False
     can_dashboard: bool = False
     can_status: bool = False
+    changes: Optional[dict[str, dict[str, Any]]] = None

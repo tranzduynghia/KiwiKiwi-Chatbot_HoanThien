@@ -1,6 +1,8 @@
 """Các schema Pydantic cho đăng nhập và quản trị tài khoản Dashboard."""
 from __future__ import annotations
 
+from typing import Any, Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -17,9 +19,11 @@ class CreateUserPayload(BaseModel):
     username: str = Field(..., min_length=3, max_length=32)
     password: str = Field(..., min_length=6, max_length=128)
     role: str = Field(default="admin")
+    changes: Optional[dict[str, dict[str, Any]]] = None
 
 
 class ChangePasswordPayload(BaseModel):
     """Payload đổi mật khẩu cho một tài khoản Dashboard hiện có."""
 
     password: str = Field(..., min_length=6, max_length=128)
+    changes: Optional[dict[str, dict[str, Any]]] = None

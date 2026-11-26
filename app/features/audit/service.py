@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.sync import WriteBehindSyncCoordinator
-from app.features.audit.diff import is_sensitive_field, sanitize_audit_value
+from app.features.audit.diff import is_sensitive_field, mask_secret_preview, sanitize_audit_value
 from app.features.audit.repository import AuditRepository
 
 
@@ -29,11 +29,17 @@ class AuditService:
         actor_meta: Optional[dict[str, Any]] = None,
         flush: bool = True,
     ) -> dict[str, Any]:
-        """Ghi một bản ghi Audit Log sau khi loại bỏ trường nhạy cảm và kèm thông tin avatar người thao tác."""
+        """Ghi một bản ghi Audit Log sau khi loại bỏ/che trường nhạy cảm và kèm thông tin avatar người thao tác."""
         safe_changes = []
         for change in changes or []:
             field = str(change.get("field", ""))
             if is_sensitive_field(field):
+                if change.get("masked"):
+                    safe_changes.append({
+                        "field": field,
+                        "before": mask_secret_preview(change.get("before")),
+                        "after": mask_secret_preview(change.get("after")),
+                    })
                 continue
             safe_changes.append({
                 "field": field,

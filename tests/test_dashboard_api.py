@@ -64,6 +64,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert "id=\"tab-models\"" in dash_html.text
         assert "id=\"st-ram-reserve\"" in dash_html.text
         assert "id=\"btn-test-watchdog\"" in dash_html.text
+        assert "id=\"confirm-save-modal\"" in dash_html.text
         assert "https://cdn.discordapp.com/avatars/999999999999999999/bot.png?size=128" in dash_html.text
 
         status_res = client.get("/api/status?check_gemini=1")
@@ -96,6 +97,10 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
             json={
                 "ask": {"user_cooldown": 3.0, "max_concurrent": 4, "default_thinking_level": "medium"},
                 "session": {"session_idle_hours": 4.0, "max_history_messages": 30},
+                "changes": {
+                    "ask.user_cooldown": {"old": 5.0, "new": 3.0},
+                    "ask.max_concurrent": {"old": 2, "new": 4},
+                },
             },
         )
         assert ask_res.status_code == 200

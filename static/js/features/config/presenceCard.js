@@ -7,6 +7,7 @@
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { confirmSaveChanges } from "../../core/confirmSave.js";
 
 const STATUS_META = {
   online: { label: "Trực tuyến (online)", dotClass: "bg-emerald-500" },
@@ -29,6 +30,24 @@ export function createPresenceCardController({ onConfigSaved }) {
   let selectedStatus = "online";
   let previewRotateStep = 0;
   let previewRotateTimer = null;
+  let initialState = null;
+
+  function readFormState() {
+    const customEl = document.getElementById("presence-custom-status");
+    const typeEl = document.getElementById("presence-activity-type");
+    const textEl = document.getElementById("presence-activity-text");
+    const rotateEl = document.getElementById("presence-auto-rotate");
+    const activityType = typeEl ? typeEl.value : "none";
+    return {
+      presence: {
+        status: selectedStatus,
+        custom_status: customEl ? customEl.value.trim() : "",
+        activity_type: activityType,
+        activity_text: activityType === "none" ? "" : textEl ? textEl.value.trim() : "",
+        auto_rotate: Boolean(rotateEl && rotateEl.checked),
+      },
+    };
+  }
 
   function stopPreviewRotation() {
     if (previewRotateTimer) {
@@ -189,6 +208,7 @@ export function createPresenceCardController({ onConfigSaved }) {
     previewRotateStep = 0;
     updateStatusButtons();
     renderPreview();
+    initialState = readFormState();
   }
 
   function syncBotName(username) {
@@ -227,33 +247,33 @@ export function createPresenceCardController({ onConfigSaved }) {
     const saveBtn = document.getElementById("btn-save-presence");
     if (saveBtn) {
       saveBtn.addEventListener("click", async () => {
-        const customStatus = customEl ? customEl.value.trim() : "";
-        const activityType = typeEl ? typeEl.value : "none";
-        const activityText = textEl ? textEl.value.trim() : "";
-        const autoRotate = Boolean(rotateEl && rotateEl.checked);
-        saveBtn.disabled = true;
-        try {
-          const res = await apiRequest("/api/config/presence", {
-            method: "PUT",
-            body: JSON.stringify({
-              status: selectedStatus,
-              custom_status: customStatus,
-              activity_type: activityType,
-              activity_text: activityText,
-              auto_rotate: autoRotate,
-            }),
-          });
-          showToast(
-            res.applied_live
-              ? "✅ Đã cập nhật trạng thái Discord tức thì và lưu MongoDB Atlas!"
-              : "✅ Đã lưu cấu hình trạng thái vào MongoDB Atlas (sẽ tự áp dụng khi bot Online)."
-          );
-          if (onConfigSaved) await onConfigSaved();
-        } catch (err) {
-          showToast(err.message, false);
-        } finally {
-          saveBtn.disabled = false;
-        }
+        const nextState = readFormState();
+        await confirmSaveChanges({
+          title: "Xác nhận cập nhật trạng thái Discord Bot",
+          subtitle: "Trạng thái và hoạt động mới sẽ áp dụng trực tiếp lên hồ sơ Discord của bot",
+          before: initialState || {},
+          after: nextState,
+          onConfirm: async (changes) => {
+            const p = nextState.presence;
+            const res = await apiRequest("/api/config/presence", {
+              method: "PUT",
+              body: JSON.stringify({
+                status: p.status,
+                custom_status: p.custom_status,
+                activity_type: p.activity_type,
+                activity_text: p.activity_text,
+                auto_rotate: p.auto_rotate,
+                changes,
+              }),
+            });
+            showToast(
+              res.applied_live
+                ? "✅ Đã cập nhật trạng thái Discord tức thì và lưu MongoDB Atlas!"
+                : "✅ Đã lưu cấu hình trạng thái vào MongoDB Atlas (sẽ tự áp dụng khi bot Online)."
+            );
+            if (onConfigSaved) await onConfigSaved();
+          },
+        });
       });
     }
   }

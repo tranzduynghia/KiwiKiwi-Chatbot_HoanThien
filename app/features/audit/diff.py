@@ -50,3 +50,52 @@ def compute_diff(old_obj: Any, new_obj: Any, prefix: str = "") -> list[dict[str,
             "after": sanitize_audit_value(new_obj),
         })
     return changes
+
+
+def mask_secret_preview(value: Any) -> str:
+    """Che giá trị nhạy cảm dạng tiền tố ngắn + dấu chấm (VD: `eyJh•••••`) để hiển thị an toàn trong Audit Log."""
+    if value is None or value == "":
+        return "(trống)"
+    text = str(value).strip()
+    if not text:
+        return "(trống)"
+    if "••••" in text or text.startswith("("):
+        return text[:40]
+    if len(text) <= 4:
+        return "•••••"
+    return f"{text[:4]}•••••"
+
+
+def merge_client_changes(
+    server_changes: list[dict[str, Any]],
+    client_changes: dict[str, dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Kết hợp diff tính phía server với bản diff `{field: {old, new}}` do Admin xác nhận trên Modal (tự che bí mật)."""
+    merged = list(server_changes)
+    if not isinstance(client_changes, dict):
+        return merged
+
+    existing_fields = {str(item.get("field", "")) for item in merged}
+    for raw_field, pair in client_changes.items():
+        field = str(raw_field or "").strip()
+        if not field or field in existing_fields or not isinstance(pair, dict):
+            continue
+        old_val = pair.get("old")
+        new_val = pair.get("new")
+        if old_val == new_val:
+            continue
+        if is_sensitive_field(field):
+            merged.append({
+                "field": field,
+                "before": mask_secret_preview(old_val),
+                "after": mask_secret_preview(new_val),
+                "masked": True,
+            })
+        else:
+            merged.append({
+                "field": field,
+                "before": sanitize_audit_value(old_val),
+                "after": sanitize_audit_value(new_val),
+            })
+        existing_fields.add(field)
+    return merged
