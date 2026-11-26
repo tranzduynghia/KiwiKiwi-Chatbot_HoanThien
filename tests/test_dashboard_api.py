@@ -288,7 +288,7 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert discord_audit["actor_avatar_url"].startswith("https://cdn.discordapp.com/")
         assert discord_audit["changes"] == [{"field": "ask.user_cooldown", "before": 5.0, "after": 3.0}]
 
-        # Kiểm tra trang 2 và alias /api/audit + chặn limit > 20 để bảo vệ RAM container
+        # Kiểm tra trang 2 và alias /api/audit + tự kẹp limit > 20 & chấp nhận category rỗng/all (không gây lỗi 422)
         audit_p2 = client.get("/api/audit?page=2&limit=5")
         assert audit_p2.status_code == 200
         p2_json = audit_p2.json()
@@ -296,7 +296,36 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert p2_json["limit"] == 5
         assert len(p2_json["items"]) >= 1
         assert p2_json["items"][0] != audit_json["items"][0]
-        assert client.get("/api/audit-logs?limit=50").status_code == 422
+
+        clamped_res = client.get("/api/audit-logs?limit=100&page=&category=")
+        assert clamped_res.status_code == 200
+        assert clamped_res.json()["limit"] == 20
+        assert clamped_res.json()["page"] == 1
+
+        all_cat_res = client.get("/api/audit?page=1&limit=5&category=all")
+        assert all_cat_res.status_code == 200
+        assert all_cat_res.json()["total_items"] >= 6
+
+        # Xác minh bản ghi MongoDB chứa ObjectId và datetime thật được tuần tự hóa JSON an toàn (không lỗi 500)
+        from datetime import datetime, timezone
+        from bson import ObjectId
+
+        raw_oid = ObjectId()
+        await fake_db["audit_logs"].insert_one({
+            "_id": raw_oid,
+            "at": datetime(2099, 1, 1, 12, 0, 0, tzinfo=timezone.utc),
+            "actor": "atlas-manual",
+            "actor_type": "system",
+            "action": "manual_edit",
+            "section": "tunnel",
+            "summary": "Kiểm tra tuần tự hóa ObjectId và datetime",
+            "changes": [],
+        })
+        bson_res = client.get("/api/audit?page=1&limit=5&category=tunnel")
+        assert bson_res.status_code == 200
+        bson_items = bson_res.json()["items"]
+        assert bson_items[0]["_id"] == str(raw_oid)
+        assert bson_items[0]["at"].startswith("2099-01-01T12:00:00")
 
 
 @pytest.mark.asyncio

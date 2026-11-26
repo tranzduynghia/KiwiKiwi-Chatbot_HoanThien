@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import logging
 import math
+from datetime import date, datetime
 from typing import Any, Optional
 
 log = logging.getLogger("gemini-bot.audit")
@@ -11,6 +12,42 @@ log = logging.getLogger("gemini-bot.audit")
 MAX_PENDING_AUDITS = 500
 DEFAULT_AUDIT_PAGE_LIMIT = 5
 MAX_AUDIT_PAGE_LIMIT = 20
+
+
+def _serialize_json_value(value: Any) -> Any:
+    """Chuyển đệ quy các kiểu dữ liệu BSON/Python (ObjectId, datetime, bytes...) sang JSON an toàn cho FastAPI."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {str(k): _serialize_json_value(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_serialize_json_value(v) for v in value]
+    # Hỗ trợ bson.ObjectId, Decimal128 và các kiểu tùy chỉnh khác bằng chuỗi
+    return str(value)
+
+
+def _serialize_audit_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    """Chuẩn hóa một bản ghi Audit Log từ MongoDB: `_id` -> chuỗi, `datetime` -> ISO và bảo đảm có trường `at`."""
+    clean = _serialize_json_value(doc)
+    if "_id" in doc and doc["_id"] is not None:
+        clean["_id"] = str(doc["_id"])
+    if not clean.get("at"):
+        fallback_ts = clean.get("timestamp") or clean.get("created_at") or ""
+        if fallback_ts:
+            clean["at"] = str(fallback_ts)
+    return clean
+
+
+def _normalize_section_filter(section: Optional[str]) -> str:
+    """Chuẩn hóa bộ lọc chuyên mục (coi rỗng hoặc `all` là không lọc)."""
+    sec = (section or "").strip()
+    if sec.lower() in ("", "all", "tất cả"):
+        return ""
+    return sec
 
 
 class AuditRepository:
@@ -81,14 +118,14 @@ class AuditRepository:
         section: Optional[str] = None,
     ) -> dict[str, Any]:
         """Phân trang phía server với `.sort('at', -1).skip().limit()` và `count_documents()`, tránh nạp toàn bộ collection vào RAM."""
-        sec = (section or "").strip()
+        sec = _normalize_section_filter(section)
         safe_limit = max(1, min(MAX_AUDIT_PAGE_LIMIT, int(limit)))
         requested_page = max(1, int(page))
 
         pending_items: list[dict[str, Any]] = []
         for doc in reversed(self._pending_audits):
             if not sec or doc.get("section") == sec:
-                item = copy.deepcopy(doc)
+                item = _serialize_audit_doc(doc)
                 item["pending"] = True
                 pending_items.append(item)
 
@@ -113,13 +150,13 @@ class AuditRepository:
             db_skip = max(0, start_idx - len(pending_items))
             try:
                 cursor = (
-                    self.collection.find(query, {"_id": 0})
+                    self.collection.find(query)
                     .sort("at", -1)
                     .skip(db_skip)
                     .limit(remaining)
                 )
                 db_items = await cursor.to_list(length=remaining)
-                page_items.extend(db_items)
+                page_items.extend(_serialize_audit_doc(doc) for doc in db_items)
             except Exception as exc:
                 log.warning("Không đọc được trang audit_logs từ MongoDB: %s", exc)
 
@@ -133,13 +170,13 @@ class AuditRepository:
 
     async def list_logs(self, limit: int = 100, section: Optional[str] = None) -> list[dict[str, Any]]:
         """Lấy danh sách Audit Log (ưu tiên bản ghi đang chờ đồng bộ trong RAM lên đầu)."""
-        sec = (section or "").strip()
+        sec = _normalize_section_filter(section)
         capped_limit = max(1, min(300, limit))
 
         pending_items: list[dict[str, Any]] = []
         for doc in reversed(self._pending_audits):
             if not sec or doc.get("section") == sec:
-                item = copy.deepcopy(doc)
+                item = _serialize_audit_doc(doc)
                 item["pending"] = True
                 pending_items.append(item)
 
@@ -147,7 +184,8 @@ class AuditRepository:
         if self.connected:
             try:
                 query: dict[str, Any] = {"section": sec} if sec else {}
-                db_items = await self.collection.find(query, {"_id": 0}).sort("at", -1).limit(capped_limit).to_list(capped_limit)
+                raw_docs = await self.collection.find(query).sort("at", -1).limit(capped_limit).to_list(capped_limit)
+                db_items = [_serialize_audit_doc(doc) for doc in raw_docs]
             except Exception as exc:
                 log.warning("Không đọc được audit_logs từ MongoDB: %s", exc)
 

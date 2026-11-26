@@ -338,7 +338,11 @@ export function createAuditTabController() {
             .join("")
         : '<tr><td colspan="6" class="py-12 text-center text-[#5e6778]">Chưa có bản ghi nhật ký chỉnh sửa nào.</td></tr>';
     } catch (err) {
-      if (seq === requestSeq && !silent) showToast(err.message, false);
+      if (seq === requestSeq && !silent) {
+        const msg = err?.message || "Không thể tải danh sách nhật ký.";
+        showToast(msg, false);
+        tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-rose-300">Không tải được Nhật ký chỉnh sửa: ${escapeHtml(msg)}</td></tr>`;
+      }
     } finally {
       if (seq === requestSeq) {
         isFetching = false;

@@ -58,7 +58,10 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
                     if request.url.path.startswith("/api/"):
                         return JSONResponse({"detail": detail}, status_code=403)
                     return PlainTextResponse(detail, status_code=403)
-        return await call_next(request)
+        response = await call_next(request)
+        if request.url.path.startswith(("/static/js/", "/static/css/")):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
