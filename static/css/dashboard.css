@@ -590,12 +590,12 @@ body.sidebar-collapsed .ox-main-wrapper {
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: none;
   }
 }
 
 .ox-tab-enter {
-  animation: oxTabFadeIn 200ms ease-out both;
+  animation: oxTabFadeIn 200ms ease-out;
 }
 
 .ox-enter {
@@ -606,8 +606,11 @@ body.sidebar-collapsed .ox-main-wrapper {
   animation: oxFadeSlideUp 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Chuyển động đóng/mở đối xứng cho mọi hộp thoại Modal (luôn chạy ngay không phụ thuộc Tailwind CDN) */
+/* Chuyển động đóng/mở đối xứng và nền kính mờ nhẹ phủ toàn viewport cho mọi hộp thoại Modal */
 .ox-modal-backdrop {
+  background-color: rgba(2, 6, 23, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 200ms ease-out;

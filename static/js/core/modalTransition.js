@@ -35,6 +35,10 @@ function clearPendingTransition(state) {
 
 export function openModalAnimated(modal, panelEl = null) {
   if (!modal) return;
+  // Đưa modal ra trực tiếp dưới `document.body` để luôn phủ kín 100% viewport (vượt trên topbar và sidebar)
+  if (typeof document !== "undefined" && document.body && modal.parentElement && modal.parentElement !== document.body) {
+    document.body.appendChild(modal);
+  }
   const panel = panelEl || modal.firstElementChild;
   const state = getModalState(modal);
   clearPendingTransition(state);
