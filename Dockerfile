@@ -26,7 +26,7 @@ COPY app/ ./app/
 COPY templates/ ./templates/
 COPY static/ ./static/
 
-RUN useradd --create-home botuser
+RUN useradd --create-home --no-log-init --shell /usr/sbin/nologin botuser
 USER botuser
 
 EXPOSE 10000

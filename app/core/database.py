@@ -9,6 +9,8 @@ from typing import Any, Optional
 import certifi
 from pymongo import AsyncMongoClient
 
+from app.core.security import redact_secrets
+
 log = logging.getLogger("gemini-bot.database")
 
 
@@ -76,7 +78,7 @@ class MongoDatabaseManager:
             return True, (time.perf_counter() - started) * 1000, "OK"
         except Exception as exc:
             self.ok = False
-            self.last_error = f"{type(exc).__name__}: {exc}"[:200]
+            self.last_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200)
             return False, (time.perf_counter() - started) * 1000, type(exc).__name__
 
     async def storage_mb(self) -> Optional[float]:

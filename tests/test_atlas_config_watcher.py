@@ -104,10 +104,12 @@ async def test_atlas_watcher_defaults_hash_noop_and_pending_guard(fake_db, fake_
 async def test_atlas_external_tunnel_hot_reload_and_zero_cache_middleware(fake_db, fake_gemini, fake_bot):
     """Sửa trực tiếp `bot_config` trên Atlas tự động bật/restart/tắt cloudflared, mở/khóa middleware tức thì và ghi Audit Log che token."""
     spawned_commands: list[tuple[str, ...]] = []
+    spawned_envs: list[dict[str, str]] = []
     procs: list[FakeSubprocess] = []
 
-    async def fake_spawn(*cmd, **_kwargs):
+    async def fake_spawn(*cmd, **kwargs):
         spawned_commands.append(cmd)
+        spawned_envs.append(dict(kwargs.get("env") or {}))
         proc = FakeSubprocess(pid=6100 + len(procs), stderr_lines=[b"INF Connected to Cloudflare Edge\n"])
         procs.append(proc)
         return proc
@@ -115,7 +117,7 @@ async def test_atlas_external_tunnel_hot_reload_and_zero_cache_middleware(fake_d
     settings = AppSettings(
         discord_token="test-token",
         gemini_api_key="test-key",
-        session_secret="test-secret-watcher-2",
+        session_secret="test-secret-watcher-2-long-enough-32chars",
         port=10000,
     )
     tunnel_service = CloudflareTunnelService(
@@ -159,7 +161,8 @@ async def test_atlas_external_tunnel_hot_reload_and_zero_cache_middleware(fake_d
         assert sync1["changed"] is True
         assert sync1["tunnel_reloaded"] is True
         assert len(spawned_commands) == 1
-        assert token_v1 in spawned_commands[0]
+        assert token_v1 not in spawned_commands[0]
+        assert spawned_envs[0]["TUNNEL_TOKEN"] == token_v1
         assert tunnel_service.is_running is True
         assert callback_events[-1] == 5
 
@@ -192,7 +195,8 @@ async def test_atlas_external_tunnel_hot_reload_and_zero_cache_middleware(fake_d
         assert sync3["tunnel_reloaded"] is True
         assert procs[0].terminated is True
         assert len(spawned_commands) == 2
-        assert token_v2 in spawned_commands[1]
+        assert token_v2 not in spawned_commands[1]
+        assert spawned_envs[1]["TUNNEL_TOKEN"] == token_v2
         assert tunnel_service.is_running is True
 
         # 4) Tắt `cf_tunnel_enabled` trực tiếp trên Atlas -> tự động dừng tiến trình cloudflared

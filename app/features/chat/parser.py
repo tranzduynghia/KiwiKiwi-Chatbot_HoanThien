@@ -89,5 +89,7 @@ def explain_error(exc: Exception) -> str:
             return "❓ Model không tồn tại hoặc đã bị gỡ. Hãy chọn lại model từ gợi ý."
         if exc.code in (500, 503):
             return "🔥 Gemini đang quá tải, hãy thử lại sau ít phút."
-        return f"⚠️ Lỗi Gemini ({exc.code}): {msg[:300]}"
+        from app.core.security import redact_secrets
+
+        return f"⚠️ Lỗi Gemini ({exc.code}): {redact_secrets(msg, max_len=300)}"
     return f"⚠️ Lỗi không xác định: {type(exc).__name__}"

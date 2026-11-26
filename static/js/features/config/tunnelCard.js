@@ -6,7 +6,7 @@
  * - Đồng bộ im lặng trạng thái chạy, PID, Public URL có thể bấm và chế độ Outbound Proxy
  */
 
-import { apiRequest, showToast } from "../../core/api.js";
+import { apiRequest, sanitizeHttpUrl, showToast } from "../../core/api.js";
 import { confirmSaveChanges } from "../../core/confirmSave.js";
 
 export function createTunnelCardController({ isAdmin, onConfigSaved }) {
@@ -26,7 +26,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
 
   function fill(config) {
     const tunnel = config?.tunnel || {};
-    hasSavedToken = Boolean(tunnel.cf_tunnel_has_token);
+    hasSavedToken = Boolean(tunnel.has_cf_tunnel_token ?? tunnel.cf_tunnel_has_token);
 
     const modeEl = document.getElementById("cf-tunnel-mode");
     const tokenEl = document.getElementById("cf-tunnel-token");
@@ -39,7 +39,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       tokenEl.value = "";
       tokenEl.placeholder = hasSavedToken
         ? "•••••••••••• (Đã lưu Token — để trống nếu giữ nguyên)"
-        : "Dán Cloudflare Tunnel Token (eyJhIjoi...)";
+        : "Dán Cloudflare Tunnel Token";
     }
     if (tokenHintEl) {
       tokenHintEl.textContent = hasSavedToken
@@ -53,7 +53,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       tunnel: {
         cf_tunnel_enabled: Boolean(tunnel.cf_tunnel_enabled),
         cf_tunnel_mode: loadedMode,
-        cf_tunnel_token: hasSavedToken ? "••••• (đã lưu)" : "",
+        cf_tunnel_token: hasSavedToken ? "••••••••••••" : "",
         tunnel_only_inbound: Boolean(tunnel.tunnel_only_inbound),
       },
     };
@@ -107,7 +107,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     }
 
     if (urlWrapEl && urlLinkEl) {
-      const pubUrl = String(telemetry.public_url || "").trim();
+      const pubUrl = sanitizeHttpUrl(telemetry.public_url);
       if (pubUrl) {
         urlWrapEl.classList.remove("hidden");
         if (urlLinkEl.getAttribute("href") !== pubUrl) {
@@ -116,6 +116,8 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         }
       } else {
         urlWrapEl.classList.add("hidden");
+        urlLinkEl.setAttribute("href", "#");
+        urlLinkEl.textContent = "—";
       }
     }
 

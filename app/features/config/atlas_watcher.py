@@ -155,8 +155,10 @@ class AtlasConfigWatcher:
             try:
                 remote_doc = await self._config_repo.fetch_remote_doc()
             except Exception as exc:
-                self._last_error = f"{type(exc).__name__}: {exc}"[:200]
-                log.warning("Lỗi truy vấn bot_config từ MongoDB Atlas: %s", exc)
+                from app.core.security import redact_secrets
+
+                self._last_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200)
+                log.warning("Lỗi truy vấn bot_config từ MongoDB Atlas: %s", self._last_error)
                 return {"changed": False, "error": self._last_error}
 
             if not remote_doc:

@@ -5,33 +5,38 @@
  * - Mở Modal xem chi tiết toàn bộ hội thoại tại chỗ (không tải lại hay chuyển hướng trang)
  */
 
-import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { apiRequest, escapeHtml, sanitizeHttpUrl, showToast } from "../../core/api.js";
 
 const PAGE_SIZE = 50;
 
 function highlightMatch(rawText, keyword) {
-  const safeText = escapeHtml(rawText);
-  const cleanKw = (keyword || "").trim();
-  if (!cleanKw) return safeText;
-  const escapedRegex = escapeHtml(cleanKw).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const source = String(rawText ?? "");
+  const cleanKw = String(keyword || "").trim();
+  if (!cleanKw) return escapeHtml(source);
+  const escapedRegex = cleanKw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   try {
     const regex = new RegExp(`(${escapedRegex})`, "gi");
-    return safeText.replace(
-      regex,
-      '<mark class="bg-rose-500/30 text-rose-100 rounded px-0.5">$1</mark>'
-    );
+    const parts = source.split(regex);
+    return parts
+      .map((part, idx) =>
+        idx % 2 === 1
+          ? `<mark class="bg-rose-500/30 text-rose-100 rounded px-0.5">${escapeHtml(part)}</mark>`
+          : escapeHtml(part)
+      )
+      .join("");
   } catch {
-    return safeText;
+    return escapeHtml(source);
   }
 }
 
 function renderAvatar(item, sizeClass = "w-10 h-10") {
   const display = item.display_name || item.username || item.user_id || "?";
   const initial = escapeHtml(String(display).trim().charAt(0).toUpperCase() || "?");
-  if (item.avatar_url) {
+  const safeAvatarUrl = sanitizeHttpUrl(item.avatar_url);
+  if (safeAvatarUrl) {
     return `
       <img
-        src="${escapeHtml(item.avatar_url)}"
+        src="${escapeHtml(safeAvatarUrl)}"
         alt="${escapeHtml(display)}"
         loading="lazy"
         class="${sizeClass} rounded-full object-cover border border-[#2a3140] shrink-0 bg-[#0a0d12]"
@@ -152,7 +157,7 @@ export function createSessionsTabController() {
         >Chat ID: ${escapeHtml(sess.chat_id)} 📋</button>
         <span class="font-mono">UID: ${escapeHtml(sess.user_id || "—")}</span>
         <span>${statusBadge}</span>
-        <span>${sess.turns || 0} lượt · ${(sess.messages || []).length} tin nhắn</span>
+        <span>${Number(sess.turns || 0)} lượt · ${(sess.messages || []).length} tin nhắn</span>
         <span>Bắt đầu: ${escapeHtml(createdStr)}</span>
         <span>Gần nhất: ${escapeHtml(lastStr)}</span>
       `;

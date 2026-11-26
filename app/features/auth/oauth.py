@@ -3,16 +3,21 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from urllib.parse import urlencode
 
 import httpx
 from fastapi import Request
+
+from app.core.security import is_trusted_proxy_ip, redact_secrets
 
 log = logging.getLogger("gemini-bot.auth.oauth")
 
 DISCORD_AUTHORIZE_URL = "https://discord.com/api/oauth2/authorize"
 DISCORD_TOKEN_URL = "https://discord.com/api/oauth2/token"
 DISCORD_USER_URL = "https://discord.com/api/users/@me"
+
+SAFE_HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}(?::\d{1,5})?$")
 
 
 class DiscordOAuthError(RuntimeError):
@@ -23,7 +28,7 @@ class DiscordOAuthService:
     """Đóng gói toàn bộ luồng gọi Discord OAuth2 tách biệt khỏi router FastAPI."""
 
     def resolve_config(self, request: Request) -> tuple[str, str, str]:
-        """Đọc Client ID, Client Secret và tự suy ra Redirect URI phù hợp với request hiện tại."""
+        """Đọc Client ID, Client Secret và suy ra Redirect URI an toàn (chống Host Header Poisoning)."""
         client_id = (os.getenv("DISCORD_CLIENT_ID") or "").strip()
         client_secret = (os.getenv("DISCORD_CLIENT_SECRET") or "").strip()
         redirect_uri = (os.getenv("DISCORD_REDIRECT_URI") or "").strip()
@@ -32,9 +37,24 @@ class DiscordOAuthService:
             if public_url:
                 redirect_uri = f"{public_url}/auth/discord/callback"
             else:
-                scheme = request.headers.get("x-forwarded-proto") or request.url.scheme
-                host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-                redirect_uri = f"{scheme}://{host}/auth/discord/callback"
+                peer_host = request.client.host if request.client else None
+                trusted = is_trusted_proxy_ip(peer_host)
+                raw_scheme = (
+                    (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+                    if trusted
+                    else ""
+                ) or (request.url.scheme or "http").lower()
+                scheme = raw_scheme if raw_scheme in ("http", "https") else "https"
+
+                raw_host = (
+                    (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+                    if trusted
+                    else ""
+                ) or (request.headers.get("host") or request.url.netloc or "").strip()
+
+                if not SAFE_HOST_RE.fullmatch(raw_host):
+                    raw_host = (request.url.netloc or "localhost").strip()
+                redirect_uri = f"{scheme}://{raw_host}/auth/discord/callback"
         return client_id, client_secret, redirect_uri
 
     def is_enabled(self, request: Request) -> bool:
@@ -76,11 +96,18 @@ class DiscordOAuthService:
                     headers={"Content-Type": "application/x-www-form-urlencoded"},
                 )
                 if token_res.status_code != 200:
-                    log.warning("Discord OAuth2 token lỗi %s: %s", token_res.status_code, token_res.text[:200])
+                    log.warning(
+                        "Discord OAuth2 token lỗi %s: %s",
+                        token_res.status_code,
+                        redact_secrets(token_res.text, max_len=200),
+                    )
                     raise DiscordOAuthError(
                         "Không đổi được mã xác thực với Discord (kiểm tra Redirect URI / Client Secret)."
                     )
-                access_token = token_res.json().get("access_token")
+                token_json = token_res.json()
+                access_token = str(token_json.get("access_token") or "").strip() if isinstance(token_json, dict) else ""
+                if not access_token:
+                    raise DiscordOAuthError("Discord không trả về access token hợp lệ.")
                 user_res = await client.get(
                     DISCORD_USER_URL,
                     headers={"Authorization": f"Bearer {access_token}"},
@@ -91,5 +118,5 @@ class DiscordOAuthService:
         except DiscordOAuthError:
             raise
         except Exception as exc:
-            log.warning("Lỗi gọi Discord OAuth2: %s", exc)
+            log.warning("Lỗi gọi Discord OAuth2: %s", redact_secrets(str(exc)))
             raise DiscordOAuthError(f"Lỗi kết nối Discord OAuth2: {type(exc).__name__}") from exc

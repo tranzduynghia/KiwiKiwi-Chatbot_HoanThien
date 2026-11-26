@@ -58,7 +58,7 @@ export function createPermissionsTabController({ isAdmin }) {
                     <span class="px-2 py-0.5 rounded text-[11px] ${user.role === "admin" ? "bg-indigo-500/20 text-indigo-300" : "bg-slate-800 text-slate-400"}">${escapeHtml(user.role)}</span>
                   </td>
                   <td class="py-2.5 pr-3 text-slate-400">
-                    ${user.last_login_at ? new Date(user.last_login_at).toLocaleString("vi-VN") : "Chưa đăng nhập"}
+                    ${escapeHtml(user.last_login_at ? new Date(user.last_login_at).toLocaleString("vi-VN") : "Chưa đăng nhập")}
                   </td>
                   <td class="py-2.5 text-right space-x-1.5">
                     ${

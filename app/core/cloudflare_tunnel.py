@@ -3,13 +3,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
+from app.core.security import redact_secrets, validate_cloudflare_tunnel_token
+
 log = logging.getLogger("gemini-bot.tunnel")
 
 TRYCLOUDFLARE_URL_RE = re.compile(r"https://[a-zA-Z0-9-]+\.trycloudflare\.com")
+_ALLOWED_SUBPROCESS_ENV_KEYS = (
+    "PATH",
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "TMPDIR",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NO_PROXY",
+    "no_proxy",
+)
 
 
 class CloudflareTunnelService:
@@ -24,7 +39,10 @@ class CloudflareTunnelService:
         spawn_subprocess: Optional[Callable[..., Awaitable[Any]]] = None,
         quick_url_wait_seconds: float = 2.0,
     ):
-        self.local_port = int(local_port)
+        port_int = int(local_port)
+        if not (1 <= port_int <= 65535):
+            raise ValueError("local_port phải nằm trong khoảng 1..65535.")
+        self.local_port = port_int
         self.outbound_proxy_url = (outbound_proxy_url or "").strip()
         self.binary_path = binary_path
         self._spawn = spawn_subprocess or asyncio.create_subprocess_exec
@@ -53,7 +71,7 @@ class CloudflareTunnelService:
         return self._process is not None and getattr(self._process, "returncode", None) is None
 
     def build_command(self, mode: str, token: str = "") -> list[str]:
-        """Xây dựng danh sách tham số CLI cho `cloudflared` theo chế độ Named Tunnel hoặc Quick Tunnel."""
+        """Xây dựng danh sách tham số CLI an toàn cho `cloudflared` (Named Tunnel đọc token từ biến môi trường `TUNNEL_TOKEN`, không lộ trên argv)."""
         clean_mode = (mode or "named").strip().lower()
         if clean_mode == "quick":
             return [
@@ -63,6 +81,9 @@ class CloudflareTunnelService:
                 "--url",
                 self.origin_url,
             ]
+        # Kiểm tra token hợp lệ nếu người gọi truyền trực tiếp vào build_command; token thực tế được cấp qua env TUNNEL_TOKEN
+        if token:
+            validate_cloudflare_tunnel_token(token)
         return [
             self.binary_path,
             "tunnel",
@@ -70,9 +91,19 @@ class CloudflareTunnelService:
             "--edge-ip-version",
             "auto",
             "run",
-            "--token",
-            token.strip(),
         ]
+
+    @staticmethod
+    def build_subprocess_env(mode: str, token: str = "") -> dict[str, str]:
+        """Tạo môi trường tối giản cho tiến trình con `cloudflared`, loại bỏ toàn bộ bí mật của bot (DISCORD_TOKEN, GEMINI_API_KEY, MONGODB_URI...)."""
+        child_env = {
+            key: os.environ[key]
+            for key in _ALLOWED_SUBPROCESS_ENV_KEYS
+            if key in os.environ and os.environ[key]
+        }
+        if (mode or "named").strip().lower() != "quick" and token:
+            child_env["TUNNEL_TOKEN"] = validate_cloudflare_tunnel_token(token)
+        return child_env
 
     async def _consume_stderr(self, proc: Any, mode: str) -> None:
         """Đọc luồng stderr của `cloudflared` để bắt URL Quick Tunnel và phát hiện lỗi thoát sớm."""
@@ -96,11 +127,11 @@ class CloudflareTunnelService:
                         log.info("Cloudflare Quick Tunnel đã sẵn sàng tại: %s", self._public_url)
                 lowered = line.lower()
                 if "err" in lowered or "failed" in lowered or "unauthorized" in lowered or "invalid" in lowered:
-                    last_err_line = line[:240]
+                    last_err_line = redact_secrets(line, max_len=240)
         except asyncio.CancelledError:
             return
         except Exception as exc:
-            log.warning("Lỗi đọc stderr từ cloudflared: %s", exc)
+            log.warning("Lỗi đọc stderr từ cloudflared: %s", redact_secrets(str(exc)))
         finally:
             rc = getattr(proc, "returncode", None)
             if rc is not None and rc != 0 and self._process is proc:
@@ -127,7 +158,7 @@ class CloudflareTunnelService:
             except ProcessLookupError:
                 pass
             except Exception as exc:
-                log.warning("Lỗi khi dừng tiến trình cloudflared: %s", exc)
+                log.warning("Lỗi khi dừng tiến trình cloudflared: %s", redact_secrets(str(exc)))
 
         if stderr_task is not None and not stderr_task.done():
             stderr_task.cancel()
@@ -155,7 +186,7 @@ class CloudflareTunnelService:
         mode = str(tunnel_cfg.get("cf_tunnel_mode") or "named").strip().lower()
         if mode not in ("named", "quick"):
             mode = "named"
-        token = str(tunnel_cfg.get("cf_tunnel_token") or "").strip()
+        raw_token = str(tunnel_cfg.get("cf_tunnel_token") or "").strip()
         tunnel_only = bool(tunnel_cfg.get("tunnel_only_inbound", False))
 
         async with self._lock:
@@ -168,25 +199,35 @@ class CloudflareTunnelService:
             if not enabled:
                 return self.status_snapshot()
 
-            if mode == "named" and not token:
-                self._last_error = "Thiếu Cloudflare Tunnel Token cho chế độ Named Tunnel."
-                log.warning("Không thể khởi động Named Tunnel: %s", self._last_error)
-                return self.status_snapshot()
+            token = ""
+            if mode == "named":
+                if not raw_token:
+                    self._last_error = "Thiếu Cloudflare Tunnel Token cho chế độ Named Tunnel."
+                    log.warning("Không thể khởi động Named Tunnel: %s", self._last_error)
+                    return self.status_snapshot()
+                try:
+                    token = validate_cloudflare_tunnel_token(raw_token)
+                except ValueError as exc:
+                    self._last_error = str(exc)
+                    log.warning("Từ chối khởi động Named Tunnel do token không hợp lệ.")
+                    return self.status_snapshot()
 
             cmd = self.build_command(mode, token)
+            child_env = self.build_subprocess_env(mode, token)
             self._url_ready_event = asyncio.Event()
             try:
                 proc = await self._spawn(
                     *cmd,
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
+                    env=child_env,
                 )
             except FileNotFoundError:
                 self._last_error = f"Không tìm thấy binary '{self.binary_path}' trong container."
                 log.warning("Không khởi động được Cloudflare Tunnel: %s", self._last_error)
                 return self.status_snapshot()
             except Exception as exc:
-                self._last_error = f"{type(exc).__name__}: {exc}"[:240]
+                self._last_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=240)
                 log.warning("Lỗi khởi chạy tiến trình cloudflared: %s", self._last_error)
                 return self.status_snapshot()
 

@@ -98,7 +98,9 @@ class WriteBehindSyncCoordinator:
                         flushed_total,
                     )
             except Exception as exc:
-                self.last_flush_error = f"{type(exc).__name__}: {exc}"[:200]
+                from app.core.security import redact_secrets
+
+                self.last_flush_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200)
                 log.warning(
                     "Chưa đẩy được bộ đệm RAM lên MongoDB Atlas (còn %d mục, sẽ thử lại): %s",
                     self.pending_count,

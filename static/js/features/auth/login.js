@@ -5,6 +5,15 @@
 const loginForm = document.getElementById("login-form");
 const errorBox = document.getElementById("client-error");
 const submitBtn = document.getElementById("submit-btn");
+const loginAvatar = document.getElementById("login-bot-avatar");
+const loginAvatarFallback = document.getElementById("login-bot-avatar-fallback");
+
+if (loginAvatar && loginAvatarFallback) {
+  loginAvatar.addEventListener("error", () => {
+    loginAvatar.classList.add("hidden");
+    loginAvatarFallback.classList.remove("hidden");
+  });
+}
 
 if (loginForm) {
   loginForm.addEventListener("submit", async (event) => {

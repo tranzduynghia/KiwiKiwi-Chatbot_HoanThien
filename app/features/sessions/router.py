@@ -42,8 +42,8 @@ def create_sessions_router(
         username: str = Query(default="", max_length=64),
         server_role: str = Query(default="", max_length=80),
         role: Optional[str] = Query(default=None),
-        limit: int = Query(default=50, ge=1, le=300),
-        offset: int = Query(default=0, ge=0),
+        limit: int = Query(default=50, ge=1, le=100),
+        offset: int = Query(default=0, ge=0, le=1000),
         _user: dict[str, Any] = Depends(auth_deps.require_user),
     ):
         bot = get_bot()

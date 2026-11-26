@@ -10,7 +10,26 @@
 
 import { escapeHtml, showToast } from "./api.js";
 
-const SENSITIVE_KEY_TOKENS = ["password", "secret", "token", "api_key", "apikey", "uri"];
+const SENSITIVE_KEY_TOKENS = [
+  "password",
+  "secret",
+  "token",
+  "api_key",
+  "apikey",
+  "uri",
+  "salt",
+  "hash",
+  "signing_key",
+  "private_key",
+  "credential",
+];
+const SAFE_NON_SECRET_KEYS = new Set([
+  "has_cf_tunnel_token",
+  "cf_tunnel_has_token",
+  "outbound_proxy_configured",
+  "discord_oauth_enabled",
+]);
+const STATIC_SECRET_PLACEHOLDER = "••••••••••••";
 const LONG_TEXT_FIELD_KEYS = new Set(["system_prompt", "ocr_instruction"]);
 const MAX_PREVIEW_CHARS = 2500;
 
@@ -98,17 +117,18 @@ const DEFAULT_FIELD_UNITS = {
 };
 
 export function isSensitiveField(key) {
-  const lowered = String(key || "").toLowerCase();
+  const lowered = String(key || "").trim().toLowerCase();
+  if (!lowered) return false;
+  const leaf = lowered.split(".").pop();
+  if (SAFE_NON_SECRET_KEYS.has(leaf)) return false;
   return SENSITIVE_KEY_TOKENS.some((tok) => lowered.includes(tok));
 }
 
 export function maskSecretPreview(value) {
   if (value === null || value === undefined || value === "") return "(trống)";
   const text = String(value).trim();
-  if (!text) return "(trống)";
-  if (text.includes("••••") || text.startsWith("(")) return text;
-  if (text.length <= 4) return "•••••";
-  return `${text.slice(0, 4)}•••••`;
+  if (!text || text === "(trống)") return "(trống)";
+  return STATIC_SECRET_PLACEHOLDER;
 }
 
 function isPlainObject(val) {

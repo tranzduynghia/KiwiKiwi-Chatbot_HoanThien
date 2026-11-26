@@ -214,7 +214,9 @@ class MemoryWatchdog:
                 sync_error = f"Quá thời gian đồng bộ MongoDB Atlas ({self.sync_timeout:g}s)"
                 log.warning("MemoryWatchdog Bước 2 quá hạn %.1fs — tiếp tục dọn cache RAM để tránh OOM.", self.sync_timeout)
             except Exception as exc:
-                sync_error = f"{type(exc).__name__}: {exc}"[:200]
+                from app.core.security import redact_secrets
+
+                sync_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200)
                 log.warning("MemoryWatchdog Bước 2 lỗi đồng bộ MongoDB Atlas: %s", sync_error)
 
         # BƯỚC 3: Chỉ sau khi đồng bộ xong (hoặc timeout) mới xóa cache RAM không thiết yếu & ép GC

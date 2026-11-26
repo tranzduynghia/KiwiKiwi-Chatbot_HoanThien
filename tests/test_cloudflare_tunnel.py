@@ -83,10 +83,12 @@ def test_memory_watchdog_reads_cgroup_container_memory(tmp_path, monkeypatch):
 async def test_cloudflare_tunnel_service_named_quick_and_missing_binary():
     """Kiểm tra Named Tunnel CLI, Quick Tunnel bắt URL trycloudflare.com từ stderr, tắt an toàn và thiếu binary."""
     spawned_commands: list[tuple[str, ...]] = []
+    spawned_envs: list[dict[str, str]] = []
     created_procs: list[FakeSubprocess] = []
 
-    async def fake_spawn(*cmd, **_kwargs):
+    async def fake_spawn(*cmd, **kwargs):
         spawned_commands.append(cmd)
+        spawned_envs.append(dict(kwargs.get("env") or {}))
         stderr_lines = (
             [
                 b"INF Starting Quick Tunnel...\n",
@@ -106,7 +108,7 @@ async def test_cloudflare_tunnel_service_named_quick_and_missing_binary():
         quick_url_wait_seconds=1.0,
     )
 
-    # 1) Named Tunnel Mode
+    # 1) Named Tunnel Mode (token cấp qua biến môi trường TUNNEL_TOKEN, không lộ trên argv)
     named_status = await service.apply_config({
         "cf_tunnel_enabled": True,
         "cf_tunnel_mode": "named",
@@ -124,9 +126,9 @@ async def test_cloudflare_tunnel_service_named_quick_and_missing_binary():
         "--edge-ip-version",
         "auto",
         "run",
-        "--token",
-        "eyJ-test-token-123",
     )
+    assert "--token" not in spawned_commands[-1]
+    assert spawned_envs[-1]["TUNNEL_TOKEN"] == "eyJ-test-token-123"
 
     # 2) Hot-reload sang Quick Tunnel Mode -> tự tắt tiến trình cũ và bắt URL trycloudflare.com
     quick_status = await service.apply_config({
@@ -255,7 +257,8 @@ async def test_tunnel_api_hot_reload_token_masking_audit_and_inbound_lock(fake_d
         )
         assert named_res.status_code == 200
         named_json = named_res.json()
-        assert named_json["config"]["tunnel"]["cf_tunnel_token"] == ""
+        assert "cf_tunnel_token" not in named_json["config"]["tunnel"]
+        assert named_json["config"]["tunnel"]["has_cf_tunnel_token"] is True
         assert named_json["config"]["tunnel"]["cf_tunnel_has_token"] is True
         assert named_json["cloudflare_tunnel"]["running"] is True
         assert container.config_repo.tunnel_cfg()["cf_tunnel_token"] == secret_token

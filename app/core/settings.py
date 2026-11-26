@@ -42,7 +42,19 @@ DEFAULT_FALLBACK_MODELS = [
     "gemini-4-hydrogen",
 ]
 
-SENSITIVE_KEY_TOKENS = ("password", "secret", "token", "api_key", "apikey", "uri")
+SENSITIVE_KEY_TOKENS = (
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "uri",
+    "salt",
+    "hash",
+    "signing_key",
+    "private_key",
+    "credential",
+)
 
 
 def parse_csv_env(name: str, default: str = "") -> list[str]:

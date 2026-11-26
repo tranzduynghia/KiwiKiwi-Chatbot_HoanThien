@@ -4,9 +4,21 @@
  * - Nút "Chi tiết" ở cuối mỗi dòng mở Modal so sánh Giá trị gốc -> Giá trị mới tại chỗ
  */
 
-import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { apiRequest, escapeHtml, sanitizeHttpUrl, showToast } from "../../core/api.js";
 
-const SENSITIVE_FIELD_TOKENS = ["password", "secret", "token", "api_key", "apikey", "uri"];
+const SENSITIVE_FIELD_TOKENS = [
+  "password",
+  "secret",
+  "token",
+  "api_key",
+  "apikey",
+  "uri",
+  "salt",
+  "hash",
+  "signing_key",
+  "private_key",
+  "credential",
+];
 
 const SECTION_LABELS = {
   ask: "Cấu hình /ask",
@@ -41,7 +53,9 @@ function isSensitiveField(fieldName) {
 
 function formatDiffValue(value, fieldName) {
   if (isSensitiveField(fieldName)) {
-    return "•••••••• (đã ẩn)";
+    return value === "(trống)" || value === null || value === undefined || value === ""
+      ? "(trống)"
+      : "••••••••••••";
   }
   if (value === null || value === undefined || value === "") {
     return "(trống)";
@@ -61,10 +75,11 @@ function formatDiffValue(value, fieldName) {
 
 function renderActorAvatar(item, sizeClass = "w-8 h-8") {
   const displayName = item.actor_display_name || item.actor || "system";
-  if (item.actor_avatar_url) {
+  const safeAvatarUrl = sanitizeHttpUrl(item.actor_avatar_url);
+  if (safeAvatarUrl) {
     return `
       <img
-        src="${escapeHtml(item.actor_avatar_url)}"
+        src="${escapeHtml(safeAvatarUrl)}"
         alt="${escapeHtml(displayName)}"
         loading="lazy"
         class="${sizeClass} rounded-full object-cover border border-[#2a3140] shrink-0 bg-[#0a0d12]"

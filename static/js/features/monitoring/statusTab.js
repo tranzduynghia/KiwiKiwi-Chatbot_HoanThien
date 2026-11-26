@@ -3,7 +3,7 @@
  * Hỗ trợ cập nhật nền im lặng mỗi 2000ms (không nhấp nháy, không đặt lại thanh cuộn, không chạy lại hiệu ứng tải đầu).
  */
 
-import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { apiRequest, escapeHtml, sanitizeHttpUrl, showToast } from "../../core/api.js";
 import { showConfirmModal } from "../../core/confirmSave.js";
 
 function buildSmoothSplinePath(points) {
@@ -62,8 +62,8 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
           const heightPct = item.value > 0 ? Math.max(16, Math.round((item.value / roundedMax) * 100)) : 14;
           return `
             <div class="ox-bar-col">
-              <div data-bar-idx="${idx}" class="ox-bar-rect ${item.primary ? "is-primary" : ""}" style="height:${heightPct}%" title="${escapeHtml(item.label)}: ${item.value}">
-                <span data-bar-val="${idx}">${item.value}</span>
+              <div data-bar-idx="${idx}" class="ox-bar-rect ${item.primary ? "is-primary" : ""}" style="height:${heightPct}%" title="${escapeHtml(item.label)}: ${Number(item.value || 0)}">
+                <span data-bar-val="${idx}">${Number(item.value || 0)}</span>
               </div>
             </div>
           `;
@@ -129,7 +129,7 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
     const fallbackEl = document.getElementById(fallbackId);
     if (!imgEl || !fallbackEl) return;
 
-    const cleanUrl = String(url || "").trim();
+    const cleanUrl = sanitizeHttpUrl(url);
     if (!cleanUrl) {
       imgEl.classList.add("hidden");
       fallbackEl.classList.remove("hidden");
@@ -352,7 +352,7 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
         ? data.bot.guilds
             .map(
               (guild) =>
-                `<div class="py-1.5 flex justify-between"><span class="text-slate-200">${escapeHtml(guild.name)}</span><span class="text-[#8b95a7] font-mono">${guild.member_count} tv</span></div>`
+                `<div class="py-1.5 flex justify-between"><span class="text-slate-200">${escapeHtml(guild.name)}</span><span class="text-[#8b95a7] font-mono">${Number(guild.member_count || 0)} tv</span></div>`
             )
             .join("")
         : '<div class="py-2 text-[#5e6778]">Chưa tham gia server nào hoặc bot đang khởi động.</div>';

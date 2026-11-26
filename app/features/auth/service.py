@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import copy
 import re
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.errors import AlreadyExistsError
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password_async, verify_password_async
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.audit.service import AuditService
 from app.features.auth.repository import UserRepository
@@ -30,7 +31,7 @@ class AuthService:
         self._sync = sync_coordinator
 
     async def list_users(self) -> list[dict[str, Any]]:
-        """Trả về danh sách tài khoản Dashboard đã lược bỏ trường `password_hash`."""
+        """Trả về danh sách tài khoản Dashboard đã lược bỏ hoàn toàn `password_hash`, `salt` và `session_version`."""
         users_map = await self._users.refresh_all()
         output = []
         for uname in sorted(users_map.keys()):
@@ -69,7 +70,8 @@ class AuthService:
         now_iso = datetime.now(timezone.utc).isoformat()
         doc = {
             "username": uname,
-            "password_hash": hash_password(password),
+            "password_hash": await hash_password_async(password),
+            "session_version": secrets.token_hex(8),
             "role": role,
             "created_at": now_iso,
             "last_login_at": None,
@@ -104,7 +106,7 @@ class AuthService:
         actor_type: str = "dashboard",
         actor_meta: Optional[dict[str, Any]] = None,
     ) -> bool:
-        """Đổi mật khẩu tài khoản hiện có (mật khẩu luôn được băm scrypt, không ghi vào Audit Log)."""
+        """Đổi mật khẩu tài khoản hiện có (băm scrypt + xoay `session_version` thu hồi ngay phiên cũ)."""
         uname = username.strip().lower()
         if len(new_password) < 6:
             raise ValueError("Mật khẩu mới phải có ít nhất 6 ký tự.")
@@ -114,7 +116,8 @@ class AuthService:
             return False
 
         doc = copy.deepcopy(users_map[uname])
-        doc["password_hash"] = hash_password(new_password)
+        doc["password_hash"] = await hash_password_async(new_password)
+        doc["session_version"] = secrets.token_hex(8)
         self._users.stage_upsert(doc)
 
         if actor:
@@ -176,7 +179,7 @@ class AuthService:
         """Xác thực tên đăng nhập và mật khẩu, đồng thời cập nhật thời điểm đăng nhập gần nhất."""
         uname = username.strip().lower()
         doc = await self._users.find_by_username(uname)
-        if not doc or not verify_password(password, doc.get("password_hash", "")):
+        if not doc or not await verify_password_async(password, doc.get("password_hash", "")):
             return None
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -186,4 +189,5 @@ class AuthService:
             "username": uname,
             "role": role,
             "is_admin": role == "admin",
+            "session_version": str(doc.get("session_version") or ""),
         }

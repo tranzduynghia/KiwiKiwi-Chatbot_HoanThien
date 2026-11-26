@@ -47,11 +47,11 @@ def test_sanitize_long_audit_value():
 
 
 def test_mask_secret_preview_and_merge_client_changes():
-    """Kiểm tra che bí mật dạng tiền tố ngắn (`eyJh•••••`) và gộp `changes` từ Modal không làm lộ plaintext."""
+    """Kiểm tra che bí mật tuyệt đối không lộ tiền tố (`••••••••••••`) và gộp `changes` từ Modal an toàn."""
     assert mask_secret_preview("") == "(trống)"
-    assert mask_secret_preview("abc") == "•••••"
-    assert mask_secret_preview("eyJhIjoi1234567890") == "eyJh•••••"
-    assert mask_secret_preview("eyJh•••••") == "eyJh•••••"
+    assert mask_secret_preview("abc") == "••••••••••••"
+    assert mask_secret_preview("eyJhIjoi1234567890") == "••••••••••••"
+    assert mask_secret_preview("eyJh•••••") == "••••••••••••"
 
     server_changes = [{"field": "tunnel.cf_tunnel_enabled", "before": False, "after": True}]
     client_changes = {
@@ -63,5 +63,6 @@ def test_mask_secret_preview_and_merge_client_changes():
     token_entry = next(item for item in merged if item["field"] == "tunnel.cf_tunnel_token")
     assert token_entry["masked"] is True
     assert token_entry["before"] == "(trống)"
-    assert token_entry["after"] == "eyJh•••••"
+    assert token_entry["after"] == "••••••••••••"
+    assert "eyJh" not in str(merged)
     assert "SecretRawValue" not in str(merged)

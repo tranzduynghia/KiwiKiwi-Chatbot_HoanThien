@@ -5,6 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 
+from app.core.security import sanitize_config_for_response
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.config.service import ConfigService
 from app.features.models.cooldown import ModelCooldownTracker
@@ -51,7 +52,7 @@ def create_models_router(
         )
         return {
             "ok": True,
-            "config": updated,
+            "config": sanitize_config_for_response(updated),
             "models_runtime": await model_registry.build_snapshot(),
             "sync": sync_coordinator.sync_status(),
         }

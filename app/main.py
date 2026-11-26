@@ -139,7 +139,7 @@ def build_container(
     auth_service = AuthService(user_repo, permission_service, audit_service, sync_coordinator)
     oauth_service = DiscordOAuthService()
     token_signer = SessionTokenSigner(secret_key=settings.session_secret)
-    auth_deps = AuthDependencies(signer=token_signer, permission_service=permission_service)
+    auth_deps = AuthDependencies(signer=token_signer, permission_service=permission_service, user_repo=user_repo)
 
     # Điều phối concurrency động theo cấu hình `ask.max_concurrent`
     gemini_semaphore = DynamicSemaphore(lambda: config_repo.ask_cfg().get("max_concurrent", 2))

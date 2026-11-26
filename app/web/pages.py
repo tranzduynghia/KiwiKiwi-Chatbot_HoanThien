@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from app.core.security import sanitize_https_url
 from app.core.settings import DEFAULT_OCR_INSTRUCTION, DEFAULT_SYSTEM_PROMPT
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.auth.dependencies import AuthDependencies
@@ -28,7 +29,7 @@ def _extract_bot_branding(bot: Any) -> tuple[str, str]:
     if avatar_asset is not None:
         with_size = getattr(avatar_asset, "with_size", None)
         sized = with_size(128) if callable(with_size) else avatar_asset
-        avatar_url = str(getattr(sized, "url", "") or getattr(avatar_asset, "url", "") or "")
+        avatar_url = sanitize_https_url(str(getattr(sized, "url", "") or getattr(avatar_asset, "url", "") or ""))
     display_name = str(
         getattr(bot_user, "display_name", "")
         or getattr(bot_user, "name", "")
@@ -47,8 +48,16 @@ async def _resolve_bot_branding(
         return avatar_url, display_name
     if usage_stats is not None:
         cached_url, cached_name = await usage_stats.get_cached_bot_branding()
-        return cached_url or avatar_url, cached_name or display_name
+        return sanitize_https_url(cached_url) or avatar_url, cached_name or display_name
     return avatar_url, display_name
+
+
+def _sanitize_login_error(error: Optional[str]) -> Optional[str]:
+    """Chuẩn hóa và giới hạn độ dài thông báo lỗi trên `/login` để tránh lợi dụng chuỗi dài gây hiểu lầm."""
+    if not error:
+        return None
+    cleaned = " ".join(str(error).split()).strip()
+    return cleaned[:200] if cleaned else None
 
 
 def _render_template(templates: Jinja2Templates, request: Request, name: str, context: dict[str, Any]):
@@ -92,7 +101,7 @@ def create_pages_router(
             request,
             "login.html",
             {
-                "error": error,
+                "error": _sanitize_login_error(error),
                 "discord_oauth_enabled": oauth_service.is_enabled(request),
                 "db_connected": sync_coordinator.connected,
                 "bot_avatar_url": bot_avatar_url,
@@ -110,12 +119,14 @@ def create_pages_router(
             get_bot() if callable(get_bot) else None,
             usage_stats,
         )
+        safe_user = dict(user)
+        safe_user["avatar_url"] = sanitize_https_url(str(user.get("avatar_url") or ""))
         return _render_template(
             templates,
             request,
             "dashboard.html",
             {
-                "user": user,
+                "user": safe_user,
                 "default_system_prompt": DEFAULT_SYSTEM_PROMPT,
                 "default_ocr_instruction": DEFAULT_OCR_INSTRUCTION,
                 "bot_avatar_url": bot_avatar_url,

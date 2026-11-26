@@ -8,7 +8,7 @@ from typing import Any, Awaitable, Callable, Optional
 
 from app.core.sync import WriteBehindSyncCoordinator
 from app.core.utils import deep_merge
-from app.features.audit.diff import compute_diff, merge_client_changes
+from app.features.audit.diff import compute_diff, is_sensitive_field, mask_secret_preview, merge_client_changes
 from app.features.audit.service import AuditService
 from app.features.config.repository import ConfigRepository
 
@@ -20,6 +20,34 @@ TUNNEL_LEGACY_TOP_LEVEL_KEYS = (
     "cf_tunnel_token",
     "tunnel_only_inbound",
 )
+
+
+def _compute_masked_sensitive_diffs(
+    old_obj: Any,
+    new_obj: Any,
+    prefix: str = "",
+) -> list[dict[str, Any]]:
+    """Phát hiện thay đổi trên trường bí mật phía server và chỉ ghi cờ giữ chỗ tĩnh `••••••••••••`."""
+    diffs: list[dict[str, Any]] = []
+    if isinstance(old_obj, dict) and isinstance(new_obj, dict):
+        for key in sorted(set(old_obj.keys()) | set(new_obj.keys())):
+            if not prefix and key in {"_id", "updated_at", "updated_by"}:
+                continue
+            path = f"{prefix}.{key}" if prefix else str(key)
+            old_val = old_obj.get(key)
+            new_val = new_obj.get(key)
+            if old_val == new_val:
+                continue
+            if is_sensitive_field(path):
+                diffs.append({
+                    "field": path,
+                    "before": mask_secret_preview(old_val),
+                    "after": mask_secret_preview(new_val),
+                    "masked": True,
+                })
+            elif isinstance(old_val, dict) and isinstance(new_val, dict):
+                diffs.extend(_compute_masked_sensitive_diffs(old_val, new_val, path))
+    return diffs
 
 
 class ConfigService:
@@ -79,7 +107,8 @@ class ConfigService:
             for stray_key in TUNNEL_LEGACY_TOP_LEVEL_KEYS:
                 merged.pop(stray_key, None)
 
-        changes = merge_client_changes(compute_diff(current, merged), client_changes)
+        server_changes = compute_diff(current, merged) + _compute_masked_sensitive_diffs(current, merged)
+        changes = merge_client_changes(server_changes, client_changes)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         merged["_id"] = "global"

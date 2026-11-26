@@ -23,7 +23,6 @@
           src="{{ bot_avatar_url }}"
           alt="{{ bot_display_name or 'KiwiKiwi' }}"
           class="w-14 h-14 rounded-full object-cover border border-[#2a3140] bg-[#181d27] shadow-lg"
-          onerror="this.classList.add('hidden'); const fb = document.getElementById('login-bot-avatar-fallback'); if (fb) fb.classList.remove('hidden');"
         />
         {% endif %}
         <div

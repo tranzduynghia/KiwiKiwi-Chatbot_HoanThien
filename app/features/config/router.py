@@ -1,11 +1,11 @@
 """Router FastAPI quản lý API đọc/cập nhật cấu hình /ask, phiên chat, System Instruction, Bot Presence và Cloudflare Tunnel."""
 from __future__ import annotations
 
-import copy
 from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.security import sanitize_config_for_response
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.config.schemas import (
     AskConfigPayload,
@@ -22,15 +22,8 @@ from app.features.config.validators import (
 
 
 def _mask_config_secrets(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Ẩn giá trị nguyên bản của `cf_tunnel_token` trước khi gửi JSON về trình duyệt, thay bằng cờ `cf_tunnel_has_token`."""
-    safe = copy.deepcopy(cfg)
-    root_token = str(safe.pop("cf_tunnel_token", "") or "").strip()
-    tunnel = safe.get("tunnel")
-    if isinstance(tunnel, dict):
-        has_token = bool(str(tunnel.get("cf_tunnel_token") or "").strip() or root_token)
-        tunnel["cf_tunnel_token"] = ""
-        tunnel["cf_tunnel_has_token"] = has_token
-    return safe
+    """Loại bỏ hoàn toàn `cf_tunnel_token` và mọi trường bí mật/hash trước khi gửi JSON về trình duyệt, chỉ giữ cờ boolean."""
+    return sanitize_config_for_response(cfg)
 
 
 def create_config_router(

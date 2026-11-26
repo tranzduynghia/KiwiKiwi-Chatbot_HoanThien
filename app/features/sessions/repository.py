@@ -111,8 +111,10 @@ class SessionRepository:
             self.last_error = None
             return result
         except Exception as exc:
+            from app.core.security import redact_secrets
+
             self.ok = False
-            self.last_error = f"{type(exc).__name__}: {exc}"[:200]
+            self.last_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200)
             log.warning("MongoDB lỗi: %s", self.last_error)
             return default
 
@@ -403,17 +405,17 @@ class SessionRepository:
         if self.archives_col is None:
             return {"items": [], "total": 0, "has_more": False}
 
-        capped_limit = max(1, min(300, int(limit)))
-        safe_offset = max(0, int(offset))
-        clean_query = (query or "").strip()
-        clean_uid = (user_id or "").strip()
-        clean_username = (username or "").strip().lower()
-        clean_server_role = (server_role or "").strip().lower()
-        clean_role = (role or "").strip().lower()
+        capped_limit = max(1, min(100, int(limit)))
+        safe_offset = max(0, min(1000, int(offset)))
+        clean_query = (query if isinstance(query, str) else "").strip()[:200]
+        clean_uid = (user_id if isinstance(user_id, str) else "").strip()[:40]
+        clean_username = (username if isinstance(username, str) else "").strip().lower()[:64]
+        clean_server_role = (server_role if isinstance(server_role, str) else "").strip().lower()[:80]
+        clean_role = (role if isinstance(role, str) else "").strip().lower()
         if clean_role not in ("user", "model"):
             clean_role = ""
 
-        # Xây dựng bộ lọc MongoDB an toàn (chỉ lọc trước theo user_id và từ khóa nội dung/ID)
+        # Xây dựng bộ lọc MongoDB an toàn (re.escape chống ReDoS & chặn hoàn toàn toán tử NoSQL)
         mongo_filter: dict[str, Any] = {}
         if clean_uid:
             mongo_filter["user_id_str"] = {"$regex": re.escape(clean_uid), "$options": "i"}
@@ -428,9 +430,11 @@ class SessionRepository:
             ]
 
         docs = await self._run(
-            lambda: self.archives_col.find(mongo_filter).sort("last_active", -1).to_list(300),
+            lambda: self.archives_col.find(mongo_filter).sort("last_active", -1).to_list(200),
             [],
         )
+
+        from app.core.security import sanitize_https_url
 
         query_lower = clean_query.lower()
         seen_session_ids: set[str] = set()
@@ -448,7 +452,7 @@ class SessionRepository:
 
             doc_username = str(doc.get("username") or "")
             doc_display = str(doc.get("display_name") or "")
-            doc_avatar = str(doc.get("avatar_url") or "")
+            doc_avatar = sanitize_https_url(str(doc.get("avatar_url") or ""))
             doc_roles = doc.get("server_roles") if isinstance(doc.get("server_roles"), list) else []
 
             # Bổ sung hồ sơ & vai trò từ Discord client trực tiếp cho các bản ghi cũ chưa lưu metadata
@@ -457,7 +461,7 @@ class SessionRepository:
                 if resolved:
                     doc_username = doc_username or str(resolved.get("username") or "")
                     doc_display = doc_display or str(resolved.get("display_name") or "")
-                    doc_avatar = doc_avatar or str(resolved.get("avatar_url") or "")
+                    doc_avatar = doc_avatar or sanitize_https_url(str(resolved.get("avatar_url") or ""))
                     if not doc_roles and resolved.get("server_roles"):
                         doc_roles = resolved["server_roles"]
 
@@ -558,20 +562,22 @@ class SessionRepository:
         user_resolver: Optional[Any] = None,
     ) -> Optional[dict[str, Any]]:
         """Lấy chi tiết toàn bộ hội thoại và thông tin người dùng của một phiên chat theo `chat_id`."""
-        if self.archives_col is None:
+        if self.archives_col is None or not isinstance(chat_id, str):
             return None
-        clean_id = (chat_id or "").strip()
-        if not clean_id:
+        clean_id = chat_id.strip()
+        if not clean_id or len(clean_id) > 128 or "$" in clean_id or "\x00" in clean_id:
             return None
 
         doc = await self._run(lambda: self.archives_col.find_one({"_id": clean_id}))
         if not doc:
             return None
 
+        from app.core.security import sanitize_https_url
+
         uid_str = str(doc.get("user_id_str") or doc.get("user_id") or "")
         doc_username = str(doc.get("username") or "")
         doc_display = str(doc.get("display_name") or "")
-        doc_avatar = str(doc.get("avatar_url") or "")
+        doc_avatar = sanitize_https_url(str(doc.get("avatar_url") or ""))
         doc_roles = doc.get("server_roles") if isinstance(doc.get("server_roles"), list) else []
 
         if user_resolver is not None and uid_str and (not doc_username or not doc_avatar or not doc_roles):
@@ -579,7 +585,7 @@ class SessionRepository:
             if resolved:
                 doc_username = doc_username or str(resolved.get("username") or "")
                 doc_display = doc_display or str(resolved.get("display_name") or "")
-                doc_avatar = doc_avatar or str(resolved.get("avatar_url") or "")
+                doc_avatar = doc_avatar or sanitize_https_url(str(resolved.get("avatar_url") or ""))
                 if not doc_roles and resolved.get("server_roles"):
                     doc_roles = resolved["server_roles"]
 

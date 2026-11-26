@@ -4,18 +4,23 @@ from __future__ import annotations
 import copy
 import logging
 import math
+import re
 from datetime import date, datetime
 from typing import Any, Optional
+
+from app.core.security import is_sensitive_key, sanitize_https_url
+from app.features.audit.diff import is_sensitive_field, mask_secret_preview
 
 log = logging.getLogger("gemini-bot.audit")
 
 MAX_PENDING_AUDITS = 500
 DEFAULT_AUDIT_PAGE_LIMIT = 5
 MAX_AUDIT_PAGE_LIMIT = 20
+SAFE_SECTION_RE = re.compile(r"^[a-z0-9_-]{1,40}$")
 
 
-def _serialize_json_value(value: Any) -> Any:
-    """Chuyển đệ quy các kiểu dữ liệu BSON/Python (ObjectId, datetime, bytes...) sang JSON an toàn cho FastAPI."""
+def _serialize_json_value(value: Any, *, key_path: str = "") -> Any:
+    """Chuyển đệ quy các kiểu dữ liệu BSON/Python sang JSON an toàn và lược bỏ mọi khóa bí mật/hash."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if isinstance(value, (datetime, date)):
@@ -23,15 +28,22 @@ def _serialize_json_value(value: Any) -> Any:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     if isinstance(value, dict):
-        return {str(k): _serialize_json_value(v) for k, v in value.items()}
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            k_str = str(k)
+            next_path = f"{key_path}.{k_str}" if key_path else k_str
+            if is_sensitive_key(next_path):
+                continue
+            out[k_str] = _serialize_json_value(v, key_path=next_path)
+        return out
     if isinstance(value, (list, tuple, set)):
-        return [_serialize_json_value(v) for v in value]
+        return [_serialize_json_value(v, key_path=key_path) for v in value]
     # Hỗ trợ bson.ObjectId, Decimal128 và các kiểu tùy chỉnh khác bằng chuỗi
     return str(value)
 
 
 def _serialize_audit_doc(doc: dict[str, Any]) -> dict[str, Any]:
-    """Chuẩn hóa một bản ghi Audit Log từ MongoDB: `_id` -> chuỗi, `datetime` -> ISO và bảo đảm có trường `at`."""
+    """Chuẩn hóa bản ghi Audit Log từ MongoDB và ép che tuyệt đối mọi bí mật/tiền tố cũ ở thời điểm đọc."""
     clean = _serialize_json_value(doc)
     if "_id" in doc and doc["_id"] is not None:
         clean["_id"] = str(doc["_id"])
@@ -39,14 +51,37 @@ def _serialize_audit_doc(doc: dict[str, Any]) -> dict[str, Any]:
         fallback_ts = clean.get("timestamp") or clean.get("created_at") or ""
         if fallback_ts:
             clean["at"] = str(fallback_ts)
+    if "actor_avatar_url" in clean:
+        clean["actor_avatar_url"] = sanitize_https_url(str(clean.get("actor_avatar_url") or ""))
+    # Phòng thủ chiều sâu: đảm bảo kể cả bản ghi lịch sử cũ có chứa tiền tố token cũng bị che thành ••••••••••••
+    raw_changes = clean.get("changes")
+    if isinstance(raw_changes, list):
+        scrubbed_changes = []
+        for change in raw_changes:
+            if not isinstance(change, dict):
+                continue
+            field_name = str(change.get("field") or "")
+            if is_sensitive_field(field_name):
+                scrubbed_changes.append({
+                    "field": field_name,
+                    "before": mask_secret_preview(change.get("before")),
+                    "after": mask_secret_preview(change.get("after")),
+                })
+            else:
+                scrubbed_changes.append(change)
+        clean["changes"] = scrubbed_changes
     return clean
 
 
 def _normalize_section_filter(section: Optional[str]) -> str:
-    """Chuẩn hóa bộ lọc chuyên mục (coi rỗng hoặc `all` là không lọc)."""
-    sec = (section or "").strip()
-    if sec.lower() in ("", "all", "tất cả"):
+    """Chuẩn hóa và xác thực chặt bộ lọc chuyên mục (chống NoSQL injection; rỗng/`all` là không lọc)."""
+    if not isinstance(section, str):
         return ""
+    sec = section.strip().lower()
+    if sec in ("", "all", "tất cả"):
+        return ""
+    if not SAFE_SECTION_RE.fullmatch(sec):
+        return "__invalid_section__"
     return sec
 
 

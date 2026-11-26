@@ -1,6 +1,7 @@
 """Router FastAPI cho xác thực kép (Password + Discord OAuth2) và quản lý tài khoản Dashboard."""
 from __future__ import annotations
 
+import re
 import secrets
 import time
 from typing import Any, Optional
@@ -9,6 +10,7 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from app.core.security import SlidingWindowRateLimiter, is_trusted_proxy_ip
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.auth.dependencies import (
     AuthDependencies,
@@ -20,10 +22,40 @@ from app.features.auth.schemas import ChangePasswordPayload, CreateUserPayload, 
 from app.features.auth.service import AuthService
 from app.features.permissions.service import PermissionService
 
+DISCORD_AVATAR_HASH_RE = re.compile(r"^[A-Za-z0-9_]{1,64}$")
 
-def _login_error_redirect(message: str) -> RedirectResponse:
-    """Chuyển hướng về trang đăng nhập kèm thông báo lỗi trên query string."""
-    return RedirectResponse(url="/login?" + urlencode({"error": message}), status_code=302)
+
+def _extract_client_ip(request: Request) -> str:
+    """Trích xuất IP client an toàn (chỉ tin `CF-Connecting-IP`/`X-Forwarded-For` khi đến từ reverse proxy tin cậy)."""
+    peer_host = request.client.host if request.client else "unknown"
+    if is_trusted_proxy_ip(peer_host):
+        cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+        if cf_ip:
+            return cf_ip[:64]
+        xff = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if xff:
+            return xff[:64]
+    return str(peer_host)[:64]
+
+
+def _login_error_redirect(
+    message: str,
+    *,
+    clear_oauth_state: bool = False,
+    secure: bool = False,
+) -> RedirectResponse:
+    """Chuyển hướng về trang đăng nhập kèm thông báo lỗi rút gọn trên query string (và dọn cookie OAuth state nếu cần)."""
+    clean_msg = " ".join(str(message or "").split()).strip()[:200]
+    response = RedirectResponse(url="/login?" + urlencode({"error": clean_msg}), status_code=302)
+    if clear_oauth_state:
+        response.delete_cookie(
+            key=OAUTH_STATE_COOKIE_NAME,
+            path="/",
+            httponly=True,
+            samesite="lax",
+            secure=secure,
+        )
+    return response
 
 
 def create_auth_router(
@@ -35,25 +67,46 @@ def create_auth_router(
 ) -> APIRouter:
     """Tạo router cho `/auth/*`, `/api/me`, và `/api/permissions/users*`."""
     router = APIRouter(tags=["auth"])
+    login_ip_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=60.0, max_keys=2048)
+    login_user_limiter = SlidingWindowRateLimiter(max_attempts=5, window_seconds=60.0, max_keys=1024)
 
     # ------------------------------------------------------------------
     # Xác thực kép: Username/Password + Discord OAuth2
     # ------------------------------------------------------------------
     @router.post("/auth/login")
     async def auth_login(payload: LoginPayload, request: Request):
+        client_ip = _extract_client_ip(request)
+        uname_key = payload.username.strip().lower()
+
+        ip_ok, ip_retry = login_ip_limiter.check(client_ip)
+        user_ok, user_retry = login_user_limiter.check(uname_key)
+        if not ip_ok or not user_ok:
+            retry_after = max(ip_retry, user_retry, 1)
+            return JSONResponse(
+                {"detail": f"Quá nhiều lần đăng nhập sai. Vui lòng thử lại sau {retry_after} giây."},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+
         user = await auth_service.authenticate_password(payload.username, payload.password)
         if not user:
+            login_ip_limiter.record_failure(client_ip)
+            login_user_limiter.record_failure(uname_key)
             raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu.")
-        session_data = {
+
+        login_user_limiter.reset(uname_key)
+        cookie_session_data = {
             "auth_type": "password",
             "username": user["username"],
             "display_name": user["username"],
             "role": user["role"],
             "is_admin": user["is_admin"],
+            "session_version": user.get("session_version", ""),
             "login_at": int(time.time()),
         }
-        response = JSONResponse({"ok": True, "user": session_data})
-        auth_deps.set_session_cookie(response, request, session_data)
+        public_user = auth_deps.public_user_payload(cookie_session_data)
+        response = JSONResponse({"ok": True, "user": public_user})
+        auth_deps.set_session_cookie(response, request, cookie_session_data)
         return response
 
     @router.get("/auth/discord")
@@ -69,6 +122,7 @@ def create_auth_router(
             key=OAUTH_STATE_COOKIE_NAME,
             value=auth_deps.signer.encode({"state": state}),
             max_age=OAUTH_STATE_MAX_AGE,
+            path="/",
             httponly=True,
             samesite="lax",
             secure=auth_deps.is_secure_request(request),
@@ -82,18 +136,32 @@ def create_auth_router(
         state: Optional[str] = None,
         error: Optional[str] = None,
     ):
+        is_secure = auth_deps.is_secure_request(request)
         if error:
-            return _login_error_redirect(f"Đăng nhập Discord bị hủy: {error}")
+            safe_err = re.sub(r"[^A-Za-z0-9_ -]", "", str(error))[:64] or "access_denied"
+            return _login_error_redirect(
+                f"Đăng nhập Discord bị hủy: {safe_err}",
+                clear_oauth_state=True,
+                secure=is_secure,
+            )
         if not code or not state:
-            return _login_error_redirect("Thiếu tham số xác thực từ Discord OAuth2.")
+            return _login_error_redirect(
+                "Thiếu tham số xác thực từ Discord OAuth2.",
+                clear_oauth_state=True,
+                secure=is_secure,
+            )
 
         saved_payload = auth_deps.signer.decode(
             request.cookies.get(OAUTH_STATE_COOKIE_NAME),
             max_age=OAUTH_STATE_MAX_AGE,
         )
         saved_state = saved_payload.get("state") if saved_payload else None
-        if not saved_state or not secrets.compare_digest(saved_state, state):
-            return _login_error_redirect("Phiên OAuth2 không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.")
+        if not saved_state or not secrets.compare_digest(str(saved_state), str(state)):
+            return _login_error_redirect(
+                "Phiên OAuth2 không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.",
+                clear_oauth_state=True,
+                secure=is_secure,
+            )
 
         client_id, client_secret, redirect_uri = oauth_service.resolve_config(request)
         try:
@@ -104,36 +172,55 @@ def create_auth_router(
                 redirect_uri=redirect_uri,
             )
         except DiscordOAuthError as exc:
-            return _login_error_redirect(str(exc))
+            return _login_error_redirect(str(exc), clear_oauth_state=True, secure=is_secure)
 
-        uid = str(discord_user.get("id", ""))
+        uid = str(discord_user.get("id", "")).strip()
+        if not uid.isdigit():
+            return _login_error_redirect(
+                "Không xác thực được Discord User ID hợp lệ.",
+                clear_oauth_state=True,
+                secure=is_secure,
+            )
+
         allowed, is_admin = await permission_service.can_access_dashboard(uid)
         if not allowed:
             return _login_error_redirect(
-                f"Discord ID {uid} không nằm trong danh sách được phép truy cập Dashboard."
+                f"Discord ID {uid} không nằm trong danh sách được phép truy cập Dashboard.",
+                clear_oauth_state=True,
+                secure=is_secure,
             )
 
-        avatar_hash = discord_user.get("avatar")
-        avatar_url = f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.png?size=64" if avatar_hash else ""
+        raw_avatar = str(discord_user.get("avatar") or "").strip()
+        avatar_url = (
+            f"https://cdn.discordapp.com/avatars/{uid}/{raw_avatar}.png?size=64"
+            if raw_avatar and DISCORD_AVATAR_HASH_RE.fullmatch(raw_avatar)
+            else ""
+        )
         session_data = {
             "auth_type": "discord",
             "discord_id": uid,
-            "username": discord_user.get("username", uid),
-            "display_name": discord_user.get("global_name") or discord_user.get("username") or uid,
+            "username": str(discord_user.get("username") or uid)[:64],
+            "display_name": str(discord_user.get("global_name") or discord_user.get("username") or uid)[:64],
             "avatar_url": avatar_url,
             "role": "admin" if is_admin else "operator",
             "is_admin": is_admin,
             "login_at": int(time.time()),
         }
         response = RedirectResponse(url="/dashboard", status_code=302)
-        response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
+        response.delete_cookie(
+            key=OAUTH_STATE_COOKIE_NAME,
+            path="/",
+            httponly=True,
+            samesite="lax",
+            secure=is_secure,
+        )
         auth_deps.set_session_cookie(response, request, session_data)
         return response
 
-    @router.api_route("/auth/logout", methods=["GET", "POST"])
-    async def auth_logout():
-        response = RedirectResponse(url="/login", status_code=302)
-        auth_deps.clear_session_cookie(response)
+    @router.post("/auth/logout")
+    async def auth_logout(request: Request):
+        response = RedirectResponse(url="/login", status_code=303)
+        auth_deps.clear_session_cookie(response, request)
         return response
 
     # ------------------------------------------------------------------
@@ -141,7 +228,7 @@ def create_auth_router(
     # ------------------------------------------------------------------
     @router.get("/api/me")
     async def api_me(user: dict[str, Any] = Depends(auth_deps.require_user)):
-        return {"user": user}
+        return {"user": auth_deps.public_user_payload(user)}
 
     @router.get("/api/permissions/users")
     async def api_list_users(user: dict[str, Any] = Depends(auth_deps.require_user)):

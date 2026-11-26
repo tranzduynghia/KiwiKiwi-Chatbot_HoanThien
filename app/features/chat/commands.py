@@ -310,7 +310,9 @@ def register_chat_commands(
             usage_stats.record(model_id, True, features)
 
         except Exception as exc:
-            usage_stats.record(model_id, False, features, f"{type(exc).__name__}: {exc}"[:200])
+            from app.core.security import redact_secrets
+
+            usage_stats.record(model_id, False, features, redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200))
             if not isinstance(exc, UserError):
                 log.exception("Lỗi /ask")
             await interaction.followup.send(explain_error(exc), allowed_mentions=NO_MENTIONS)

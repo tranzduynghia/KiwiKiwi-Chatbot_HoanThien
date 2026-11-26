@@ -61,7 +61,9 @@ class ModelRegistry:
                 self.last_error = None
                 log.info("Đã tải %d model chat", len(discovered))
         except Exception as exc:
-            self.last_error = f"{type(exc).__name__}: {exc}"[:200]
+            from app.core.security import redact_secrets
+
+            self.last_error = redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200)
             log.warning("Không tải được danh sách model: %s", self.last_error)
 
     def badge_for(self, model_id: str) -> str:

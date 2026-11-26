@@ -4,12 +4,23 @@ from __future__ import annotations
 import copy
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from app.core.security import hash_password
+from app.core.security import hash_password, redact_secrets
 
 log = logging.getLogger("gemini-bot.auth")
+
+
+def _safe_username_key(username: Any) -> str:
+    """Chuẩn hóa username dạng chuỗi an toàn, chặn khóa bắt đầu bằng `$` hoặc chứa ký tự null."""
+    if not isinstance(username, str):
+        return ""
+    cleaned = username.strip().lower()
+    if not cleaned or len(cleaned) > 64 or "$" in cleaned or "\x00" in cleaned:
+        return ""
+    return cleaned
 
 
 class UserRepository:
@@ -27,12 +38,13 @@ class UserRepository:
 
     def _seed_from_env(self) -> None:
         """Nạp sẵn tài khoản admin đầu tiên vào RAM từ `.env` để vẫn đăng nhập được khi Atlas tạm gián đoạn."""
-        init_user = (os.getenv("INITIAL_ADMIN_USERNAME") or "").strip().lower()
+        init_user = _safe_username_key(os.getenv("INITIAL_ADMIN_USERNAME") or "")
         init_pass = (os.getenv("INITIAL_ADMIN_PASSWORD") or "").strip()
         if init_user and init_pass:
             self._cache[init_user] = {
                 "username": init_user,
                 "password_hash": hash_password(init_pass),
+                "session_version": secrets.token_hex(8),
                 "role": "admin",
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "last_login_at": None,
@@ -49,21 +61,22 @@ class UserRepository:
         return len(self._pending)
 
     async def attach_db(self, db: Any) -> None:
-        """Gắn collection `dashboard_users`, tạo unique index và khởi tạo admin đầu tiên nếu còn trống."""
+        """Gắn collection `dashboard_users`, tạo unique index và đồng bộ cache đúng theo nguồn MongoDB."""
         self.collection = db["dashboard_users"]
         try:
             await self.collection.create_index("username", unique=True)
         except Exception as exc:
-            log.warning("Không tạo được index cho dashboard_users: %s", exc)
+            log.warning("Không tạo được index cho dashboard_users: %s", redact_secrets(str(exc)))
 
         try:
-            init_user = (os.getenv("INITIAL_ADMIN_USERNAME") or "").strip().lower()
+            init_user = _safe_username_key(os.getenv("INITIAL_ADMIN_USERNAME") or "")
             init_pass = (os.getenv("INITIAL_ADMIN_PASSWORD") or "").strip()
             user_count = await self.collection.count_documents({})
             if user_count == 0 and init_user and init_pass:
                 doc = self._cache.get(init_user) or {
                     "username": init_user,
                     "password_hash": hash_password(init_pass),
+                    "session_version": secrets.token_hex(8),
                     "role": "admin",
                     "created_at": datetime.now(timezone.utc).isoformat(),
                     "last_login_at": None,
@@ -73,13 +86,21 @@ class UserRepository:
                     await self._on_initial_admin_created(init_user)
                 log.info("Đã tự động tạo tài khoản admin đầu tiên `%s` trên MongoDB Atlas.", init_user)
 
+            # Thay thế cache theo dữ liệu MongoDB thực tế (giữ lại thao tác đang chờ đồng bộ) để loại bỏ tài khoản đã xóa
             db_users = await self.collection.find({}).to_list(200)
+            merged: dict[str, dict[str, Any]] = {}
             for user_doc in db_users:
-                uname = user_doc.get("username")
-                if uname and uname not in self._pending:
-                    self._cache[uname] = user_doc
+                uname = _safe_username_key(user_doc.get("username"))
+                if uname:
+                    merged[uname] = user_doc
+            for uname, entry in self._pending.items():
+                if entry.get("op") == "delete":
+                    merged.pop(uname, None)
+                elif entry.get("op") == "upsert":
+                    merged[uname] = copy.deepcopy(entry["doc"])
+            self._cache = merged
         except Exception as exc:
-            log.warning("Lỗi khởi tạo dữ liệu dashboard_users trên MongoDB: %s", exc)
+            log.warning("Lỗi khởi tạo dữ liệu dashboard_users trên MongoDB: %s", redact_secrets(str(exc)))
 
     async def flush_pending(self) -> int:
         """Đẩy các thao tác tạo/đổi mật khẩu/xóa tài khoản lên MongoDB Atlas rồi giải phóng hàng đợi."""
@@ -112,18 +133,21 @@ class UserRepository:
                         merged[uname] = copy.deepcopy(entry["doc"])
                 self._cache = merged
             except Exception as exc:
-                log.warning("Không đọc được dashboard_users từ MongoDB (dùng cache): %s", exc)
+                log.warning("Không đọc được dashboard_users từ MongoDB (dùng cache): %s", redact_secrets(str(exc)))
         return copy.deepcopy(self._cache)
 
     async def find_by_username(self, username: str) -> Optional[dict[str, Any]]:
         """Tìm tài khoản theo tên đăng nhập (ưu tiên RAM nếu có thay đổi chờ đồng bộ)."""
-        uname = username.strip().lower()
+        uname = _safe_username_key(username)
+        if not uname:
+            return None
         if self.connected and uname not in self._pending:
             try:
                 doc = await self.collection.find_one({"username": uname})
                 if doc:
                     self._cache[uname] = doc
                     return copy.deepcopy(doc)
+                self._cache.pop(uname, None)
                 return None
             except Exception:
                 return copy.deepcopy(self._cache.get(uname))
@@ -132,7 +156,9 @@ class UserRepository:
 
     async def record_last_login(self, username: str, timestamp_iso: str) -> None:
         """Cập nhật thời điểm đăng nhập gần nhất trên cache và MongoDB (nếu đang kết nối)."""
-        uname = username.strip().lower()
+        uname = _safe_username_key(username)
+        if not uname:
+            return
         if uname in self._cache:
             self._cache[uname]["last_login_at"] = timestamp_iso
         if self.connected:
@@ -149,6 +175,8 @@ class UserRepository:
 
     def stage_delete(self, username: str) -> None:
         """Xóa tài khoản khỏi RAM cache và xếp lệnh xóa vào hàng đợi đồng bộ Atlas."""
-        uname = username.strip().lower()
+        uname = _safe_username_key(username)
+        if not uname:
+            return
         self._cache.pop(uname, None)
         self._pending[uname] = {"op": "delete"}

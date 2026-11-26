@@ -1,15 +1,18 @@
-"""Tiện ích so sánh khác biệt (diff) và lọc dữ liệu nhạy cảm trước khi lưu Audit Log."""
+"""Tiện ích so sánh khác biệt (diff) và che tuyệt đối dữ liệu nhạy cảm (Zero-Secret, Zero-Prefix) cho Audit Log."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from app.core.settings import SENSITIVE_KEY_TOKENS
+from app.core.security import STATIC_SECRET_PLACEHOLDER, is_sensitive_key
+
+SAFE_AUDIT_FIELD_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+MAX_CLIENT_DIFF_ENTRIES = 50
 
 
 def is_sensitive_field(field_path: str) -> bool:
-    """Kiểm tra tên trường có chứa từ khóa nhạy cảm (mật khẩu, token, secret...) hay không."""
-    lowered = field_path.lower()
-    return any(token in lowered for token in SENSITIVE_KEY_TOKENS)
+    """Kiểm tra tên trường có chứa từ khóa nhạy cảm hoặc chuỗi băm xác thực hay không."""
+    return is_sensitive_key(field_path)
 
 
 def sanitize_audit_value(value: Any) -> Any:
@@ -53,32 +56,36 @@ def compute_diff(old_obj: Any, new_obj: Any, prefix: str = "") -> list[dict[str,
 
 
 def mask_secret_preview(value: Any) -> str:
-    """Che giá trị nhạy cảm dạng tiền tố ngắn + dấu chấm (VD: `eyJh•••••`) để hiển thị an toàn trong Audit Log."""
+    """Che tuyệt đối giá trị bí mật bằng chuỗi giữ chỗ tĩnh (`••••••••••••`) — KHÔNG bao giờ lộ tiền tố, hậu tố hay hash."""
     if value is None or value == "":
         return "(trống)"
     text = str(value).strip()
-    if not text:
+    if not text or text == "(trống)":
         return "(trống)"
-    if "••••" in text or text.startswith("("):
-        return text[:40]
-    if len(text) <= 4:
-        return "•••••"
-    return f"{text[:4]}•••••"
+    return STATIC_SECRET_PLACEHOLDER
 
 
 def merge_client_changes(
     server_changes: list[dict[str, Any]],
     client_changes: dict[str, dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
-    """Kết hợp diff tính phía server với bản diff `{field: {old, new}}` do Admin xác nhận trên Modal (tự che bí mật)."""
+    """Kết hợp diff tính phía server với bản diff `{field: {old, new}}` từ Modal (chỉ nhận tối đa 50 trường hợp lệ, che tuyệt đối bí mật)."""
     merged = list(server_changes)
     if not isinstance(client_changes, dict):
         return merged
 
     existing_fields = {str(item.get("field", "")) for item in merged}
+    added = 0
     for raw_field, pair in client_changes.items():
+        if added >= MAX_CLIENT_DIFF_ENTRIES:
+            break
         field = str(raw_field or "").strip()
-        if not field or field in existing_fields or not isinstance(pair, dict):
+        if (
+            not field
+            or field in existing_fields
+            or not SAFE_AUDIT_FIELD_RE.fullmatch(field)
+            or not isinstance(pair, dict)
+        ):
             continue
         old_val = pair.get("old")
         new_val = pair.get("new")
@@ -98,4 +105,5 @@ def merge_client_changes(
                 "after": sanitize_audit_value(new_val),
             })
         existing_fields.add(field)
+        added += 1
     return merged
