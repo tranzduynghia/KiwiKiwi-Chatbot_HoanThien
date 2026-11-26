@@ -27,9 +27,10 @@ class AuditService:
         changes: Optional[list[dict[str, Any]]] = None,
         timestamp: Optional[str] = None,
         actor_meta: Optional[dict[str, Any]] = None,
+        source: Optional[str] = None,
         flush: bool = True,
     ) -> dict[str, Any]:
-        """Ghi một bản ghi Audit Log sau khi loại bỏ/che trường nhạy cảm và kèm thông tin avatar người thao tác."""
+        """Ghi một bản ghi Audit Log sau khi loại bỏ/che trường nhạy cảm và kèm thông tin avatar/nguồn thao tác."""
         safe_changes = []
         for change in changes or []:
             field = str(change.get("field", ""))
@@ -59,6 +60,8 @@ class AuditService:
             "summary": summary,
             "changes": safe_changes,
         }
+        if source:
+            doc["source"] = str(source)
         self._repository.enqueue(doc)
         if flush:
             await self._sync.flush_pending()

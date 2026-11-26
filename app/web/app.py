@@ -40,10 +40,16 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
 
     @app.middleware("http")
     async def enforce_cloudflare_tunnel_inbound(request: Request, call_next):
-        """Chặn truy cập trực tiếp bỏ qua Cloudflare khi `tunnel_only_inbound` được bật (luôn giữ `/health` cho Northflank)."""
+        """Đọc động `current_config` trong RAM trên mỗi HTTP request (không cache lúc khởi động) để chặn truy cập bỏ qua Cloudflare (luôn giữ `/health`)."""
         if request.url.path != "/health":
-            tunnel_cfg = container.config_repo.tunnel_cfg()
-            if tunnel_cfg.get("tunnel_only_inbound"):
+            current_config = container.config_repo.current_config
+            tunnel_cfg = current_config.get("tunnel") if isinstance(current_config.get("tunnel"), dict) else {}
+            tunnel_only_inbound = (
+                bool(current_config.get("tunnel_only_inbound", False))
+                if "tunnel_only_inbound" in current_config
+                else bool(tunnel_cfg.get("tunnel_only_inbound", False))
+            )
+            if tunnel_only_inbound:
                 has_cf_edge_header = bool(
                     request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip")
                 )

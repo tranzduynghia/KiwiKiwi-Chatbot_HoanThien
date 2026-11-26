@@ -38,7 +38,11 @@ class AskBot(discord.Client):
         self._web_server: Optional[uvicorn.Server] = None
         self._web_task: Optional[asyncio.Task] = None
         self._memory_watchdog_task: Optional[asyncio.Task] = None
+        self._atlas_config_watcher_task: Optional[asyncio.Task] = None
         self.container.memory_watchdog.attach_bot(self)
+        self.container.atlas_config_watcher.attach_presence_hook(
+            lambda presence_cfg: apply_bot_presence(self, presence_cfg)
+        )
         self._register_commands()
 
     def _register_commands(self) -> None:
@@ -90,6 +94,9 @@ class AskBot(discord.Client):
         self.loop.create_task(self.model_refresher())
         self.loop.create_task(self.session_sweeper())
         self.loop.create_task(self.config_sync_worker())
+        self._atlas_config_watcher_task = self.loop.create_task(
+            self.container.atlas_config_watcher.run_forever(self.is_closed)
+        )
         self._memory_watchdog_task = self.loop.create_task(
             self.container.memory_watchdog.run_forever(self.is_closed)
         )
@@ -210,8 +217,10 @@ class AskBot(discord.Client):
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self) -> None:
-        """Dừng Cloudflare Tunnel, MemoryWatchdog, tác vụ luân phiên Presence, Web Dashboard, MongoDB Atlas và đóng client Discord."""
+        """Dừng Cloudflare Tunnel, AtlasConfigWatcher, MemoryWatchdog, tác vụ luân phiên Presence, Web Dashboard, MongoDB Atlas và đóng client Discord."""
         stop_presence_rotation(self)
+        if self._atlas_config_watcher_task is not None and not self._atlas_config_watcher_task.done():
+            self._atlas_config_watcher_task.cancel()
         if self._memory_watchdog_task is not None and not self._memory_watchdog_task.done():
             self._memory_watchdog_task.cancel()
         await self.container.cloudflare_tunnel.stop()

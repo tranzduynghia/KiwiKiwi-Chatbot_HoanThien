@@ -91,9 +91,11 @@ function renderActorCell(item) {
   const isDiscord = item.actor_type === "discord" || Boolean(discordId);
   const subLabel = isDiscord
     ? `Discord ID: ${discordId || "—"}`
-    : item.actor_type === "system"
-      ? "Hệ thống"
-      : "Tài khoản Dashboard";
+    : item.source
+      ? String(item.source)
+      : item.actor_type === "system"
+        ? "Hệ thống"
+        : "Tài khoản Dashboard";
 
   return `
     <div class="flex items-center gap-2.5 min-w-0">

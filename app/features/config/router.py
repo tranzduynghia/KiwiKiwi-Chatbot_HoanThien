@@ -24,9 +24,10 @@ from app.features.config.validators import (
 def _mask_config_secrets(cfg: dict[str, Any]) -> dict[str, Any]:
     """Ẩn giá trị nguyên bản của `cf_tunnel_token` trước khi gửi JSON về trình duyệt, thay bằng cờ `cf_tunnel_has_token`."""
     safe = copy.deepcopy(cfg)
+    root_token = str(safe.pop("cf_tunnel_token", "") or "").strip()
     tunnel = safe.get("tunnel")
     if isinstance(tunnel, dict):
-        has_token = bool(str(tunnel.get("cf_tunnel_token") or "").strip())
+        has_token = bool(str(tunnel.get("cf_tunnel_token") or "").strip() or root_token)
         tunnel["cf_tunnel_token"] = ""
         tunnel["cf_tunnel_has_token"] = has_token
     return safe

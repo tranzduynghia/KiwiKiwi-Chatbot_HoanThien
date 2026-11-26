@@ -145,6 +145,10 @@ class CloudflareTunnelService:
             log.info("Đã dừng Cloudflare Tunnel.")
             return self.status_snapshot()
 
+    def set_tunnel_only_inbound(self, enabled: bool) -> None:
+        """Cập nhật trạng thái telemetry `tunnel_only_inbound` ngay trong RAM mà không làm gián đoạn tiến trình `cloudflared`."""
+        self._tunnel_only_inbound = bool(enabled)
+
     async def apply_config(self, tunnel_cfg: dict[str, Any]) -> dict[str, Any]:
         """Áp dụng cấu hình `tunnel` nóng theo thời gian thực: khởi động, khởi động lại hoặc dừng `cloudflared`."""
         enabled = bool(tunnel_cfg.get("cf_tunnel_enabled", False))

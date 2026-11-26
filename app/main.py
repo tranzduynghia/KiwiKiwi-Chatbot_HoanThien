@@ -30,6 +30,7 @@ from app.features.auth.repository import UserRepository
 from app.features.auth.service import AuthService
 from app.features.chat.cooldown import UserCooldownTracker
 from app.features.chat.gemini_service import GeminiChatService
+from app.features.config.atlas_watcher import AtlasConfigWatcher
 from app.features.config.repository import ConfigRepository
 from app.features.config.service import ConfigService
 from app.features.models.cooldown import ModelCooldownTracker
@@ -57,6 +58,7 @@ class AppContainer:
     audit_service: AuditService
     config_repo: ConfigRepository
     config_service: ConfigService
+    atlas_config_watcher: AtlasConfigWatcher
     permission_repo: PermissionRepository
     permission_service: PermissionService
     user_repo: UserRepository
@@ -245,6 +247,14 @@ def build_container(
         outbound_proxy_url=settings.outbound_proxy_url,
     )
 
+    atlas_config_watcher = AtlasConfigWatcher(
+        config_repo=config_repo,
+        config_service=config_service,
+        audit_service=audit_service,
+        cloudflare_tunnel=tunnel_service,
+    )
+    config_service.set_external_sync_hook(atlas_config_watcher.poll_once)
+
     monitoring_service = MonitoringService(
         config_repo=config_repo,
         model_registry=model_registry,
@@ -269,6 +279,7 @@ def build_container(
         audit_service=audit_service,
         config_repo=config_repo,
         config_service=config_service,
+        atlas_config_watcher=atlas_config_watcher,
         permission_repo=permission_repo,
         permission_service=permission_service,
         user_repo=user_repo,

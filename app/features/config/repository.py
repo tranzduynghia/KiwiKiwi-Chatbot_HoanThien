@@ -40,6 +40,11 @@ class ConfigRepository:
         """Truy cập nhanh cấu hình hiện tại trong RAM (không gọi mạng)."""
         return self._config
 
+    @property
+    def current_config(self) -> dict[str, Any]:
+        """Bí danh đọc trực tiếp cấu hình hiện tại trong RAM cho middleware và watcher."""
+        return self._config
+
     async def attach_db(self, db: Any) -> None:
         """Gắn collection `bot_config` và khởi tạo/nạp cấu hình mặc định nếu chưa có bản đệm mới."""
         self.collection = db["bot_config"]
@@ -66,6 +71,21 @@ class ConfigRepository:
         await self.collection.replace_one({"_id": "global"}, doc, upsert=True)
         self._pending_config = None
         return 1
+
+    async def fetch_remote_doc(self) -> Optional[dict[str, Any]]:
+        """Đọc tài liệu `bot_config` (`_id: "global"`) mới nhất từ MongoDB Atlas mà không ghi đè RAM."""
+        if not self.connected:
+            return None
+        return await self.collection.find_one({"_id": "global"})
+
+    def apply_external_config(self, merged_doc: dict[str, Any]) -> None:
+        """Cập nhật ngay `current_config` trong RAM từ thay đổi bên ngoài trên Atlas (không đưa vào hàng đợi đẩy ngược)."""
+        self._config = copy.deepcopy(merged_doc)
+        self._loaded_at = time.monotonic()
+
+    def mark_synced(self) -> None:
+        """Cập nhật mốc thời gian kiểm tra đồng bộ gần nhất khi cấu hình Atlas trùng khớp với RAM."""
+        self._loaded_at = time.monotonic()
 
     async def get_config(self, force: bool = False) -> dict[str, Any]:
         """Đọc cấu hình mới nhất (ưu tiên bản RAM nếu đang có thay đổi chờ đẩy lên Atlas)."""
@@ -106,8 +126,21 @@ class ConfigRepository:
         return self._config.get("presence", {})
 
     def tunnel_cfg(self) -> dict[str, Any]:
-        """Trả về nhánh cấu hình Cloudflare Tunnel (`cf_tunnel_enabled`, `cf_tunnel_mode`, `cf_tunnel_token`, `tunnel_only_inbound`)."""
-        return self._config.get("tunnel", {})
+        """Trả về nhánh cấu hình Cloudflare Tunnel hiện hành (hỗ trợ cả trường lồng `tunnel.*` lẫn trường phẳng ở gốc tài liệu)."""
+        base = dict(self._config.get("tunnel") or {})
+        for key in ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token", "tunnel_only_inbound"):
+            if key in self._config:
+                base[key] = self._config[key]
+        return base
+
+    def is_tunnel_only_inbound(self) -> bool:
+        """Đọc động cờ `tunnel_only_inbound` trực tiếp từ `current_config` trong RAM trên mỗi yêu cầu HTTP."""
+        if "tunnel_only_inbound" in self._config:
+            return bool(self._config.get("tunnel_only_inbound", False))
+        tunnel = self._config.get("tunnel")
+        if isinstance(tunnel, dict):
+            return bool(tunnel.get("tunnel_only_inbound", False))
+        return False
 
     def model_override(self, model_id: str) -> dict[str, Any]:
         """Lấy cấu hình ghi đè (tên hiển thị, tag, ẩn/hiện) của một model cụ thể."""

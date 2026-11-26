@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import logging
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable, Optional
 
 from app.core.sync import WriteBehindSyncCoordinator
 from app.core.utils import deep_merge
@@ -13,6 +13,13 @@ from app.features.audit.service import AuditService
 from app.features.config.repository import ConfigRepository
 
 log = logging.getLogger("gemini-bot.config")
+
+TUNNEL_LEGACY_TOP_LEVEL_KEYS = (
+    "cf_tunnel_enabled",
+    "cf_tunnel_mode",
+    "cf_tunnel_token",
+    "tunnel_only_inbound",
+)
 
 
 class ConfigService:
@@ -28,13 +35,29 @@ class ConfigService:
         self._audit = audit_service
         self._sync = sync_coordinator
         self._callbacks: list[Callable[[dict[str, Any]], None]] = []
+        self._external_sync_hook: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None
 
     def on_update(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Đăng ký hàm callback chạy mỗi khi cấu hình toàn cục được cập nhật."""
         self._callbacks.append(callback)
 
+    def set_external_sync_hook(self, hook: Optional[Callable[[], Awaitable[dict[str, Any]]]]) -> None:
+        """Gắn hàm đồng bộ nóng từ MongoDB Atlas để mọi lần đọc `force=True` không bỏ sót hook áp dụng nóng."""
+        self._external_sync_hook = hook
+
+    def notify_callbacks(self) -> None:
+        """Kích hoạt toàn bộ callback lắng nghe thay đổi cấu hình với `current_config` mới nhất trong RAM."""
+        for callback in self._callbacks:
+            try:
+                callback(self._repository.current)
+            except Exception as exc:
+                log.warning("Lỗi callback cập nhật cấu hình: %s", exc)
+
     async def get_config(self, force: bool = False) -> dict[str, Any]:
-        """Lấy bản sao cấu hình hiện hành từ kho cấu hình."""
+        """Lấy bản sao cấu hình hiện hành (nếu `force=True` và có Atlas watcher thì đồng bộ qua watcher trước)."""
+        if force and self._external_sync_hook is not None and self._repository.connected and self._repository.pending_count == 0:
+            await self._external_sync_hook()
+            return copy.deepcopy(self._repository.current)
         return await self._repository.get_config(force=force)
 
     async def update_config(
@@ -49,8 +72,13 @@ class ConfigService:
         client_changes: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Lưu tạm trong RAM -> ghi Audit Log -> xả lên MongoDB Atlas -> kích hoạt callback."""
-        current = await self._repository.get_config(force=True)
+        current = await self.get_config(force=True)
         merged = deep_merge(current, patch)
+        if "tunnel" in patch:
+            # Khi lưu cấu hình tunnel chuẩn từ Dashboard, dọn mọi khóa tunnel phẳng có thể từng được sửa tay trên Atlas
+            for stray_key in TUNNEL_LEGACY_TOP_LEVEL_KEYS:
+                merged.pop(stray_key, None)
+
         changes = merge_client_changes(compute_diff(current, merged), client_changes)
 
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -74,11 +102,6 @@ class ConfigService:
             )
 
         await self._sync.flush_pending()
-
-        for callback in self._callbacks:
-            try:
-                callback(self._repository.current)
-            except Exception as exc:
-                log.warning("Lỗi callback cập nhật cấu hình: %s", exc)
+        self.notify_callbacks()
 
         return copy.deepcopy(self._repository.current)
