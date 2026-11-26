@@ -67,3 +67,13 @@ class AuditService:
     async def list_logs(self, limit: int = 100, section: Optional[str] = None) -> list[dict[str, Any]]:
         """Trả về danh sách nhật ký chỉnh sửa mới nhất theo chuyên mục (nếu có)."""
         return await self._repository.list_logs(limit=limit, section=section)
+
+    async def list_logs_paginated(
+        self,
+        *,
+        page: int = 1,
+        limit: int = 5,
+        section: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Truy vấn phân trang Audit Log phía server (mặc định 5 mục/trang, tối đa 20 mục)."""
+        return await self._repository.list_logs_paginated(page=page, limit=limit, section=section)

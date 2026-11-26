@@ -107,9 +107,52 @@ function renderActorCell(item) {
 }
 
 export function createAuditTabController() {
+  const PAGE_SIZE = 5;
   let cachedItems = [];
+  let currentPage = 1;
+  let totalPages = 1;
+  let totalItems = 0;
   let lastRenderKey = "";
   let isFetching = false;
+  let isNavigating = false;
+  let requestSeq = 0;
+
+  function renderSkeletonRows(tbody) {
+    tbody.innerHTML = Array.from({ length: PAGE_SIZE })
+      .map(
+        () => `
+          <tr>
+            <td class="py-3 pr-3"><span class="ox-skeleton-bar h-3.5 w-28"></span></td>
+            <td class="py-3 pr-3">
+              <div class="flex items-center gap-2.5">
+                <span class="ox-skeleton-bar w-8 h-8 rounded-full shrink-0"></span>
+                <div class="space-y-1.5">
+                  <span class="ox-skeleton-bar h-3 w-24 block"></span>
+                  <span class="ox-skeleton-bar h-2.5 w-20 block"></span>
+                </div>
+              </div>
+            </td>
+            <td class="py-3 pr-3"><span class="ox-skeleton-bar h-4 w-24"></span></td>
+            <td class="py-3 pr-3"><span class="ox-skeleton-bar h-3.5 w-48"></span></td>
+            <td class="py-3 pr-3 text-center"><span class="ox-skeleton-bar h-4 w-12"></span></td>
+            <td class="py-3 text-right"><span class="ox-skeleton-bar h-6 w-20"></span></td>
+          </tr>
+        `
+      )
+      .join("");
+  }
+
+  function updatePaginationControls() {
+    const badgeEl = document.getElementById("audit-page-badge");
+    const totalEl = document.getElementById("audit-total-count");
+    const prevBtn = document.getElementById("btn-audit-prev");
+    const nextBtn = document.getElementById("btn-audit-next");
+
+    if (badgeEl) badgeEl.textContent = `Trang ${currentPage} / ${totalPages}`;
+    if (totalEl) totalEl.textContent = `Tổng: ${totalItems} bản ghi`;
+    if (prevBtn) prevBtn.disabled = currentPage <= 1 || isNavigating;
+    if (nextBtn) nextBtn.disabled = currentPage >= totalPages || isNavigating;
+  }
 
   function closeAuditDetailModal() {
     const modal = document.getElementById("audit-detail-modal");
@@ -205,27 +248,64 @@ export function createAuditTabController() {
     modal.classList.add("flex");
   }
 
-  async function loadAuditLogs({ silent = false } = {}) {
-    if (isFetching && silent) return;
+  async function loadAuditLogs({ silent = false, page = null, animateTransition = false } = {}) {
+    if ((isFetching || isNavigating) && silent) return;
+    const targetPage = Math.max(1, page !== null ? Number(page) : currentPage);
+    const tbody = document.getElementById("audit-tbody");
+    if (!tbody) return;
+
+    const seq = ++requestSeq;
     isFetching = true;
+    if (!silent) {
+      isNavigating = true;
+      updatePaginationControls();
+    }
+
     try {
+      // Hiệu ứng mờ dần/trượt nhẹ trang cũ + skeleton giữ chiều cao ổn định khi người dùng chủ động chuyển trang
+      if (!silent && animateTransition) {
+        tbody.classList.add("ox-audit-leaving");
+        await new Promise((resolve) => setTimeout(resolve, 130));
+        if (seq !== requestSeq) return;
+        tbody.classList.remove("ox-audit-leaving");
+        renderSkeletonRows(tbody);
+      } else if (!silent && !cachedItems.length) {
+        renderSkeletonRows(tbody);
+      }
+
       const sectionEl = document.getElementById("audit-section-filter");
       const section = sectionEl ? sectionEl.value : "";
-      const query = section ? `?limit=100&section=${encodeURIComponent(section)}` : "?limit=100";
-      const data = await apiRequest(`/api/audit-logs${query}`);
-      const tbody = document.getElementById("audit-tbody");
-      if (!tbody) return;
+      const params = new URLSearchParams({
+        page: String(targetPage),
+        limit: String(PAGE_SIZE),
+      });
+      if (section) params.set("section", section);
+
+      const data = await apiRequest(`/api/audit-logs?${params.toString()}`);
+      // Bỏ qua phản hồi cũ nếu người dùng đã chuyển sang trang/bộ lọc mới hơn
+      if (seq !== requestSeq) return;
 
       const items = data.items || [];
-      const nextKey = JSON.stringify(items);
-      // Nếu đang cập nhật nền im lặng và dữ liệu không đổi -> giữ nguyên DOM & vị trí cuộn
+      currentPage = Number(data.page || targetPage);
+      totalPages = Math.max(1, Number(data.total_pages || 1));
+      totalItems = Number(data.total_items ?? items.length);
+
+      const nextKey = JSON.stringify({
+        page: currentPage,
+        totalItems,
+        totalPages,
+        items,
+      });
+
+      // Khi cập nhật nền im lặng 1s và trang hiện tại không thay đổi -> giữ nguyên DOM, không chạy lại animation
       if (silent && nextKey === lastRenderKey) {
+        updatePaginationControls();
         return;
       }
 
       cachedItems = items;
       lastRenderKey = nextKey;
-      const rowAnimClass = silent ? "" : "ox-enter";
+      const rowAnimClass = silent ? "" : "ox-audit-row-enter";
 
       tbody.innerHTML = cachedItems.length
         ? cachedItems
@@ -237,7 +317,7 @@ export function createAuditTabController() {
                 ? '<span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30">Chờ sync</span>'
                 : '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Atlas</span>';
               return `
-                <tr class="hover:bg-[#181d28]/70 ${rowAnimClass}">
+                <tr class="hover:bg-[#181d28]/70 ${rowAnimClass}" style="--row-idx:${idx}">
                   <td class="py-2.5 pr-3 font-mono text-[#8b95a7] whitespace-nowrap">${escapeHtml(timeStr)}</td>
                   <td class="py-2.5 pr-3">${renderActorCell(item)}</td>
                   <td class="py-2.5 pr-3"><span class="px-2 py-0.5 rounded bg-[#181d27] border border-[#252b38] text-[10px] text-slate-300 whitespace-nowrap">${escapeHtml(sectionName)}</span></td>
@@ -254,19 +334,47 @@ export function createAuditTabController() {
               `;
             })
             .join("")
-        : '<tr><td colspan="6" class="py-4 text-center text-[#5e6778]">Chưa có bản ghi nhật ký chỉnh sửa nào.</td></tr>';
+        : '<tr><td colspan="6" class="py-12 text-center text-[#5e6778]">Chưa có bản ghi nhật ký chỉnh sửa nào.</td></tr>';
     } catch (err) {
-      if (!silent) showToast(err.message, false);
+      if (seq === requestSeq && !silent) showToast(err.message, false);
     } finally {
-      isFetching = false;
+      if (seq === requestSeq) {
+        isFetching = false;
+        isNavigating = false;
+        updatePaginationControls();
+      }
     }
   }
 
   function bindEvents() {
     const filterEl = document.getElementById("audit-section-filter");
-    if (filterEl) filterEl.addEventListener("change", () => loadAuditLogs({ silent: false }));
+    if (filterEl) {
+      filterEl.addEventListener("change", () => {
+        currentPage = 1;
+        loadAuditLogs({ silent: false, page: 1, animateTransition: true });
+      });
+    }
     const refreshBtn = document.getElementById("btn-refresh-audit");
-    if (refreshBtn) refreshBtn.addEventListener("click", () => loadAuditLogs({ silent: false }));
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", () => {
+        loadAuditLogs({ silent: false, page: currentPage, animateTransition: true });
+      });
+    }
+
+    const prevBtn = document.getElementById("btn-audit-prev");
+    const nextBtn = document.getElementById("btn-audit-next");
+    if (prevBtn) {
+      prevBtn.addEventListener("click", () => {
+        if (currentPage <= 1 || isNavigating) return;
+        loadAuditLogs({ silent: false, page: currentPage - 1, animateTransition: true });
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener("click", () => {
+        if (currentPage >= totalPages || isNavigating) return;
+        loadAuditLogs({ silent: false, page: currentPage + 1, animateTransition: true });
+      });
+    }
 
     // Mở Modal chi tiết diff tại chỗ khi bấm nút "Chi tiết"
     const tbody = document.getElementById("audit-tbody");

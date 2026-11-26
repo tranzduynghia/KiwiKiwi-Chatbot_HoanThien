@@ -23,15 +23,18 @@ def create_audit_router(
     lookup = user_lookup or DiscordUserLookupService()
 
     @router.get("/api/audit-logs")
+    @router.get("/api/audit")
     async def api_audit_logs(
-        limit: int = Query(default=100, ge=1, le=300),
+        page: int = Query(default=1, ge=1),
+        limit: int = Query(default=5, ge=1, le=20),
         section: Optional[str] = Query(default=None),
         _user: dict[str, Any] = Depends(auth_deps.require_user),
     ):
-        items = await audit_service.list_logs(limit=limit, section=section)
+        result = await audit_service.list_logs_paginated(page=page, limit=limit, section=section)
+        items = result["items"]
         bot = get_bot() if callable(get_bot) else None
 
-        # Bổ sung avatar và Discord ID cho các bản ghi Audit Log cũ từ Discord client đang chạy
+        # Chỉ bổ sung avatar và Discord ID cho đúng 5 bản ghi thuộc trang hiện tại
         for item in items:
             actor_str = str(item.get("actor") or "")
             discord_id = str(item.get("actor_discord_id") or "")
@@ -47,6 +50,12 @@ def create_audit_router(
                 if profile.get("avatar_url"):
                     item["actor_avatar_url"] = profile["avatar_url"]
 
-        return {"items": items}
+        return {
+            "items": items,
+            "page": result["page"],
+            "limit": result["limit"],
+            "total_items": result["total_items"],
+            "total_pages": result["total_pages"],
+        }
 
     return router

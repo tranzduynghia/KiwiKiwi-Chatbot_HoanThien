@@ -21,9 +21,9 @@
     </div>
   </div>
 
-  <!-- Bảng danh sách nhật ký chỉnh sửa -->
-  <div class="card p-5">
-    <div class="overflow-x-auto">
+  <!-- Bảng danh sách nhật ký chỉnh sửa (cố định tối đa 5 dòng/trang, giữ min-height tránh nhảy layout khi chuyển trang) -->
+  <div class="card p-5 space-y-4">
+    <div id="audit-table-wrap" class="overflow-x-auto min-h-[305px]">
       <table class="w-full text-left text-xs border-collapse">
         <thead>
           <tr class="border-b border-[#1e232e] text-[#8b95a7]">
@@ -37,6 +37,39 @@
         </thead>
         <tbody id="audit-tbody" class="divide-y divide-[#1e232e]/80"></tbody>
       </table>
+    </div>
+
+    <!-- Thanh điều hướng phân trang phía dưới bảng Audit Log -->
+    <div class="pt-3 border-t border-[#1e232e] flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span
+          id="audit-page-badge"
+          class="px-2.5 py-1 rounded-full bg-[#181d27] border border-[#2a3140] text-slate-200 font-medium font-mono text-[11px]"
+        >
+          Trang 1 / 1
+        </span>
+        <span id="audit-total-count" class="text-[11px] text-[#8b95a7]">
+          Tổng: 0 bản ghi
+        </span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button
+          id="btn-audit-prev"
+          type="button"
+          disabled
+          class="btn-ghost text-xs px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          ← Trang trước
+        </button>
+        <button
+          id="btn-audit-next"
+          type="button"
+          disabled
+          class="btn-ghost text-xs px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Trang sau →
+        </button>
+      </div>
     </div>
   </div>
 

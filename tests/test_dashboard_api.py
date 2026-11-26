@@ -274,14 +274,29 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
             changes=[{"field": "ask.user_cooldown", "before": 5.0, "after": 3.0}],
         )
 
-        # Kiểm tra Audit Log đã ghi nhận toàn bộ thay đổi kèm diff và avatar Discord
+        # Kiểm tra Audit Log phân trang phía server (mặc định 5 mục/trang, page 1 & page 2, alias /api/audit)
         audit_res = client.get("/api/audit-logs")
         assert audit_res.status_code == 200
-        audit_items = audit_res.json()["items"]
-        assert len(audit_items) >= 6
-        discord_audit = next(item for item in audit_items if item.get("actor_discord_id") == "777888")
+        audit_json = audit_res.json()
+        assert audit_json["page"] == 1
+        assert audit_json["limit"] == 5
+        assert len(audit_json["items"]) == 5
+        assert audit_json["total_items"] >= 6
+        assert audit_json["total_pages"] >= 2
+
+        discord_audit = next(item for item in audit_json["items"] if item.get("actor_discord_id") == "777888")
         assert discord_audit["actor_avatar_url"].startswith("https://cdn.discordapp.com/")
         assert discord_audit["changes"] == [{"field": "ask.user_cooldown", "before": 5.0, "after": 3.0}]
+
+        # Kiểm tra trang 2 và alias /api/audit + chặn limit > 20 để bảo vệ RAM container
+        audit_p2 = client.get("/api/audit?page=2&limit=5")
+        assert audit_p2.status_code == 200
+        p2_json = audit_p2.json()
+        assert p2_json["page"] == 2
+        assert p2_json["limit"] == 5
+        assert len(p2_json["items"]) >= 1
+        assert p2_json["items"][0] != audit_json["items"][0]
+        assert client.get("/api/audit-logs?limit=50").status_code == 422
 
 
 @pytest.mark.asyncio

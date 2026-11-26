@@ -13,20 +13,34 @@ from app.main import AppContainer, build_container
 
 
 class FakeCursor:
-    """Mô phỏng cursor truy vấn bất đồng bộ của PyMongo (`sort`, `to_list`)."""
+    """Mô phỏng cursor truy vấn bất đồng bộ của PyMongo (`sort`, `skip`, `limit`, `to_list`)."""
 
     def __init__(self, docs: list[dict[str, Any]]):
         self._docs = docs
+        self._skip = 0
+        self._limit: Optional[int] = None
 
     def sort(self, field: str, direction: int = 1) -> "FakeCursor":
         reverse = direction < 0
         self._docs.sort(key=lambda item: str(item.get(field) or ""), reverse=reverse)
         return self
 
+    def skip(self, count: int) -> "FakeCursor":
+        self._skip = max(0, int(count))
+        return self
+
+    def limit(self, count: int) -> "FakeCursor":
+        self._limit = max(0, int(count))
+        return self
+
     async def to_list(self, length: Optional[int] = None) -> list[dict[str, Any]]:
-        if length is None:
-            return copy.deepcopy(self._docs)
-        return copy.deepcopy(self._docs[:length])
+        sliced = self._docs[self._skip :]
+        effective = self._limit
+        if length is not None:
+            effective = length if effective is None else min(effective, length)
+        if effective is None:
+            return copy.deepcopy(sliced)
+        return copy.deepcopy(sliced[:effective])
 
 
 class FakeCollection:
