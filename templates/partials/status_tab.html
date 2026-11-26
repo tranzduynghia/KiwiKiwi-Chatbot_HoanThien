@@ -605,13 +605,55 @@
         </div>
       </div>
 
-      {# Thông tin kết nối trực tiếp, Public URL & lỗi #}
-      <div class="lg:col-span-5 rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-2.5 text-xs">
-        <div class="flex items-center justify-between text-[#8b95a7]">
-          <span class="font-medium text-slate-200">Thông tin kết nối trực tiếp</span>
-          <span id="cf-origin-url" class="font-mono text-[10px] text-[#5e6778]">Origin nội bộ: http://127.0.0.1:10000</span>
+      {# Thông tin kết nối trực tiếp, Public URL & hướng dẫn 2 chế độ Tunnel #}
+      <div class="lg:col-span-5 rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-3 text-xs">
+        {# Hàng tiêu đề: tên thẻ bên trái + huy hiệu Origin nội bộ kèm nút sao chép 1 chạm bên phải #}
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+          <h4 class="text-sm font-semibold text-slate-100">Thông tin kết nối trực tiếp</h4>
+          <div class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/90 border border-slate-700/80 pl-2.5 pr-1 py-0.5 max-w-full">
+            <span class="text-[10px] text-slate-400 font-medium shrink-0">Origin:</span>
+            <code id="cf-origin-url" class="font-mono text-[11px] text-amber-300 truncate">{{ tunnel_origin_url }}</code>
+            <button
+              type="button"
+              id="btn-copy-cf-origin"
+              title="Sao chép địa chỉ Origin vào clipboard"
+              aria-label="Sao chép Origin"
+              class="inline-flex items-center justify-center w-6 h-6 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 transition-colors shrink-0"
+            >
+              {# Biểu tượng sao chép nội tuyến #}
+              <svg
+                id="cf-copy-icon"
+                class="w-3.5 h-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+              </svg>
+              {# Biểu tượng dấu tích xác nhận đã sao chép #}
+              <svg
+                id="cf-copy-check-icon"
+                class="hidden w-3.5 h-3.5 text-emerald-400"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.4"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </button>
+          </div>
         </div>
 
+        {# Đường dẫn Public URL hiện hành (hiển thị tự động khi Quick Tunnel chạy) #}
         <div id="cf-public-url-wrap" class="hidden rounded-lg bg-[#131720] border border-emerald-500/30 p-2.5">
           <div class="text-[10px] text-[#8b95a7] mb-1">Public URL đang hoạt động:</div>
           <a
@@ -623,9 +665,48 @@
           >—</a>
         </div>
 
-        <div class="text-[11px] text-[#5e6778] leading-relaxed">
-          • <strong class="text-slate-300">Named Tunnel:</strong> Định tuyến Public Hostname về <code class="text-slate-300">http://127.0.0.1:&lt;PORT&gt;</code> trong Cloudflare Zero Trust.<br />
-          • <strong class="text-slate-300">Quick Tunnel:</strong> Tự cấp URL <code class="text-slate-300">https://*.trycloudflare.com</code> không cần cấu hình token.
+        {# Bố cục 2 cột phân tách rõ ràng chế độ Named Tunnel và Quick Tunnel #}
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+          {# Thẻ 1: Named Tunnel (Cố định) #}
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-lg p-3 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-1.5">
+              <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-orange-300">
+                <span class="w-1.5 h-1.5 rounded-full bg-orange-400"></span>
+                <span>Named Tunnel</span>
+              </span>
+              <span class="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                Khuyên dùng
+              </span>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Trỏ Public Hostname trên Cloudflare Zero Trust về đúng địa chỉ
+              <code
+                id="cf-named-origin-code"
+                class="inline-block px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700/80 font-mono text-[11px] text-amber-300 align-baseline"
+              >{{ tunnel_origin_url }}</code>
+              <span class="text-slate-400">(yêu cầu Tunnel Token).</span>
+            </p>
+          </div>
+
+          {# Thẻ 2: Quick Tunnel (Dùng thử) #}
+          <div class="bg-slate-900/60 border border-slate-800/80 rounded-lg p-3 space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-1.5">
+              <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sky-300">
+                <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+                <span>Quick Tunnel</span>
+              </span>
+              <span class="px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                Không cần Token
+              </span>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Tự cấp tên miền tạm
+              <code
+                class="inline-block px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700/80 font-mono text-[11px] text-sky-300 align-baseline"
+              >https://*.trycloudflare.com</code>
+              <span class="text-slate-400">(URL thay đổi mỗi lần khởi động lại).</span>
+            </p>
+          </div>
         </div>
 
         <div id="cf-last-error" class="hidden text-[11px] text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg px-2.5 py-1.5 break-words"></div>

@@ -76,6 +76,7 @@ def create_pages_router(
     sync_coordinator: WriteBehindSyncCoordinator,
     get_bot: Optional[Callable[[], Any]] = None,
     usage_stats: Optional[UsageStats] = None,
+    tunnel_origin_url: str = "http://127.0.0.1:8080",
 ) -> APIRouter:
     """Tạo router giao diện HTML cho trang gốc, trang đăng nhập và trang quản trị Dashboard."""
     router = APIRouter(tags=["pages"])
@@ -131,6 +132,7 @@ def create_pages_router(
                 "default_ocr_instruction": DEFAULT_OCR_INSTRUCTION,
                 "bot_avatar_url": bot_avatar_url,
                 "bot_display_name": bot_display_name,
+                "tunnel_origin_url": tunnel_origin_url,
                 "asset_version": ASSET_VERSION,
             },
         )

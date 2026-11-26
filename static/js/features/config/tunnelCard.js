@@ -131,9 +131,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       }`;
     }
 
-    if (originEl && telemetry.origin_url) {
-      const nextOrigin = `Origin nội bộ: ${telemetry.origin_url}`;
-      if (originEl.textContent !== nextOrigin) originEl.textContent = nextOrigin;
+    if (telemetry.origin_url) {
+      const originUrl = String(telemetry.origin_url).trim();
+      if (originEl && originEl.textContent !== originUrl) {
+        originEl.textContent = originUrl;
+      }
+      const namedOriginEl = document.getElementById("cf-named-origin-code");
+      if (namedOriginEl && namedOriginEl.textContent !== originUrl) {
+        namedOriginEl.textContent = originUrl;
+      }
     }
 
     if (urlWrapEl && urlLinkEl) {
@@ -321,12 +327,49 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     });
   }
 
+  async function copyOriginToClipboard() {
+    const originEl = document.getElementById("cf-origin-url");
+    const originText = (originEl?.textContent || "").trim();
+    if (!originText) return;
+
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(originText);
+      } else {
+        const tempInput = document.createElement("textarea");
+        tempInput.value = originText;
+        tempInput.setAttribute("readonly", "");
+        tempInput.style.position = "fixed";
+        tempInput.style.opacity = "0";
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand("copy");
+        document.body.removeChild(tempInput);
+      }
+      const copyIcon = document.getElementById("cf-copy-icon");
+      const checkIcon = document.getElementById("cf-copy-check-icon");
+      if (copyIcon && checkIcon) {
+        copyIcon.classList.add("hidden");
+        checkIcon.classList.remove("hidden");
+        clearTimeout(copyOriginToClipboard._timerId);
+        copyOriginToClipboard._timerId = setTimeout(() => {
+          checkIcon.classList.add("hidden");
+          copyIcon.classList.remove("hidden");
+        }, 1800);
+      }
+      showToast(`✅ Đã sao chép Origin: ${originText}`);
+    } catch {
+      showToast("Không thể sao chép tự động, vui lòng bôi đen địa chỉ Origin để sao chép.", false);
+    }
+  }
+
   function bindEvents() {
     const modeEl = document.getElementById("cf-tunnel-mode");
     if (modeEl) modeEl.addEventListener("change", syncModeInputs);
 
     const toggleBtn = document.getElementById("btn-toggle-tunnel");
     const saveBtn = document.getElementById("btn-save-tunnel");
+    const copyOriginBtn = document.getElementById("btn-copy-cf-origin");
     if (toggleBtn) {
       toggleBtn.addEventListener("click", () => {
         submitTunnelAction(isTunnelActive ? "stop" : "start");
@@ -336,6 +379,9 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       saveBtn.addEventListener("click", () => {
         submitTunnelAction("update");
       });
+    }
+    if (copyOriginBtn) {
+      copyOriginBtn.addEventListener("click", copyOriginToClipboard);
     }
   }
 

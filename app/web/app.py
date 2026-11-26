@@ -199,6 +199,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             sync_coordinator=container.sync_coordinator,
             get_bot=get_bot,
             usage_stats=container.usage_stats,
+            tunnel_origin_url=container.cloudflare_tunnel.origin_url,
         )
     )
     app.include_router(
