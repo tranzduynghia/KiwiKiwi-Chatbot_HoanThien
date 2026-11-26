@@ -609,16 +609,16 @@
       <div class="lg:col-span-5 min-w-0 rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-3 text-xs">
         {# Hàng tiêu đề: tên thẻ bên trái + huy hiệu Origin nội bộ kèm nút sao chép 1 chạm bên phải #}
         <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
-          <h4 class="text-sm font-semibold text-slate-100">Thông tin kết nối trực tiếp</h4>
+          <h4 class="text-sm font-semibold text-slate-100 select-none">Thông tin kết nối trực tiếp</h4>
           <div class="inline-flex items-center gap-1.5 rounded-full bg-slate-800/80 border border-slate-700/70 pl-2.5 pr-1 py-0.5 max-w-full min-w-0">
-            <span class="text-[10px] text-slate-400 font-medium shrink-0">Origin:</span>
-            <code id="cf-origin-url" class="font-mono text-[11px] text-slate-200 truncate">{{ tunnel_origin_url }}</code>
+            <span class="text-[10px] text-slate-400 font-medium shrink-0 select-none">Origin:</span>
+            <code id="cf-origin-url" class="font-mono text-[11px] text-slate-200 truncate select-all cursor-pointer">{{ tunnel_origin_url }}</code>
             <button
               type="button"
               id="btn-copy-cf-origin"
               title="Sao chép địa chỉ Origin vào clipboard"
               aria-label="Sao chép Origin"
-              class="inline-flex items-center justify-center w-6 h-6 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/80 transition-colors shrink-0"
+              class="inline-flex items-center justify-center w-6 h-6 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/80 transition-colors shrink-0 select-none"
             >
               {# Biểu tượng sao chép nội tuyến #}
               <svg
@@ -655,7 +655,7 @@
 
         {# Đường dẫn Public URL hiện hành (hiển thị tự động khi Quick Tunnel chạy) #}
         <div id="cf-public-url-wrap" class="hidden rounded-lg bg-[#131720] border border-emerald-500/30 p-2.5">
-          <div class="text-[10px] text-[#8b95a7] mb-1">Public URL đang hoạt động:</div>
+          <div class="text-[10px] text-[#8b95a7] mb-1 select-none">Public URL đang hoạt động:</div>
           <a
             id="cf-public-url"
             href="#"
@@ -669,7 +669,7 @@
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
           {# Thẻ 1: Named Tunnel (Cố định) #}
           <div class="min-w-0 bg-slate-900/60 border border-slate-800/80 rounded-lg p-3 space-y-2">
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex flex-wrap items-center justify-between gap-1.5 select-none">
               <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-100">
                 <span class="w-1.5 h-1.5 rounded-full bg-amber-400/80 shrink-0"></span>
                 <span>Named Tunnel</span>
@@ -678,11 +678,11 @@
                 Khuyên dùng
               </span>
             </div>
-            <p class="text-xs text-slate-300 leading-relaxed break-words">
+            <p class="text-xs text-slate-300 leading-relaxed break-words select-none">
               Trỏ Public Hostname trên Cloudflare Zero Trust về đúng địa chỉ
               <code
                 id="cf-named-origin-code"
-                class="inline-block max-w-full break-all px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 align-baseline"
+                class="inline-block max-w-full break-all px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 align-baseline select-all cursor-pointer"
               >{{ tunnel_origin_url }}</code>
               <span class="text-slate-400">(yêu cầu Tunnel Token).</span>
             </p>
@@ -690,7 +690,7 @@
 
           {# Thẻ 2: Quick Tunnel (Dùng thử) #}
           <div class="min-w-0 bg-slate-900/60 border border-slate-800/80 rounded-lg p-3 space-y-2">
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex flex-wrap items-center justify-between gap-1.5 select-none">
               <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-100">
                 <span class="w-1.5 h-1.5 rounded-full bg-sky-400/80 shrink-0"></span>
                 <span>Quick Tunnel</span>
@@ -699,10 +699,10 @@
                 Không cần Token
               </span>
             </div>
-            <p class="text-xs text-slate-300 leading-relaxed break-words">
+            <p class="text-xs text-slate-300 leading-relaxed break-words select-none">
               Tự cấp tên miền tạm
               <code
-                class="inline-block max-w-full break-all px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 align-baseline"
+                class="inline-block max-w-full break-all px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 align-baseline select-all cursor-pointer"
               >https://*.trycloudflare.com</code>
               <span class="text-slate-400">(URL thay đổi mỗi lần khởi động lại).</span>
             </p>
