@@ -236,16 +236,19 @@ async def test_tunnel_api_hot_reload_token_masking_audit_and_inbound_lock(fake_d
             json={"cf_tunnel_enabled": True, "cf_tunnel_mode": "quick", "tunnel_only_inbound": False},
         ).status_code == 403
 
-        # Admin đăng nhập và kiểm tra giao diện thẻ Cloudflare Tunnel (2 nút xếp dọc + không rò comment HTML)
+        # Admin đăng nhập và kiểm tra giao diện thẻ Cloudflare Tunnel (2 nút xếp dọc + trạng thái tắt ban đầu + không rò comment HTML)
         client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
         dash = client.get("/dashboard")
         assert dash.status_code == 200
         assert 'id="cf-tunnel-mode"' in dash.text
         assert 'id="cf-tunnel-token"' in dash.text
         assert 'id="btn-toggle-tunnel"' in dash.text
+        assert 'data-tunnel-active="false"' in dash.text
+        assert "bg-emerald-600" in dash.text
         assert 'id="btn-save-tunnel"' in dash.text
         assert "Bật Tunnel" in dash.text
         assert "Cập nhật Tunnel" in dash.text
+        assert "Origin nội bộ:" not in dash.text
         assert "<!--" not in dash.text
 
         # Bật Named Tunnel -> lưu token trong MongoDB nhưng ẩn trong API response & Audit Log
@@ -266,6 +269,13 @@ async def test_tunnel_api_hot_reload_token_masking_audit_and_inbound_lock(fake_d
         assert named_json["config"]["tunnel"]["cf_tunnel_has_token"] is True
         assert named_json["cloudflare_tunnel"]["running"] is True
         assert container.config_repo.tunnel_cfg()["cf_tunnel_token"] == secret_token
+
+        # Sau khi Tunnel đang chạy -> SSR /dashboard phải render nút đỏ "Tắt Tunnel" (data-tunnel-active="true")
+        dash_running = client.get("/dashboard")
+        assert dash_running.status_code == 200
+        assert 'data-tunnel-active="true"' in dash_running.text
+        assert "bg-rose-600" in dash_running.text
+        assert "Tắt Tunnel" in dash_running.text
 
         # Kiểm tra /api/status xuất đầy đủ telemetry cloudflare_tunnel
         st_res = client.get("/api/status")

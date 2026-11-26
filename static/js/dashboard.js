@@ -7,7 +7,7 @@ import { createAuditTabController } from "./features/audit/auditTab.js";
 import { createAskConfigTabController } from "./features/config/askConfigTab.js";
 import { createPresenceCardController } from "./features/config/presenceCard.js";
 import { createPromptConfigTabController } from "./features/config/promptConfigTab.js";
-import { createTunnelCardController } from "./features/config/tunnelCard.js";
+import { createTunnelCardController } from "./features/config/tunnelCard.js?v=20261126-2";
 import { createModelsTabController } from "./features/models/modelsTab.js";
 import { createStatusTabController } from "./features/monitoring/statusTab.js";
 import { createPermissionsTabController } from "./features/permissions/permissionsTab.js";

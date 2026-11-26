@@ -20,8 +20,15 @@ function formatModeLabel(mode) {
   return mode === "quick" ? "Quick Tunnel (trycloudflare.com)" : "Named Tunnel (Token)";
 }
 
+function normalizeOriginUrl(raw) {
+  return String(raw || "")
+    .replace(/^(?:Origin\s*nội\s*bộ\s*:|Origin\s*:)\s*/i, "")
+    .trim();
+}
+
 export function createTunnelCardController({ isAdmin, onConfigSaved }) {
   let hasSavedToken = false;
+  let hasTelemetry = false;
   let isTunnelActive = false;
   let initialState = null;
 
@@ -88,12 +95,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       },
     };
 
-    syncToggleButton(enabledNow);
+    if (!hasTelemetry) {
+      syncToggleButton(enabledNow);
+    }
     syncModeInputs();
   }
 
   function renderTelemetry(telemetry) {
     if (!telemetry) return;
+    hasTelemetry = true;
 
     const badgeEl = document.getElementById("cf-status-badge");
     const outboundEl = document.getElementById("cf-outbound-badge");
@@ -132,7 +142,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     }
 
     if (telemetry.origin_url) {
-      const originUrl = String(telemetry.origin_url).trim();
+      const originUrl = normalizeOriginUrl(telemetry.origin_url);
       if (originEl && originEl.textContent !== originUrl) {
         originEl.textContent = originUrl;
       }
@@ -163,8 +173,8 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       errEl.classList.toggle("hidden", !errText);
     }
 
-    // Đồng bộ tức thì nút Bật / Tắt Tunnel theo trạng thái thực tế của cloudflared
-    syncToggleButton(Boolean(telemetry.running || telemetry.enabled));
+    // Đồng bộ chính xác theo bảng chân trị: running === true -> đỏ Tắt Tunnel; running === false -> xanh Bật Tunnel
+    syncToggleButton(Boolean(telemetry.running));
   }
 
   /**
@@ -329,7 +339,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
 
   async function copyOriginToClipboard() {
     const originEl = document.getElementById("cf-origin-url");
-    const originText = (originEl?.textContent || "").trim();
+    const originText = normalizeOriginUrl(originEl?.textContent || "");
     if (!originText) return;
 
     try {
@@ -371,6 +381,8 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const saveBtn = document.getElementById("btn-save-tunnel");
     const copyOriginBtn = document.getElementById("btn-copy-cf-origin");
     if (toggleBtn) {
+      // Đồng bộ trạng thái khởi tạo từ HTML render phía server trước khi nhận telemetry đầu tiên
+      syncToggleButton(toggleBtn.dataset.tunnelActive === "true");
       toggleBtn.addEventListener("click", () => {
         submitTunnelAction(isTunnelActive ? "stop" : "start");
       });

@@ -185,7 +185,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             response.headers["Cache-Control"] = "no-store, max-age=0"
             response.headers["Pragma"] = "no-cache"
         elif request.url.path.startswith(("/static/js/", "/static/css/")):
-            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
         return response
 
     if STATIC_DIR.exists():
@@ -200,6 +200,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             get_bot=get_bot,
             usage_stats=container.usage_stats,
             tunnel_origin_url=container.cloudflare_tunnel.origin_url,
+            get_tunnel_running=lambda: bool(container.cloudflare_tunnel.is_running),
         )
     )
     app.include_router(
