@@ -376,3 +376,95 @@ async def test_oauth2_csrf_state_and_security_headers_and_redaction(app_containe
     )
     with pytest.raises(UserError):
         await read_attachment(svg_attachment, max_file_mb=5.0)
+
+
+@pytest.mark.asyncio
+async def test_password_pepper_hmac_prehash_and_seamless_legacy_migration(app_container, fake_db, fake_bot, monkeypatch):
+    """Kiểm tra tiền băm HMAC-SHA256 với PASSWORD_PEPPER, nâng cấp mượt hash cũ không khóa admin và không lộ bí mật."""
+    import hashlib
+    import hmac
+
+    from app.core.security import (
+        apply_password_pepper,
+        hash_password,
+        verify_password_with_migration,
+    )
+
+    pepper_secret = "super-secret-pepper-key-2026-not-in-db"
+    long_password = "P" * 96 + "!Admin2026"  # > 72 bytes để kiểm chứng tiền băm HMAC-SHA256 luôn cố định 64 ký tự hex
+
+    # 1) Công thức tiền băm HMAC-SHA256 chuẩn
+    expected_prehash = hmac.new(
+        pepper_secret.encode("utf-8"),
+        long_password.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    peppered_material = apply_password_pepper(long_password, pepper=pepper_secret)
+    assert peppered_material == expected_prehash
+    assert len(peppered_material) == 64
+
+    # 2) Tạo tài khoản Admin cũ TRƯỚC khi bật PASSWORD_PEPPER (legacy unpeppered hash trong MongoDB)
+    monkeypatch.delenv("PASSWORD_PEPPER", raising=False)
+    await app_container.sync_coordinator.attach_db(fake_db)
+    await app_container.auth_service.create_user("admin", long_password, role="admin")
+
+    legacy_doc = await fake_db["dashboard_users"].find_one({"username": "admin"})
+    assert legacy_doc is not None
+    legacy_hash = legacy_doc["password_hash"]
+    # Xác nhận hash cũ là unpeppered
+    assert verify_password_with_migration(long_password, legacy_hash, pepper="") == (True, False)
+    assert verify_password_with_migration(long_password, legacy_hash, pepper=pepper_secret) == (True, True)
+
+    # 3) Bật PASSWORD_PEPPER trong môi trường -> đăng nhập lần đầu KHÔNG bị khóa và tự nâng cấp hash trong MongoDB
+    monkeypatch.setenv("PASSWORD_PEPPER", pepper_secret)
+    web_app = create_dashboard_app(app_container, get_bot=lambda: fake_bot)
+    with TestClient(web_app) as client:
+        # Sai mật khẩu vẫn bị từ chối 401 và không ghi đè hash
+        bad_res = client.post("/auth/login", json={"username": "admin", "password": "WrongPassword123!"})
+        assert bad_res.status_code == 401
+        still_legacy = await fake_db["dashboard_users"].find_one({"username": "admin"})
+        assert still_legacy["password_hash"] == legacy_hash
+
+        # Đăng nhập đúng mật khẩu -> 200 OK và hash trong MongoDB được tự động nâng cấp sang bản có pepper
+        login_res = client.post("/auth/login", json={"username": "admin", "password": long_password})
+        assert login_res.status_code == 200
+        assert pepper_secret not in login_res.text
+        assert "password_hash" not in login_res.text
+
+        upgraded_doc = await fake_db["dashboard_users"].find_one({"username": "admin"})
+        assert upgraded_doc is not None
+        upgraded_hash = upgraded_doc["password_hash"]
+        assert upgraded_hash != legacy_hash
+        assert pepper_secret not in str(upgraded_doc)
+
+        # Sau khi nâng cấp: xác thực với pepper khớp trực tiếp (needs_migration=False), xác thực không có pepper phải thất bại
+        assert verify_password_with_migration(long_password, upgraded_hash, pepper=pepper_secret) == (True, False)
+        assert verify_password_with_migration(long_password, upgraded_hash, pepper="") == (False, False)
+
+        # Đăng nhập lần 2 tiếp tục thành công và không cần migration nữa
+        login_res_2 = client.post("/auth/login", json={"username": "admin", "password": long_password})
+        assert login_res_2.status_code == 200
+        after_second_doc = await fake_db["dashboard_users"].find_one({"username": "admin"})
+        assert after_second_doc["password_hash"] == upgraded_hash
+
+        # Tạo tài khoản mới hoặc đổi mật khẩu khi PASSWORD_PEPPER đang bật -> lưu trực tiếp hash có pepper
+        assert client.post(
+            "/api/permissions/users",
+            json={"username": "newop", "password": "NewOpPassword123!", "role": "operator"},
+        ).status_code == 200
+        newop_doc = await fake_db["dashboard_users"].find_one({"username": "newop"})
+        assert verify_password_with_migration("NewOpPassword123!", newop_doc["password_hash"], pepper=pepper_secret) == (True, False)
+        assert verify_password_with_migration("NewOpPassword123!", newop_doc["password_hash"], pepper="") == (False, False)
+
+        # Kiểm tra Zero Exposure trên /api/me, /api/permissions/users và /api/audit-logs
+        for path in ("/api/me", "/api/permissions/users", "/api/audit-logs?limit=20"):
+            res = client.get(path)
+            assert res.status_code == 200
+            assert pepper_secret not in res.text
+            assert "password_hash" not in res.text
+            assert upgraded_hash not in res.text
+
+    # Kiểm tra hash_password với pepper khác nhau cho ra kết quả không tương thích
+    h_with_pepper = hash_password("SamePass123!", pepper=pepper_secret)
+    assert verify_password_with_migration("SamePass123!", h_with_pepper, pepper="wrong-pepper") == (False, False)
+

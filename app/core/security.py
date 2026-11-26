@@ -50,7 +50,7 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"[MN][A-Za-z\d]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"), "[REDACTED_TOKEN]"),
     (
         re.compile(
-            r"((?:api[_-]?key|token|secret|password|passwd|auth|key)\s*[=:]\s*)([^\s&'\",;]+)",
+            r"((?:api[_-]?key|token|secret|password|passwd|pepper|auth|key)\s*[=:]\s*)([^\s&'\",;]+)",
             re.IGNORECASE,
         ),
         r"\1[REDACTED]",
@@ -64,22 +64,25 @@ _LOOPBACK_NETWORKS = (
 )
 
 
-def hash_password(password: str) -> str:
-    """Băm mật khẩu với thuật toán scrypt kèm salt ngẫu nhiên 16 byte."""
-    salt = secrets.token_bytes(16)
-    derived_key = hashlib.scrypt(
-        password.encode("utf-8"),
-        salt=salt,
-        n=2**14,
-        r=8,
-        p=1,
-        dklen=32,
-    )
-    return f"scrypt$16384$8$1${salt.hex()}${derived_key.hex()}"
+def get_password_pepper() -> str:
+    """Đọc khóa PASSWORD_PEPPER trực tiếp từ biến môi trường (không bao giờ lưu trong MongoDB hay Git)."""
+    return (os.getenv("PASSWORD_PEPPER") or "").strip()
 
 
-def verify_password(password: str, stored_hash: str) -> bool:
-    """Kiểm tra mật khẩu thô với chuỗi băm scrypt theo thời gian hằng (chống timing attack)."""
+def apply_password_pepper(raw_password: str, pepper: Optional[str] = None) -> str:
+    """Tiền băm mật khẩu bằng HMAC-SHA256 với PASSWORD_PEPPER (64 ký tự hex, tránh giới hạn 72-byte của bcrypt)."""
+    effective_pepper = get_password_pepper() if pepper is None else pepper.strip()
+    if not effective_pepper:
+        return raw_password
+    return hmac.new(
+        effective_pepper.encode("utf-8"),
+        raw_password.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _verify_scrypt_material(material: str, stored_hash: str) -> bool:
+    """Xác thực chuỗi đầu vào đã chuẩn bị với chuỗi băm scrypt theo thời gian hằng (chống timing attack)."""
     try:
         parts = stored_hash.split("$")
         if len(parts) != 6 or parts[0] != "scrypt":
@@ -92,7 +95,7 @@ def verify_password(password: str, stored_hash: str) -> bool:
         salt = bytes.fromhex(salt_hex)
         expected = bytes.fromhex(dk_hex)
         actual = hashlib.scrypt(
-            password.encode("utf-8"),
+            material.encode("utf-8"),
             salt=salt,
             n=n_val,
             r=r_val,
@@ -104,16 +107,66 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
-async def hash_password_async(password: str) -> str:
+def hash_password(password: str, *, pepper: Optional[str] = None) -> str:
+    """Tiền băm mật khẩu với HMAC-SHA256 (nếu có PASSWORD_PEPPER) rồi băm scrypt kèm salt ngẫu nhiên 16 byte."""
+    material = apply_password_pepper(password, pepper=pepper)
+    salt = secrets.token_bytes(16)
+    derived_key = hashlib.scrypt(
+        material.encode("utf-8"),
+        salt=salt,
+        n=2**14,
+        r=8,
+        p=1,
+        dklen=32,
+    )
+    return f"scrypt$16384$8$1${salt.hex()}${derived_key.hex()}"
+
+
+def verify_password_with_migration(
+    password: str,
+    stored_hash: str,
+    *,
+    pepper: Optional[str] = None,
+) -> tuple[bool, bool]:
+    """Xác thực mật khẩu theo 2 bước: ưu tiên bản tiền băm HMAC-SHA256 Pepper; nếu sai thì kiểm tra hash cũ để nâng cấp mượt."""
+    effective_pepper = get_password_pepper() if pepper is None else pepper.strip()
+    if effective_pepper:
+        peppered_pw = apply_password_pepper(password, pepper=effective_pepper)
+        if _verify_scrypt_material(peppered_pw, stored_hash):
+            return True, False
+        if _verify_scrypt_material(password, stored_hash):
+            return True, True
+        return False, False
+    return _verify_scrypt_material(password, stored_hash), False
+
+
+def verify_password(password: str, stored_hash: str, *, pepper: Optional[str] = None) -> bool:
+    """Kiểm tra mật khẩu với chuỗi băm scrypt (hỗ trợ cả mật khẩu đã gắn pepper lẫn fallback hash cũ)."""
+    is_valid, _needs_migration = verify_password_with_migration(password, stored_hash, pepper=pepper)
+    return is_valid
+
+
+async def hash_password_async(password: str, *, pepper: Optional[str] = None) -> str:
     """Băm mật khẩu trên luồng phụ với giới hạn đồng thời để không chặn event loop hoặc gây tràn RAM 488MB."""
     async with _SCRYPT_SEMAPHORE:
-        return await asyncio.to_thread(hash_password, password)
+        return await asyncio.to_thread(hash_password, password, pepper=pepper)
 
 
-async def verify_password_async(password: str, stored_hash: str) -> bool:
+async def verify_password_async(password: str, stored_hash: str, *, pepper: Optional[str] = None) -> bool:
     """Xác thực mật khẩu trên luồng phụ với giới hạn đồng thời an toàn cho container 488MB."""
     async with _SCRYPT_SEMAPHORE:
-        return await asyncio.to_thread(verify_password, password, stored_hash)
+        return await asyncio.to_thread(verify_password, password, stored_hash, pepper=pepper)
+
+
+async def verify_password_with_migration_async(
+    password: str,
+    stored_hash: str,
+    *,
+    pepper: Optional[str] = None,
+) -> tuple[bool, bool]:
+    """Xác thực mật khẩu kèm cờ nâng cấp hash cũ trên luồng phụ (giới hạn đồng thời cho container 488MB)."""
+    async with _SCRYPT_SEMAPHORE:
+        return await asyncio.to_thread(verify_password_with_migration, password, stored_hash, pepper=pepper)
 
 
 def is_sensitive_key(field_path: str) -> bool:

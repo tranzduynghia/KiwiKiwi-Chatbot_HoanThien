@@ -44,6 +44,7 @@ DEFAULT_FALLBACK_MODELS = [
 
 SENSITIVE_KEY_TOKENS = (
     "password",
+    "pepper",
     "secret",
     "token",
     "api_key",

@@ -12,6 +12,7 @@ import { escapeHtml, showToast } from "./api.js";
 
 const SENSITIVE_KEY_TOKENS = [
   "password",
+  "pepper",
   "secret",
   "token",
   "api_key",

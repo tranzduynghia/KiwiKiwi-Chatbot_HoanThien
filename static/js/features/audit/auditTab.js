@@ -8,6 +8,7 @@ import { apiRequest, escapeHtml, sanitizeHttpUrl, showToast } from "../../core/a
 
 const SENSITIVE_FIELD_TOKENS = [
   "password",
+  "pepper",
   "secret",
   "token",
   "api_key",

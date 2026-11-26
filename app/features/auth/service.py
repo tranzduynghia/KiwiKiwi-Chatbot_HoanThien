@@ -2,17 +2,20 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.errors import AlreadyExistsError
-from app.core.security import hash_password_async, verify_password_async
+from app.core.security import hash_password_async, verify_password_with_migration_async
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.audit.service import AuditService
 from app.features.auth.repository import UserRepository
 from app.features.permissions.service import PermissionService
+
+log = logging.getLogger("gemini-bot.auth")
 
 
 class AuthService:
@@ -176,11 +179,23 @@ class AuthService:
         return True
 
     async def authenticate_password(self, username: str, password: str) -> Optional[dict[str, Any]]:
-        """Xác thực tên đăng nhập và mật khẩu, đồng thời cập nhật thời điểm đăng nhập gần nhất."""
+        """Xác thực mật khẩu (hỗ trợ HMAC-SHA256 Pepper + tự động nâng cấp mượt hash cũ sang bản có pepper khi đăng nhập)."""
         uname = username.strip().lower()
         doc = await self._users.find_by_username(uname)
-        if not doc or not await verify_password_async(password, doc.get("password_hash", "")):
+        if not doc:
             return None
+
+        is_valid, needs_migration = await verify_password_with_migration_async(
+            password,
+            doc.get("password_hash", ""),
+        )
+        if not is_valid:
+            return None
+
+        if needs_migration:
+            upgraded_hash = await hash_password_async(password)
+            await self._users.upgrade_password_hash(uname, upgraded_hash)
+            log.info("Đã tự động nâng cấp mật khẩu của tài khoản '%s' sang chuẩn HMAC-SHA256 Pepper.", uname)
 
         now_iso = datetime.now(timezone.utc).isoformat()
         await self._users.record_last_login(uname, now_iso)

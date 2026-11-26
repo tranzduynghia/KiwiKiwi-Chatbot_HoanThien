@@ -167,6 +167,27 @@ class UserRepository:
             except Exception:
                 pass
 
+    async def upgrade_password_hash(self, username: str, new_password_hash: str) -> None:
+        """Nâng cấp mượt `password_hash` cũ sang bản có `PASSWORD_PEPPER` ngay trên RAM và MongoDB."""
+        uname = _safe_username_key(username)
+        if not uname or not new_password_hash:
+            return
+        if uname in self._cache:
+            self._cache[uname]["password_hash"] = new_password_hash
+        if self.connected:
+            try:
+                await self.collection.update_one(
+                    {"username": uname},
+                    {"$set": {"password_hash": new_password_hash}},
+                )
+                if uname in self._pending and self._pending[uname].get("op") == "upsert":
+                    self._pending[uname]["doc"]["password_hash"] = new_password_hash
+                return
+            except Exception as exc:
+                log.warning("Chưa cập nhật được password_hash nâng cấp lên MongoDB cho '%s': %s", uname, redact_secrets(str(exc)))
+        if uname in self._cache:
+            self.stage_upsert(self._cache[uname])
+
     def stage_upsert(self, doc: dict[str, Any]) -> None:
         """Lưu tài khoản đã băm scrypt vào RAM và hàng đợi đồng bộ Atlas."""
         uname = doc["username"]

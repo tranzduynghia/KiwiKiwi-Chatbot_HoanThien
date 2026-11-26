@@ -29,6 +29,7 @@ Sao chép `_.env.example` thành `.env` (hoặc cấu hình trong Environment Va
 | `MONGODB_DB` | Không | Tên database (mặc định `gemini_bot`) |
 | `PORT` | Không | Cổng chạy Web Dashboard & `/health` (mặc định `10000`) |
 | `SESSION_SECRET` | Nên đặt | Chuỗi bí mật >= 32 ký tự để ký HMAC-SHA256 cookie phiên. Tạo bằng: `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `PASSWORD_PEPPER` | Nên đặt | Khóa bí mật tiền băm mật khẩu bằng HMAC-SHA256 trước khi đưa vào `scrypt` (tự động nâng cấp mượt hash cũ khi đăng nhập, không lưu vào MongoDB). Tạo bằng: `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `SESSION_MAX_AGE_SECONDS` | Không | Thời hạn cookie phiên tính bằng giây (mặc định `86400` = 24 giờ, kẹp trong `300..604800`) |
 | `DASHBOARD_PUBLIC_URL` | Khi dùng OAuth2 | URL công khai của Dashboard (VD: `https://bot.northflank.app`, không có `/` ở cuối) |
 | `DISCORD_CLIENT_ID` | Khi dùng OAuth2 | Client ID trong Discord Developer Portal → **OAuth2** |

@@ -138,6 +138,8 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
             if forwarded_proto in ("http", "https"):
                 request.scope["scheme"] = forwarded_proto
+                if hasattr(request, "_url"):
+                    delattr(request, "_url")
             forwarded_ip = (
                 (request.headers.get("cf-connecting-ip") or "").strip()
                 or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
