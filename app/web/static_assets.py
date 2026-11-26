@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -304,8 +305,22 @@ def strip_js_comments(source: str) -> str:
     return _cleanup_blank_lines("".join(out))
 
 
-def create_sanitized_static_router(static_dir: Path) -> APIRouter:
-    """Tạo router phục vụ `/static/{asset_path:path}`: tự động lọc comment JS/CSS tại runtime kèm cache nhẹ theo `mtime_ns`."""
+# Nhận diện lệnh import/export ES module tương đối (`from "./..."` hoặc `from "../..."`) để gắn version cache-bust
+_JS_RELATIVE_IMPORT_RE = re.compile(
+    r"""(\b(?:from|import)\s*['"])(\.\.?/[^'"?#]+\.m?js)(?:\?[^'"]*)?(['"])"""
+)
+
+
+def rewrite_js_relative_imports(source: str, asset_version: str) -> str:
+    """Tự động gắn `?v=<asset_version>` vào các đường dẫn ES module tương đối trong bản JS phục vụ runtime (không sửa tệp trên đĩa)."""
+    version = str(asset_version or "").strip()
+    if not version:
+        return source
+    return _JS_RELATIVE_IMPORT_RE.sub(rf"\1\2?v={version}\3", source)
+
+
+def create_sanitized_static_router(static_dir: Path, *, asset_version: str = "") -> APIRouter:
+    """Tạo router phục vụ `/static/{asset_path:path}`: tự động lọc comment JS/CSS & gắn version ES module tại runtime kèm cache theo `mtime_ns`."""
     router = APIRouter(tags=["static"])
     resolved_root = static_dir.resolve()
     # Bộ nhớ đệm nhẹ: path -> (mtime_ns, size, content_bytes, etag, media_type)
@@ -331,7 +346,10 @@ def create_sanitized_static_router(static_dir: Path) -> APIRouter:
             _, _, body_bytes, etag, media_type = cached
         else:
             raw_text = target.read_text(encoding="utf-8")
-            stripped_text = strip_css_comments(raw_text) if suffix == ".css" else strip_js_comments(raw_text)
+            if suffix == ".css":
+                stripped_text = strip_css_comments(raw_text)
+            else:
+                stripped_text = rewrite_js_relative_imports(strip_js_comments(raw_text), asset_version)
             body_bytes = stripped_text.encode("utf-8")
             etag = f'"{hashlib.sha256(body_bytes).hexdigest()[:16]}"'
             media_type = _MEDIA_TYPES[suffix]

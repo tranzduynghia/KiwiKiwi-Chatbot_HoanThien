@@ -606,6 +606,29 @@ body.sidebar-collapsed .ox-main-wrapper {
   animation: oxFadeSlideUp 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Chuyển động đóng/mở đối xứng cho mọi hộp thoại Modal (luôn chạy ngay không phụ thuộc Tailwind CDN) */
+.ox-modal-backdrop {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease-out;
+}
+
+.ox-modal-backdrop.is-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ox-modal-panel {
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.95);
+  transition: opacity 200ms ease-out, transform 200ms ease-out;
+}
+
+.ox-modal-backdrop.is-open .ox-modal-panel {
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+
 .ox-kpi-value,
 .ox-progress-fill,
 .ox-bar-rect {

@@ -371,32 +371,46 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
 
   function bindEvents() {
     bindAvatarFallbacks();
-    document.getElementById("btn-refresh-status").addEventListener("click", () => loadStatus(false, { silent: false }));
-    document.getElementById("btn-check-gemini").addEventListener("click", () => loadStatus(true, { silent: false }));
-    document.getElementById("btn-clear-cd").addEventListener("click", async () => {
-      await showConfirmModal({
-        title: "Xác nhận xóa toàn bộ Cooldown Model Gemini",
-        subtitle: "Tất cả model đang tạm nghỉ vì 429 Quota hoặc quá tải sẽ được mở khóa ngay lập tức",
-        changes: [
-          {
-            key: "models.cooldowns",
-            label: "Trạng thái Cooldown Model",
-            before: "Đang áp dụng cooldown tự động",
-            after: "Đặt lại về 0 (sẵn sàng gọi ngay)",
-          },
-        ],
-        confirmLabel: "Xác nhận xóa",
-        onConfirm: async () => {
-          const res = await apiRequest("/api/models/clear-cooldowns", { method: "POST" });
-          showToast(`Đã xóa cooldown của ${res.cleared} model.`);
-          loadStatus(false, { silent: true });
-        },
-      });
-    });
+    const statusRoot = document.getElementById("tab-status") || document;
+    statusRoot.addEventListener("click", async (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== "function") return;
 
-    const testWatchdogBtn = document.getElementById("btn-test-watchdog");
-    if (testWatchdogBtn) {
-      testWatchdogBtn.addEventListener("click", async () => {
+      if (target.closest("#btn-refresh-status")) {
+        loadStatus(false, { silent: false });
+        return;
+      }
+
+      if (target.closest("#btn-check-gemini")) {
+        loadStatus(true, { silent: false });
+        return;
+      }
+
+      const clearCdBtn = target.closest("#btn-clear-cd");
+      if (clearCdBtn && !clearCdBtn.disabled) {
+        await showConfirmModal({
+          title: "Xác nhận xóa toàn bộ Cooldown Model Gemini",
+          subtitle: "Tất cả model đang tạm nghỉ vì 429 Quota hoặc quá tải sẽ được mở khóa ngay lập tức",
+          changes: [
+            {
+              key: "models.cooldowns",
+              label: "Trạng thái Cooldown Model",
+              before: "Đang áp dụng cooldown tự động",
+              after: "Đặt lại về 0 (sẵn sàng gọi ngay)",
+            },
+          ],
+          confirmLabel: "Xác nhận xóa",
+          onConfirm: async () => {
+            const res = await apiRequest("/api/models/clear-cooldowns", { method: "POST" });
+            showToast(`Đã xóa cooldown của ${res.cleared} model.`);
+            loadStatus(false, { silent: true });
+          },
+        });
+        return;
+      }
+
+      const testWatchdogBtn = target.closest("#btn-test-watchdog");
+      if (testWatchdogBtn && !testWatchdogBtn.disabled) {
         await showConfirmModal({
           title: "Xác nhận chạy mô phỏng Memory Watchdog",
           subtitle: "Kiểm thử toàn bộ quy trình 4 bước Sync-Before-Purge mà không gây tràn RAM thật",
@@ -432,8 +446,8 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
             }
           },
         });
-      });
-    }
+      }
+    });
   }
 
   return {

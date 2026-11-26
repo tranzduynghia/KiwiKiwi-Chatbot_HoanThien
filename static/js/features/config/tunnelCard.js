@@ -378,23 +378,37 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     if (modeEl) modeEl.addEventListener("change", syncModeInputs);
 
     const toggleBtn = document.getElementById("btn-toggle-tunnel");
-    const saveBtn = document.getElementById("btn-save-tunnel");
-    const copyOriginBtn = document.getElementById("btn-copy-cf-origin");
     if (toggleBtn) {
       // Đồng bộ trạng thái khởi tạo từ HTML render phía server trước khi nhận telemetry đầu tiên
       syncToggleButton(toggleBtn.dataset.tunnelActive === "true");
-      toggleBtn.addEventListener("click", () => {
+    }
+
+    // Ủy quyền sự kiện click trên khung thẻ Tunnel để không bao giờ mất listener khi nút đổi trạng thái động
+    const tunnelCardEl = document.getElementById("cf-tunnel-card") || document;
+    tunnelCardEl.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!target || typeof target.closest !== "function") return;
+
+      const clickedToggle = target.closest("#btn-toggle-tunnel");
+      if (clickedToggle && !clickedToggle.disabled) {
+        event.preventDefault();
         submitTunnelAction(isTunnelActive ? "stop" : "start");
-      });
-    }
-    if (saveBtn) {
-      saveBtn.addEventListener("click", () => {
+        return;
+      }
+
+      const clickedSave = target.closest("#btn-save-tunnel");
+      if (clickedSave && !clickedSave.disabled) {
+        event.preventDefault();
         submitTunnelAction("update");
-      });
-    }
-    if (copyOriginBtn) {
-      copyOriginBtn.addEventListener("click", copyOriginToClipboard);
-    }
+        return;
+      }
+
+      const clickedCopy = target.closest("#btn-copy-cf-origin");
+      if (clickedCopy) {
+        event.preventDefault();
+        copyOriginToClipboard();
+      }
+    });
   }
 
   return { fill, renderTelemetry, bindEvents };

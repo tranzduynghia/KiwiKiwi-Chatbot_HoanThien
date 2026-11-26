@@ -128,3 +128,9 @@ async def test_rendered_pages_and_static_endpoints_strip_all_developer_comments(
                 # Đảm bảo mã nguồn trên đĩa vẫn còn comment phát triển
                 disk_text = js_file.read_text(encoding="utf-8")
                 assert ("/*" in disk_text) or ("//" in disk_text), f"Tệp nguồn {rel} bị mất comment trên đĩa"
+
+            # Đảm bảo import ES module tương đối được gắn tự động `?v=<ASSET_VERSION>` khi phục vụ runtime
+            dash_js = client.get("/static/js/dashboard.js").text
+            assert "./features/config/tunnelCard.js?v=" in dash_js
+            confirm_js = client.get("/static/js/core/confirmSave.js").text
+            assert "./modalTransition.js?v=" in confirm_js
