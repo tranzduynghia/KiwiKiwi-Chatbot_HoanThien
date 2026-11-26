@@ -25,6 +25,7 @@ def test_dockerfile_and_entrypoint_configure_cloudflare_warp_proxy():
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
     entrypoint = (root / "docker-entrypoint.sh").read_text(encoding="utf-8")
 
+    assert "FROM python:3.12-slim-bookworm" in dockerfile
     assert "cloudflare-warp" in dockerfile
     assert "COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/cloudflared" in dockerfile
     assert "/var/lib/cloudflare-warp" in dockerfile
@@ -51,7 +52,7 @@ def test_dockerfile_and_entrypoint_configure_cloudflare_warp_proxy():
 
 @pytest.mark.asyncio
 async def test_warp_proxy_routes_gemini_and_discord_with_graceful_fallback():
-    """Khi 127.0.0.1:<port> mở -> Gemini & Discord đi qua WARP; khi tắt hoặc mất kết nối -> tự động fallback Direct, MongoDB giữ TLS trực tiếp."""
+    """Khi 127.0.0.1:<port> mở -> Gemini & Discord đi qua WARP (socks5h:// chống rò DNS); khi tắt/mất kết nối -> fallback Direct, MongoDB giữ TLS trực tiếp."""
     # Mở một cổng TCP loopback tạm thời để mô phỏng WARP proxy 127.0.0.1:40000 đang lắng nghe
     server = await asyncio.start_server(lambda r, w: w.close(), "127.0.0.1", 0)
     listen_port = server.sockets[0].getsockname()[1]
@@ -87,36 +88,37 @@ async def test_warp_proxy_routes_gemini_and_discord_with_graceful_fallback():
         )
         bot = AskBot(container)
 
-        expected_proxy = f"http://127.0.0.1:{listen_port}"
+        expected_proxy = f"socks5h://127.0.0.1:{listen_port}"
         assert warp_service.is_active is True
         assert created_clients[-1][0] == expected_proxy
-        assert bot.http.proxy == expected_proxy
+        assert bot._active_outbound_proxy == expected_proxy
         # MongoDB Atlas vẫn giữ URI TLS trực tiếp, không bị sửa sang proxy
         assert container.db_manager.uri == settings.mongodb_uri
 
-        # Kiểm tra build_gemini_http_options với proxy động và Direct
+        # Kiểm tra build_gemini_http_options với proxy động socks5h:// và Direct
         opts_warp = build_gemini_http_options(settings, proxy_url=expected_proxy)
         assert opts_warp is not None
         assert opts_warp.client_args == {"proxy": expected_proxy}
         assert opts_warp.async_client_args == {"proxy": expected_proxy}
         assert build_gemini_http_options(settings, proxy_url="") is None
 
-        # Tắt nóng WARP Outbound -> Gemini client & Discord http.proxy lập tức chuyển về Direct (None)
+        # Tắt nóng WARP Outbound -> Gemini client & Discord lập tức chuyển về Direct (None)
         snap_off = await warp_service.set_enabled(False, force_probe=True)
         assert snap_off["enabled"] is False
         assert snap_off["active"] is False
         assert snap_off["outbound_mode"] == "direct"
         assert created_clients[-1][0] is None
+        assert bot._active_outbound_proxy is None
         assert bot.http.proxy is None
 
-        # Bật lại nóng WARP Outbound -> khôi phục định tuyến qua 127.0.0.1:<port>
+        # Bật lại nóng WARP Outbound -> khôi phục định tuyến qua socks5h://127.0.0.1:<port>
         snap_on = await warp_service.set_enabled(True, force_probe=True)
         assert snap_on["active"] is True
         assert snap_on["outbound_mode"] == "proxy"
         assert snap_on["warp_ram_mb"] == 29.4
         assert snap_on["warp_pid"] == 7788
         assert created_clients[-1][0] == expected_proxy
-        assert bot.http.proxy == expected_proxy
+        assert bot._active_outbound_proxy == expected_proxy
 
         # Đóng cổng giả lập WARP -> refresh_status tự động fallback về Direct mà không lỗi
         server.close()
@@ -127,6 +129,7 @@ async def test_warp_proxy_routes_gemini_and_discord_with_graceful_fallback():
         assert snap_fallback["fallback_direct"] is True
         assert snap_fallback["outbound_mode"] == "direct"
         assert created_clients[-1][0] is None
+        assert bot._active_outbound_proxy is None
         assert bot.http.proxy is None
     finally:
         server.close()
@@ -178,7 +181,7 @@ async def test_gemini_mid_request_proxy_error_triggers_direct_fallback(fake_db):
         web_search=False,
     )
     assert resp.text == "Trả lời thành công qua Direct fallback"
-    assert call_log == ["http://127.0.0.1:40000", None]
+    assert call_log == ["socks5h://127.0.0.1:40000", None]
     assert warp_service.is_active is False
     assert warp_service.status_snapshot()["fallback_direct"] is True
 
@@ -450,7 +453,7 @@ async def test_warp_start_update_stop_daemon_bootstrap_and_socket_readiness_poll
         assert start_body["warp"]["active"] is True
         assert start_body["warp"]["connected"] is True
         assert start_body["warp"]["diagnostic"] is None
-        assert start_body["warp"]["proxy_url"] == "http://127.0.0.1:40000"
+        assert start_body["warp"]["proxy_url"] == "socks5h://127.0.0.1:40000"
         assert start_body["cloudflare_tunnel"]["outbound_mode"] == "proxy"
         assert state["daemon_spawned"] is True
         assert state["registered"] is True
@@ -461,11 +464,11 @@ async def test_warp_start_update_stop_daemon_bootstrap_and_socket_readiness_poll
         assert all("WARP_LICENSE_KEY" not in env for env in state["child_envs"])
         assert all("DISCORD_TOKEN" not in env for env in state["child_envs"])
 
-        # POST /api/warp/update với cổng loopback mới 40001 -> luôn khóa về 127.0.0.1:40001
+        # POST /api/warp/update với cổng loopback mới 40001 -> luôn khóa về socks5h://127.0.0.1:40001
         upd_res = client.post("/api/warp/update", json={"warp_outbound_enabled": True, "warp_proxy_port": 40001})
         assert upd_res.status_code == 200
         assert upd_res.json()["warp"]["active"] is True
-        assert upd_res.json()["warp"]["proxy_url"] == "http://127.0.0.1:40001"
+        assert upd_res.json()["warp"]["proxy_url"] == "socks5h://127.0.0.1:40001"
         assert state["proxy_port"] == 40001
 
         # POST /api/warp/stop -> ngắt kết nối và chuyển ngay về Direct

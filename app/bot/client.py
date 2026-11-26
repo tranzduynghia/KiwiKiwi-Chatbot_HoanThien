@@ -25,6 +25,30 @@ from app.web.app import create_dashboard_app
 log = logging.getLogger("gemini-bot")
 
 
+def _build_discord_proxy_kwargs(proxy_url: Optional[str]) -> dict[str, Any]:
+    """Chuyển đổi URL proxy (`socks5h://`, `socks5://`, `http://`) thành tham số phù hợp cho `discord.Client`."""
+    raw = (proxy_url or "").strip()
+    if not raw:
+        return {}
+    lowered = raw.lower()
+    if lowered.startswith(("socks5h://", "socks5://", "socks4a://", "socks4://")):
+        try:
+            from aiohttp_socks import ProxyConnector
+
+            rdns = lowered.startswith(("socks5h://", "socks4a://"))
+            normalized = raw
+            if lowered.startswith("socks5h://"):
+                normalized = "socks5://" + raw[len("socks5h://"):]
+            elif lowered.startswith("socks4a://"):
+                normalized = "socks4://" + raw[len("socks4a://"):]
+            connector = ProxyConnector.from_url(normalized, rdns=rdns)
+            return {"connector": connector, "proxy": None}
+        except Exception as exc:
+            log.warning("Không tạo được SOCKS5h ProxyConnector cho Discord (%s) — tạm dùng Direct.", exc)
+            return {}
+    return {"proxy": raw}
+
+
 class AskBot(discord.Client):
     """Tiến trình bot Discord kiêm máy chủ Web Dashboard FastAPI chạy chung vòng lặp asyncio."""
 
@@ -34,7 +58,8 @@ class AskBot(discord.Client):
             proxy_url = warp_proxy.effective_proxy_url() or None
         else:
             proxy_url = (getattr(container.settings, "outbound_proxy_url", "") or "").strip() or None
-        super().__init__(intents=discord.Intents.default(), proxy=proxy_url)
+        self._active_outbound_proxy: Optional[str] = proxy_url
+        super().__init__(intents=discord.Intents.default(), **_build_discord_proxy_kwargs(proxy_url))
         self.container = container
         self.tree = app_commands.CommandTree(self)
         self.ready_at: Optional[float] = None
@@ -48,9 +73,20 @@ class AskBot(discord.Client):
             lambda presence_cfg: apply_bot_presence(self, presence_cfg)
         )
         if warp_proxy is not None:
-            def _update_discord_proxy(new_proxy: Optional[str]) -> None:
-                if getattr(self, "http", None) is not None:
-                    self.http.proxy = new_proxy or None
+            async def _update_discord_proxy(new_proxy: Optional[str]) -> None:
+                self._active_outbound_proxy = new_proxy or None
+                http_client = getattr(self, "http", None)
+                if http_client is None:
+                    return
+                kwargs = _build_discord_proxy_kwargs(new_proxy)
+                http_client.proxy = kwargs.get("proxy")
+                new_connector = kwargs.get("connector")
+                if new_connector is not None:
+                    http_client.connector = new_connector
+                elif not new_proxy:
+                    import aiohttp
+
+                    http_client.connector = aiohttp.TCPConnector(limit=0)
             warp_proxy.register_route_hook(_update_discord_proxy)
         self._register_commands()
 

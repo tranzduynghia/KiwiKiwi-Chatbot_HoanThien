@@ -21,8 +21,9 @@ log = logging.getLogger("gemini-bot.warp")
 
 DEFAULT_WARP_PROXY_HOST = "127.0.0.1"
 DEFAULT_WARP_PROXY_PORT = 40000
-DEFAULT_WARP_PROXY_URL = f"http://{DEFAULT_WARP_PROXY_HOST}:{DEFAULT_WARP_PROXY_PORT}"
+DEFAULT_WARP_PROXY_URL = f"socks5h://{DEFAULT_WARP_PROXY_HOST}:{DEFAULT_WARP_PROXY_PORT}"
 WARP_PROCESS_NAMES = frozenset({"warp-svc", "warp-svc.exe"})
+_WARP_FALLBACK_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/usr/local/sbin")
 
 # Các biến môi trường an toàn được phép truyền cho tiến trình con `warp-svc`/`warp-cli` (tuyệt đối không lộ bí mật bot)
 _ALLOWED_WARP_ENV_KEYS = (
@@ -239,13 +240,14 @@ class WarpProxyService:
 
         raw_url = (proxy_url or "").strip()
         self.explicit_proxy_url = bool(explicit_proxy_url and raw_url)
-        self.proxy_url = raw_url or f"http://{DEFAULT_WARP_PROXY_HOST}:{clean_port}"
+        self.proxy_url = raw_url or f"socks5h://{DEFAULT_WARP_PROXY_HOST}:{clean_port}"
         self.safe_proxy_url = sanitize_proxy_url_display(self.proxy_url)
         self.host, self.port = parse_proxy_host_port(self.proxy_url)
 
         self._probe_sync = probe_sync_fn or probe_tcp_proxy_sync
         self._probe_async = probe_async_fn or probe_tcp_proxy_async
         self._metrics_fn = metrics_fn or read_warp_process_metrics
+        self._custom_which = which_fn is not None
         self._which = which_fn or shutil.which
         self._spawn = spawn_subprocess or asyncio.create_subprocess_exec
         self._cache_ttl = max(0.01, float(cache_ttl))
@@ -294,12 +296,25 @@ class WarpProxyService:
         # Trước khi chạy kiểm tra mạng đầu tiên, tôn trọng OUTBOUND_PROXY_URL cấu hình tường minh
         return self.explicit_proxy_url
 
+    def _find_binary(self, name: str) -> Optional[str]:
+        """Tìm đường dẫn thực thi của `warp-svc`/`warp-cli` trong `PATH` và các thư mục hệ thống chuẩn."""
+        found = self._which(name)
+        if found:
+            return found
+        if self._custom_which:
+            return None
+        for directory in _WARP_FALLBACK_BIN_DIRS:
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+        return None
+
     def is_installed(self) -> bool:
         """Kiểm tra cả hai binary `warp-svc` và `warp-cli` có tồn tại trong container hay không."""
-        return bool(self._which("warp-svc") and self._which("warp-cli"))
+        return bool(self._find_binary("warp-svc") and self._find_binary("warp-cli"))
 
     def effective_proxy_url(self) -> str:
-        """Trả về URL proxy hiệu lực (`http://127.0.0.1:40000`) nếu WARP đang bật & sẵn sàng, ngược lại trả về `""` (Direct)."""
+        """Trả về URL proxy hiệu lực (`socks5h://127.0.0.1:40000`) nếu WARP đang bật & sẵn sàng, ngược lại trả về `""` (Direct)."""
         return self.proxy_url if self.is_active else ""
 
     def register_route_hook(self, hook: Callable[[Optional[str]], Any]) -> None:
@@ -307,13 +322,13 @@ class WarpProxyService:
         self._route_hooks.append(hook)
 
     def _set_loopback_port(self, port: int) -> None:
-        """Cập nhật cổng proxy cục bộ, luôn khóa chặt về loopback `127.0.0.1:<port>` (không bao giờ mở ra ngoài)."""
+        """Cập nhật cổng proxy cục bộ, luôn khóa chặt về loopback `socks5h://127.0.0.1:<port>` (chống rò rỉ DNS)."""
         port_int = int(port)
         if not (1 <= port_int <= 65535):
             raise ValueError("Cổng WARP proxy phải nằm trong khoảng 1..65535.")
         self.host = DEFAULT_WARP_PROXY_HOST
         self.port = port_int
-        self.proxy_url = f"http://{DEFAULT_WARP_PROXY_HOST}:{port_int}"
+        self.proxy_url = f"socks5h://{DEFAULT_WARP_PROXY_HOST}:{port_int}"
         self.safe_proxy_url = self.proxy_url
         self.explicit_proxy_url = False
 
@@ -386,7 +401,7 @@ class WarpProxyService:
 
     async def _run_warp_cli(self, *args: str, timeout: Optional[float] = None) -> tuple[int, str, str]:
         """Chạy `warp-cli --accept-tos ...` an toàn (`shell=False`, tách biệt env bí mật, giới hạn timeout)."""
-        warp_cli = self._which("warp-cli")
+        warp_cli = self._find_binary("warp-cli")
         if not warp_cli:
             return 127, "", "Chưa cài cloudflare-warp"
         cmd = (warp_cli, "--accept-tos", *args)
@@ -486,7 +501,7 @@ class WarpProxyService:
         if rc == 0:
             return True, None, "connected"
 
-        warp_svc_bin = self._which("warp-svc")
+        warp_svc_bin = self._find_binary("warp-svc")
         if not warp_svc_bin:
             return False, "Chưa cài cloudflare-warp", "not_installed"
 
@@ -700,7 +715,7 @@ class WarpProxyService:
 
             await self._apply_route_hooks(None)
 
-            if self._which("warp-cli"):
+            if self._find_binary("warp-cli"):
                 pid, _ram = self._metrics_fn()
                 managed_alive = (
                     self._daemon_proc is not None and getattr(self._daemon_proc, "returncode", None) is None

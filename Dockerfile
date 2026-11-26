@@ -1,8 +1,9 @@
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PORT=10000
 
 WORKDIR /app
@@ -16,7 +17,7 @@ COPY requirements.txt .
 RUN echo "cache-bust: ${CACHE_BUST}" \
  && pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir --upgrade --upgrade-strategy eager --force-reinstall -r requirements.txt \
- && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|fastapi|uvicorn|httpx|pydantic)==" || true) \
+ && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|fastapi|uvicorn|httpx|socksio|aiohttp-socks|pydantic)==" || true) \
  && rm -f /tmp/pypi-*.json
 
 RUN apt-get update \
@@ -24,9 +25,9 @@ RUN apt-get update \
  && curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
  && CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")" \
  && echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" > /etc/apt/sources.list.d/cloudflare-client.list \
- && (apt-get update || (echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ bookworm main" > /etc/apt/sources.list.d/cloudflare-client.list && apt-get update)) \
+ && apt-get update \
  && apt-get install -y --no-install-recommends cloudflare-warp \
- && command -v warp-svc && command -v warp-cli \
+ && ls -la "$(command -v warp-svc)" "$(command -v warp-cli)" \
  && apt-get purge -y --auto-remove gnupg \
  && rm -rf /var/lib/apt/lists/*
 

@@ -155,7 +155,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     );
     const warpRamMb = telemetry.warp_ram_mb ?? warpInfo.warp_ram_mb ?? null;
     const warpPid = telemetry.warp_pid ?? warpInfo.warp_pid ?? null;
-    const warpProxyUrl = telemetry.warp_proxy_url || warpInfo.proxy_url || "http://127.0.0.1:40000";
+    const warpProxyUrl = telemetry.warp_proxy_url || warpInfo.proxy_url || "socks5h://127.0.0.1:40000";
     const warpDiagnostic = String(
       telemetry.warp_diagnostic ?? warpInfo.diagnostic ?? warpInfo.last_error ?? ""
     ).trim();
