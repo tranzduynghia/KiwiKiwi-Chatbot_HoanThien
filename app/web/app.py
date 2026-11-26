@@ -86,6 +86,8 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         stop_presence_rotation(get_bot())
         if getattr(container, "cloudflare_tunnel", None) is not None:
             await container.cloudflare_tunnel.stop()
+        if getattr(container, "warp_proxy", None) is not None:
+            await container.warp_proxy.shutdown()
 
     app = FastAPI(
         title="KiwiKiwi Bot Dashboard",
@@ -220,6 +222,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             auth_deps=container.auth_deps,
         )
     )
+    has_warp = getattr(container, "warp_proxy", None) is not None
     app.include_router(
         create_config_router(
             config_service=container.config_service,
@@ -229,8 +232,23 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             apply_presence_fn=lambda presence_cfg: apply_bot_presence(get_bot(), presence_cfg),
             apply_tunnel_fn=container.cloudflare_tunnel.apply_config,
             apply_warp_fn=(
-                (lambda enabled: container.warp_proxy.set_enabled(enabled, force_probe=True))
-                if getattr(container, "warp_proxy", None) is not None
+                (lambda enabled, port=None: container.warp_proxy.set_enabled(enabled, force_probe=True, bootstrap=True, port=port))
+                if has_warp
+                else None
+            ),
+            start_warp_fn=(
+                (lambda port=None: container.warp_proxy.start_and_connect(port=port, force_reconnect=False))
+                if has_warp
+                else None
+            ),
+            update_warp_fn=(
+                (lambda port=None: container.warp_proxy.start_and_connect(port=port, force_reconnect=True))
+                if has_warp
+                else None
+            ),
+            stop_warp_fn=(
+                container.warp_proxy.stop_and_disconnect
+                if has_warp
                 else None
             ),
             get_tunnel_status_fn=container.cloudflare_tunnel.status_snapshot,

@@ -118,6 +118,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const warpRamBadgeEl = document.getElementById("cf-warp-ram-badge");
     const warpEndpointEl = document.getElementById("cf-warp-endpoint");
     const warpDetailEl = document.getElementById("cf-warp-detail");
+    const warpDiagnosticEl = document.getElementById("cf-warp-diagnostic");
     const warpToggleEl = document.getElementById("cf-warp-outbound-toggle");
     const originEl = document.getElementById("cf-origin-url");
     const urlWrapEl = document.getElementById("cf-public-url-wrap");
@@ -155,6 +156,9 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const warpRamMb = telemetry.warp_ram_mb ?? warpInfo.warp_ram_mb ?? null;
     const warpPid = telemetry.warp_pid ?? warpInfo.warp_pid ?? null;
     const warpProxyUrl = telemetry.warp_proxy_url || warpInfo.proxy_url || "http://127.0.0.1:40000";
+    const warpDiagnostic = String(
+      telemetry.warp_diagnostic ?? warpInfo.diagnostic ?? warpInfo.last_error ?? ""
+    ).trim();
 
     if (outboundEl) {
       const nextText = warpActive ? "Outbound: Cloudflare WARP" : "Outbound: Direct";
@@ -205,9 +209,16 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         const ramPart = warpRamMb !== null && warpRamMb !== undefined ? ` (${warpRamMb} MB RAM)` : "";
         detailText = `Gemini API & Discord đang đi qua Cloudflare WARP${ramPart} · MongoDB Atlas: Direct TLS`;
       } else if (warpFallback) {
-        detailText = "WARP proxy 127.0.0.1:40000 chưa phản hồi — tự động dùng Direct · MongoDB Atlas: Direct TLS";
+        detailText = "Đang tạm dùng Direct fallback cho Gemini & Discord · MongoDB Atlas: Direct TLS";
       }
       if (warpDetailEl.textContent !== detailText) warpDetailEl.textContent = detailText;
+    }
+
+    if (warpDiagnosticEl) {
+      const showDiag = !warpActive && warpEnabled && Boolean(warpDiagnostic);
+      const diagText = showDiag ? `⚠️ ${warpDiagnostic}` : "";
+      if (warpDiagnosticEl.textContent !== diagText) warpDiagnosticEl.textContent = diagText;
+      warpDiagnosticEl.classList.toggle("hidden", !showDiag);
     }
 
     if (warpToggleEl && !isTogglingWarp && initialState?.tunnel) {
@@ -261,15 +272,17 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         title: nextEnabled
           ? "Xác nhận bật Outbound qua Cloudflare WARP"
           : "Xác nhận tắt Outbound Cloudflare WARP",
-        subtitle:
-          "Định tuyến Gemini API & Discord sẽ chuyển nóng ngay lập tức (MongoDB Atlas luôn giữ kết nối TLS trực tiếp)",
+        subtitle: nextEnabled
+          ? "Hệ thống sẽ khởi động warp-svc, ép mode proxy 127.0.0.1 và kiểm tra kết nối trong tối đa ~7 giây"
+          : "Định tuyến Gemini API & Discord sẽ chuyển ngay về kết nối Direct (MongoDB Atlas luôn giữ Direct TLS)",
         before: { tunnel: { warp_outbound_enabled: prevEnabled } },
         after: { tunnel: { warp_outbound_enabled: Boolean(nextEnabled) } },
         confirmLabel: nextEnabled ? "Bật WARP Outbound" : "Chuyển về Direct",
         confirmTone: nextEnabled ? "success" : "danger",
         onConfirm: async (changes) => {
-          const res = await apiRequest("/api/config/warp", {
-            method: "PUT",
+          const endpoint = nextEnabled ? "/api/warp/start" : "/api/warp/stop";
+          const res = await apiRequest(endpoint, {
+            method: "POST",
             body: JSON.stringify({
               warp_outbound_enabled: Boolean(nextEnabled),
               changes,
@@ -282,13 +295,16 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
             renderTelemetry(res.cloudflare_tunnel);
           }
           const warpActive = Boolean(res.warp?.active ?? res.cloudflare_tunnel?.warp_active);
+          const diag = String(
+            res.warp?.diagnostic ?? res.cloudflare_tunnel?.warp_diagnostic ?? ""
+          ).trim();
           if (!nextEnabled) {
             showToast("⏹ Đã tắt Cloudflare WARP Outbound — chuyển sang kết nối Direct.");
           } else if (warpActive) {
-            showToast("⚡ Đã bật Outbound qua Cloudflare WARP (127.0.0.1:40000)!");
+            showToast(`⚡ Đã bật Outbound qua Cloudflare WARP (${res.warp?.proxy_url || "127.0.0.1:40000"})!`);
           } else {
             showToast(
-              "⚠️ Đã bật cấu hình WARP nhưng 127.0.0.1:40000 chưa phản hồi — tạm dùng Direct fallback.",
+              `⚠️ ${diag || "WARP proxy chưa phản hồi"} — tạm dùng Direct fallback.`,
               false
             );
           }
@@ -300,6 +316,55 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       }
     } catch {
       if (warpToggleEl) warpToggleEl.checked = prevEnabled;
+    } finally {
+      isTogglingWarp = false;
+    }
+  }
+
+  async function submitWarpReconnect() {
+    isTogglingWarp = true;
+    try {
+      await showConfirmModal({
+        title: "Khởi động lại & kiểm tra Cloudflare WARP",
+        subtitle: "Khởi động warp-svc (nếu chưa chạy), đăng ký/áp dụng mode proxy 127.0.0.1 và chờ cổng lắng nghe (~7 giây)",
+        confirmLabel: "Kết nối lại WARP",
+        confirmTone: "primary",
+        entries: [
+          {
+            key: "tunnel.warp_outbound_enabled",
+            label: "Định tuyến Outbound Cloudflare WARP",
+            before: "Kiểm tra / cấu hình lại",
+            after: "mode proxy (127.0.0.1) + connect",
+            formattedBefore: "Hiện tại",
+            formattedAfter: "Khởi động & kết nối lại",
+            isSensitive: false,
+            isHighImpact: false,
+            isLongText: false,
+          },
+        ],
+        onConfirm: async () => {
+          const res = await apiRequest("/api/warp/update", {
+            method: "POST",
+            body: JSON.stringify({ warp_outbound_enabled: true }),
+          });
+          if (res.config) {
+            fill(res.config);
+          }
+          if (res.cloudflare_tunnel) {
+            renderTelemetry(res.cloudflare_tunnel);
+          }
+          const warpActive = Boolean(res.warp?.active ?? res.cloudflare_tunnel?.warp_active);
+          const diag = String(
+            res.warp?.diagnostic ?? res.cloudflare_tunnel?.warp_diagnostic ?? ""
+          ).trim();
+          if (warpActive) {
+            showToast(`⚡ Cloudflare WARP đã kết nối tại ${res.warp?.proxy_url || "127.0.0.1:40000"}!`);
+          } else {
+            showToast(`⚠️ ${diag || "WARP chưa kết nối được"} — đang giữ Direct fallback.`, false);
+          }
+          if (onConfigSaved) await onConfigSaved();
+        },
+      });
     } finally {
       isTogglingWarp = false;
     }
@@ -542,6 +607,13 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       if (clickedCopy) {
         event.preventDefault();
         copyOriginToClipboard();
+        return;
+      }
+
+      const clickedWarpReconnect = target.closest("#btn-warp-reconnect");
+      if (clickedWarpReconnect && !clickedWarpReconnect.disabled && isAdmin) {
+        event.preventDefault();
+        submitWarpReconnect();
       }
     });
 

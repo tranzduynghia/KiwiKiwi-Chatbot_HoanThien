@@ -26,6 +26,7 @@ RUN apt-get update \
  && echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" > /etc/apt/sources.list.d/cloudflare-client.list \
  && (apt-get update || (echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ bookworm main" > /etc/apt/sources.list.d/cloudflare-client.list && apt-get update)) \
  && apt-get install -y --no-install-recommends cloudflare-warp \
+ && command -v warp-svc && command -v warp-cli \
  && apt-get purge -y --auto-remove gnupg \
  && rm -rf /var/lib/apt/lists/*
 
@@ -38,8 +39,9 @@ COPY static/ ./static/
 
 RUN chmod +x /app/docker-entrypoint.sh \
  && useradd --create-home --no-log-init --shell /usr/sbin/nologin botuser \
- && mkdir -p /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp \
- && chown -R botuser:botuser /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp /app
+ && mkdir -p /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp /home/botuser/.local/share/warp \
+ && chown -R botuser:botuser /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp /home/botuser /app \
+ && chmod 0775 /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp
 
 USER botuser
 

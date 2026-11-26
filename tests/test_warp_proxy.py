@@ -285,3 +285,242 @@ def test_warp_license_key_zero_secret_protection():
     })
     assert sanitized["tunnel"]["warp_outbound_enabled"] is True
     assert "warp_license_key" not in sanitized["tunnel"]
+
+
+class _FakeCliProcess:
+    """Mô phỏng tiến trình `warp-cli` trả về stdout/stderr cho `communicate()`."""
+
+    def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
+        self.returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+
+    async def communicate(self):
+        return self._stdout, self._stderr
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+    async def wait(self) -> int:
+        return self.returncode
+
+
+class _FakeDaemonProcess:
+    """Mô phỏng tiến trình nền `warp-svc` có thể sống bền hoặc thoát sớm kèm stderr."""
+
+    def __init__(self, pid: int = 8800, returncode: int | None = None, stderr_bytes: bytes = b""):
+        self.pid = pid
+        self.returncode = returncode
+        self.terminated = False
+        self.stderr = SimpleNamespace(read=self._read_stderr) if stderr_bytes else None
+        self._stderr_bytes = stderr_bytes
+
+    async def _read_stderr(self) -> bytes:
+        return self._stderr_bytes
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = 0
+
+    def kill(self) -> None:
+        self.terminated = True
+        self.returncode = -9
+
+    async def wait(self) -> int:
+        return self.returncode or 0
+
+
+@pytest.mark.asyncio
+async def test_warp_start_update_stop_daemon_bootstrap_and_socket_readiness_poll(
+    fake_db, fake_gemini, fake_bot, monkeypatch, tmp_path
+):
+    """Kiểm thử toàn bộ chuỗi POST /api/warp/start, /api/warp/update, /api/warp/stop: khởi chạy warp-svc, chờ IPC, đăng ký, mode proxy, proxy port, connect và poll socket 127.0.0.1:<port>."""
+    monkeypatch.setenv("WARP_LICENSE_KEY", "SUPER-SECRET-WARP-KEY-9999")
+    monkeypatch.delenv("WARP_CONNECTOR_TOKEN", raising=False)
+
+    state = {
+        "daemon_spawned": False,
+        "status_calls": 0,
+        "registered": False,
+        "proxy_mode": False,
+        "proxy_port": 40000,
+        "connected_cmd": False,
+        "socket_polls_after_connect": 0,
+        "commands": [],
+        "child_envs": [],
+    }
+
+    async def fake_spawn(*cmd, **kwargs):
+        state["commands"].append(cmd)
+        state["child_envs"].append(dict(kwargs.get("env") or {}))
+        binary = Path(cmd[0]).name
+        if binary == "warp-svc":
+            state["daemon_spawned"] = True
+            return _FakeDaemonProcess(pid=8811, returncode=None)
+
+        # warp-cli --accept-tos ...
+        args = cmd[2:]
+        if args == ("status",):
+            state["status_calls"] += 1
+            # Lần đầu IPC chưa chạy -> kích hoạt spawn warp-svc; lần sau daemon đã sẵn sàng
+            if not state["daemon_spawned"] or state["status_calls"] < 2:
+                return _FakeCliProcess(1, stderr=b"Unable to connect to CloudflareWARP daemon")
+            return _FakeCliProcess(0, stdout=b"Status update: Disconnected")
+        if args == ("registration", "show"):
+            if not state["registered"]:
+                return _FakeCliProcess(1, stderr=b"Error: Missing registration")
+            return _FakeCliProcess(0, stdout=b"Account type: Unlimited")
+        if args == ("registration", "new"):
+            state["registered"] = True
+            return _FakeCliProcess(0, stdout=b"Success")
+        if args[:2] == ("registration", "license"):
+            return _FakeCliProcess(0, stdout=b"Success")
+        if args == ("mode", "proxy"):
+            state["proxy_mode"] = True
+            return _FakeCliProcess(0, stdout=b"Success")
+        if args[:2] == ("proxy", "port"):
+            state["proxy_port"] = int(args[2])
+            return _FakeCliProcess(0, stdout=b"Success")
+        if args == ("connect",):
+            state["connected_cmd"] = True
+            state["socket_polls_after_connect"] = 0
+            return _FakeCliProcess(0, stdout=b"Success")
+        if args == ("disconnect",):
+            state["connected_cmd"] = False
+            return _FakeCliProcess(0, stdout=b"Success")
+        return _FakeCliProcess(0)
+
+    async def fake_probe_async(host: str, port: int, _timeout: float) -> bool:
+        assert host == "127.0.0.1"
+        if not state["connected_cmd"] or port != state["proxy_port"]:
+            return False
+        state["socket_polls_after_connect"] += 1
+        # Mô phỏng WARP cần 3 lượt poll socket mới mở cổng 127.0.0.1:<port>
+        return state["socket_polls_after_connect"] >= 3
+
+    warp_service = WarpProxyService(
+        warp_port=40000,
+        enabled=False,
+        probe_sync_fn=lambda _h, _p, _t: False,
+        probe_async_fn=fake_probe_async,
+        metrics_fn=lambda: (8811, 28.6) if state["daemon_spawned"] else (None, None),
+        which_fn=lambda name: f"/usr/bin/{name}" if name in ("warp-svc", "warp-cli") else None,
+        spawn_subprocess=fake_spawn,
+        ipc_wait_timeout=1.0,
+        ipc_poll_interval=0.02,
+        connect_poll_timeout=1.0,
+        connect_poll_interval=0.02,
+        log_path=str(tmp_path / "warp-svc.log"),
+    )
+
+    settings = AppSettings(
+        discord_token="test-token",
+        gemini_api_key="test-key",
+        session_secret="test-secret-warp-lifecycle-0123456789",
+    )
+    container = build_container(
+        settings,
+        gemini_client=fake_gemini,
+        reserve_buffer_bytes=16 * 1024,
+        warp_proxy=warp_service,
+    )
+    await container.sync_coordinator.attach_db(fake_db)
+    await container.session_repo.attach_db(fake_db)
+    await container.auth_service.create_user("admin", "AdminPass123!", role="admin")
+    await container.auth_service.create_user("operator1", "OperPass123!", role="operator")
+
+    web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
+    with TestClient(web_app) as client:
+        # Chưa đăng nhập -> 401 cho tất cả endpoint điều khiển WARP
+        assert client.post("/api/warp/start").status_code == 401
+        assert client.post("/api/warp/update").status_code == 401
+        assert client.post("/api/warp/stop").status_code == 401
+
+        # Operator -> 403
+        client.post("/auth/login", json={"username": "operator1", "password": "OperPass123!"})
+        assert client.post("/api/warp/start").status_code == 403
+        assert client.post("/api/warp/update").status_code == 403
+        assert client.post("/api/warp/stop").status_code == 403
+
+        # Admin -> POST /api/warp/start tự khởi động warp-svc, đăng ký, áp dụng license, ép mode proxy + port 40000 + connect và poll tới khi cổng mở
+        client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
+        start_res = client.post("/api/warp/start", json={"warp_outbound_enabled": True})
+        assert start_res.status_code == 200
+        start_body = start_res.json()
+        assert start_body["warp"]["active"] is True
+        assert start_body["warp"]["connected"] is True
+        assert start_body["warp"]["diagnostic"] is None
+        assert start_body["warp"]["proxy_url"] == "http://127.0.0.1:40000"
+        assert start_body["cloudflare_tunnel"]["outbound_mode"] == "proxy"
+        assert state["daemon_spawned"] is True
+        assert state["registered"] is True
+        assert state["proxy_mode"] is True
+        assert state["socket_polls_after_connect"] >= 3
+        # Không bao giờ rò rỉ WARP_LICENSE_KEY trong JSON trả về hay biến môi trường subprocess
+        assert "SUPER-SECRET-WARP-KEY-9999" not in start_res.text
+        assert all("WARP_LICENSE_KEY" not in env for env in state["child_envs"])
+        assert all("DISCORD_TOKEN" not in env for env in state["child_envs"])
+
+        # POST /api/warp/update với cổng loopback mới 40001 -> luôn khóa về 127.0.0.1:40001
+        upd_res = client.post("/api/warp/update", json={"warp_outbound_enabled": True, "warp_proxy_port": 40001})
+        assert upd_res.status_code == 200
+        assert upd_res.json()["warp"]["active"] is True
+        assert upd_res.json()["warp"]["proxy_url"] == "http://127.0.0.1:40001"
+        assert state["proxy_port"] == 40001
+
+        # POST /api/warp/stop -> ngắt kết nối và chuyển ngay về Direct
+        stop_res = client.post("/api/warp/stop")
+        assert stop_res.status_code == 200
+        assert stop_res.json()["warp"]["active"] is False
+        assert stop_res.json()["cloudflare_tunnel"]["outbound_mode"] == "direct"
+        assert state["connected_cmd"] is False
+
+
+@pytest.mark.asyncio
+async def test_warp_clear_sanitized_diagnostics_on_missing_binary_and_daemon_failure(monkeypatch, tmp_path):
+    """Kiểm tra chẩn đoán rõ ràng & đã che bí mật/đường dẫn khi thiếu binary hoặc warp-svc thoát lỗi."""
+    monkeypatch.setenv("WARP_LICENSE_KEY", "SECRET-KEY-SHOULD-NOT-LEAK")
+
+    # 1) Thiếu binary cloudflare-warp -> trả đúng thông điệp "Chưa cài cloudflare-warp"
+    missing_service = WarpProxyService(
+        warp_port=40000,
+        probe_sync_fn=lambda _h, _p, _t: False,
+        probe_async_fn=lambda _h, _p, _t: asyncio.sleep(0, result=False),
+        which_fn=lambda _name: None,
+    )
+    snap_missing = await missing_service.start_and_connect()
+    assert snap_missing["active"] is False
+    assert snap_missing["diagnostic_code"] == "not_installed"
+    assert snap_missing["diagnostic"] == "Chưa cài cloudflare-warp"
+
+    # 2) warp-svc thoát sớm với stderr chứa đường dẫn nội bộ + WARP_LICENSE_KEY -> phải che sạch trước khi trả về UI
+    log_file = tmp_path / "warp-fail.log"
+
+    async def failing_spawn(*cmd, **kwargs):
+        if Path(cmd[0]).name == "warp-svc":
+            log_file.write_text(
+                "ERROR Permission denied opening /var/lib/cloudflare-warp/reg.json for SECRET-KEY-SHOULD-NOT-LEAK\n",
+                encoding="utf-8",
+            )
+            return _FakeDaemonProcess(pid=9901, returncode=1)
+        return _FakeCliProcess(1, stderr=b"Unable to connect to CloudflareWARP daemon")
+
+    failing_service = WarpProxyService(
+        warp_port=40000,
+        probe_sync_fn=lambda _h, _p, _t: False,
+        probe_async_fn=lambda _h, _p, _t: asyncio.sleep(0, result=False),
+        metrics_fn=lambda: (None, None),
+        which_fn=lambda name: f"/usr/bin/{name}" if name in ("warp-svc", "warp-cli") else None,
+        spawn_subprocess=failing_spawn,
+        ipc_wait_timeout=0.3,
+        ipc_poll_interval=0.02,
+        log_path=str(log_file),
+    )
+    snap_fail = await failing_service.start_and_connect()
+    assert snap_fail["active"] is False
+    assert snap_fail["diagnostic_code"] == "daemon_not_running"
+    assert snap_fail["diagnostic"] is not None
+    assert snap_fail["diagnostic"].startswith("warp-svc chưa khởi động")
+    assert "SECRET-KEY-SHOULD-NOT-LEAK" not in snap_fail["diagnostic"]
+    assert "/var/lib/cloudflare-warp/reg.json" not in snap_fail["diagnostic"]
+

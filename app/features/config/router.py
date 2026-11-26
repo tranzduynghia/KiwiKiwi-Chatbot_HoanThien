@@ -12,6 +12,7 @@ from app.features.config.schemas import (
     PresenceConfigPayload,
     PromptConfigPayload,
     TunnelConfigPayload,
+    WarpActionPayload,
     WarpConfigPayload,
 )
 from app.features.config.service import ConfigService
@@ -34,10 +35,13 @@ def create_config_router(
     auth_deps: Any,
     apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
     apply_tunnel_fn: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None,
-    apply_warp_fn: Optional[Callable[[bool], Awaitable[dict[str, Any]]]] = None,
+    apply_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
+    start_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
+    update_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
+    stop_warp_fn: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None,
     get_tunnel_status_fn: Optional[Callable[[], dict[str, Any]]] = None,
 ) -> APIRouter:
-    """Tạo router cho `/api/config`, `/api/config/ask`, `/api/config/prompt`, `/api/config/presence`, `/api/config/tunnel` và `/api/config/warp`."""
+    """Tạo router cho `/api/config*` và các endpoint điều khiển WARP `/api/warp/start`, `/api/warp/update`, `/api/warp/stop`."""
     router = APIRouter(tags=["config"])
 
     @router.get("/api/config")
@@ -183,32 +187,39 @@ def create_config_router(
             "sync": sync_coordinator.sync_status(),
         }
 
-    @router.put("/api/config/warp")
-    async def api_update_warp_config(
-        payload: WarpConfigPayload,
-        user: dict[str, Any] = Depends(auth_deps.require_admin),
-    ):
-        """Bật/tắt nóng định tuyến Outbound (Gemini & Discord) qua Cloudflare WARP User-Space Proxy (127.0.0.1:40000)."""
-        enabled = bool(payload.warp_outbound_enabled)
+    async def _execute_warp_change(
+        *,
+        enabled: bool,
+        port: Optional[int],
+        force_reconnect: bool,
+        user: dict[str, Any],
+        summary: str,
+        client_changes: Optional[dict[str, dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
         actor, actor_type = auth_deps.actor_label(user)
-        action_summary = (
-            "Bật định tuyến Outbound qua Cloudflare WARP (127.0.0.1:40000)"
-            if enabled
-            else "Tắt định tuyến Outbound Cloudflare WARP (chuyển về Direct)"
-        )
         updated = await config_service.update_config(
             {"tunnel": {"warp_outbound_enabled": enabled}},
             updated_by=actor,
             actor_type=actor_type,
             actor_meta=auth_deps.actor_meta(user),
             section="tunnel",
-            summary=action_summary,
-            client_changes=payload.changes,
+            summary=summary,
+            client_changes=client_changes,
         )
 
         warp_status: Optional[dict[str, Any]] = None
-        if apply_warp_fn is not None:
-            warp_status = await apply_warp_fn(enabled)
+        if enabled:
+            if force_reconnect and update_warp_fn is not None:
+                warp_status = await update_warp_fn(port=port)
+            elif start_warp_fn is not None:
+                warp_status = await start_warp_fn(port=port)
+            elif apply_warp_fn is not None:
+                warp_status = await apply_warp_fn(True, port=port)
+        else:
+            if stop_warp_fn is not None:
+                warp_status = await stop_warp_fn()
+            elif apply_warp_fn is not None:
+                warp_status = await apply_warp_fn(False, port=port)
 
         tunnel_status = get_tunnel_status_fn() if callable(get_tunnel_status_fn) else None
         return {
@@ -218,5 +229,82 @@ def create_config_router(
             "cloudflare_tunnel": tunnel_status,
             "sync": sync_coordinator.sync_status(),
         }
+
+    @router.put("/api/config/warp")
+    async def api_update_warp_config(
+        payload: WarpConfigPayload,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Bật/tắt nóng định tuyến Outbound (Gemini & Discord) qua Cloudflare WARP User-Space Proxy và poll socket loopback."""
+        enabled = bool(payload.warp_outbound_enabled)
+        summary = (
+            "Bật định tuyến Outbound qua Cloudflare WARP (127.0.0.1)"
+            if enabled
+            else "Tắt định tuyến Outbound Cloudflare WARP (chuyển về Direct)"
+        )
+        return await _execute_warp_change(
+            enabled=enabled,
+            port=payload.warp_proxy_port,
+            force_reconnect=False,
+            user=user,
+            summary=summary,
+            client_changes=payload.changes,
+        )
+
+    @router.post("/api/warp/start")
+    async def api_warp_start(
+        payload: Optional[WarpActionPayload] = None,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Khởi động `warp-svc`, đăng ký/cấu hình `mode proxy` + `proxy port` + `connect` và poll `127.0.0.1:<port>` trước khi trả trạng thái."""
+        port = payload.warp_proxy_port if payload is not None else None
+        changes = payload.changes if payload is not None else None
+        return await _execute_warp_change(
+            enabled=True,
+            port=port,
+            force_reconnect=False,
+            user=user,
+            summary="Khởi động & kết nối Cloudflare WARP User-Space Proxy",
+            client_changes=changes,
+        )
+
+    @router.post("/api/warp/update")
+    async def api_warp_update(
+        payload: Optional[WarpActionPayload] = None,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Áp dụng lại cấu hình WARP (`mode proxy`, `proxy port`, `connect`) và poll socket `127.0.0.1:<port>` tới 6–8 giây."""
+        enabled = True if (payload is None or payload.warp_outbound_enabled is None) else bool(payload.warp_outbound_enabled)
+        port = payload.warp_proxy_port if payload is not None else None
+        changes = payload.changes if payload is not None else None
+        summary = (
+            "Cập nhật & kết nối lại Cloudflare WARP User-Space Proxy"
+            if enabled
+            else "Tắt định tuyến Outbound Cloudflare WARP (chuyển về Direct)"
+        )
+        return await _execute_warp_change(
+            enabled=enabled,
+            port=port,
+            force_reconnect=enabled,
+            user=user,
+            summary=summary,
+            client_changes=changes,
+        )
+
+    @router.post("/api/warp/stop")
+    async def api_warp_stop(
+        payload: Optional[WarpActionPayload] = None,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Tắt định tuyến Outbound Cloudflare WARP, ngắt kết nối `warp-cli` và chuyển ngay về Direct."""
+        changes = payload.changes if payload is not None else None
+        return await _execute_warp_change(
+            enabled=False,
+            port=None,
+            force_reconnect=False,
+            user=user,
+            summary="Tắt định tuyến Outbound Cloudflare WARP (chuyển về Direct)",
+            client_changes=changes,
+        )
 
     return router

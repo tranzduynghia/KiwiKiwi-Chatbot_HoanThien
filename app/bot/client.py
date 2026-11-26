@@ -97,7 +97,11 @@ class AskBot(discord.Client):
         tunnel_cfg = self.container.config_repo.tunnel_cfg()
         if getattr(self.container, "warp_proxy", None) is not None:
             warp_enabled = bool(tunnel_cfg.get("warp_outbound_enabled", settings.warp_outbound_enabled))
-            await self.container.warp_proxy.set_enabled(warp_enabled, force_probe=True)
+            if warp_enabled:
+                # Khởi động/xác minh WARP nền không chặn quá trình đăng nhập Discord Gateway
+                self.loop.create_task(self.container.warp_proxy.start_and_connect())
+            else:
+                await self.container.warp_proxy.set_enabled(False, force_probe=False)
         if tunnel_cfg.get("cf_tunnel_enabled"):
             await self.container.cloudflare_tunnel.apply_config(tunnel_cfg)
 
@@ -243,6 +247,8 @@ class AskBot(discord.Client):
         if self._memory_watchdog_task is not None and not self._memory_watchdog_task.done():
             self._memory_watchdog_task.cancel()
         await self.container.cloudflare_tunnel.stop()
+        if getattr(self.container, "warp_proxy", None) is not None:
+            await self.container.warp_proxy.shutdown()
         if self._web_server is not None:
             self._web_server.should_exit = True
         if self._web_task is not None:

@@ -48,7 +48,16 @@ class TunnelConfigPayload(BaseModel):
 
 
 class WarpConfigPayload(BaseModel):
-    """Payload bật/tắt nhanh định tuyến Outbound qua Cloudflare WARP User-Space Proxy (127.0.0.1:40000)."""
+    """Payload bật/tắt nhanh định tuyến Outbound qua Cloudflare WARP User-Space Proxy (127.0.0.1:<port>)."""
 
     warp_outbound_enabled: bool
+    warp_proxy_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    changes: Optional[dict[str, dict[str, Any]]] = None
+
+
+class WarpActionPayload(BaseModel):
+    """Payload cho các endpoint điều khiển trực tiếp `/api/warp/start`, `/api/warp/update` và `/api/warp/stop`."""
+
+    warp_outbound_enabled: Optional[bool] = None
+    warp_proxy_port: Optional[int] = Field(default=None, ge=1, le=65535)
     changes: Optional[dict[str, dict[str, Any]]] = None

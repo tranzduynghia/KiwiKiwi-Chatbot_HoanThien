@@ -693,15 +693,31 @@
           >—</a>
         </div>
 
-        {# Trạng thái định tuyến Outbound Cloudflare WARP #}
-        <div class="rounded-lg bg-slate-900/60 border border-slate-800/80 p-2.5 space-y-1">
+        {# Trạng thái định tuyến Outbound Cloudflare WARP kèm chẩn đoán và nút kết nối lại #}
+        <div class="rounded-lg bg-slate-900/60 border border-slate-800/80 p-2.5 space-y-1.5">
           <div class="flex flex-wrap items-center justify-between gap-2 text-[10px]">
             <span class="text-slate-300 font-medium select-none">Outbound Proxy (WARP)</span>
-            <code id="cf-warp-endpoint" class="font-mono text-slate-400 select-all">http://127.0.0.1:40000</code>
+            <div class="inline-flex items-center gap-1.5">
+              <code id="cf-warp-endpoint" class="font-mono text-slate-400 select-all">http://127.0.0.1:40000</code>
+              {% if user.is_admin %}
+              <button
+                type="button"
+                id="btn-warp-reconnect"
+                title="Khởi động / kết nối lại Cloudflare WARP (mode proxy)"
+                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors"
+              >
+                ↻ Kết nối lại
+              </button>
+              {% endif %}
+            </div>
           </div>
           <div id="cf-warp-detail" class="text-[11px] text-slate-400 leading-snug select-none">
             Direct (chưa kết nối WARP proxy) · MongoDB Atlas: Direct TLS
           </div>
+          <div
+            id="cf-warp-diagnostic"
+            class="hidden text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-2 py-1 break-words"
+          ></div>
         </div>
 
         {# Bố cục 2 cột phân tách rõ ràng chế độ Named Tunnel và Quick Tunnel (có min-w-0 chống tràn ngang) #}

@@ -287,8 +287,12 @@ class CloudflareTunnelService:
                 "warp_connected": warp_snap["connected"],
                 "warp_active": warp_snap["active"],
                 "warp_fallback_direct": warp_snap["fallback_direct"],
+                "warp_installed": warp_snap.get("warp_installed", False),
                 "warp_ram_mb": warp_snap["warp_ram_mb"],
                 "warp_pid": warp_snap["warp_pid"],
                 "warp_proxy_url": warp_snap["proxy_url"],
+                "warp_proxy_port": warp_snap.get("proxy_port", 40000),
+                "warp_diagnostic": warp_snap.get("diagnostic"),
+                "warp_diagnostic_code": warp_snap.get("diagnostic_code"),
             })
         return snapshot
