@@ -14,6 +14,7 @@ from app.core.memory_watchdog import MemoryWatchdog
 from app.core.settings import BOT_VERSION
 from app.core.sync import WriteBehindSyncCoordinator
 from app.core.utils import format_duration
+from app.core.warp_proxy import WarpProxyService
 from app.features.config.repository import ConfigRepository
 from app.features.models.cooldown import ModelCooldownTracker
 from app.features.models.registry import ModelRegistry
@@ -23,7 +24,7 @@ from app.features.sessions.repository import SessionRepository
 
 
 class MonitoringService:
-    """Tổng hợp trạng thái bot Discord, tài nguyên RAM/CPU, Gemini API, MongoDB, Cloudflare Tunnel và thống kê sử dụng."""
+    """Tổng hợp trạng thái bot Discord, tài nguyên RAM/CPU, Gemini API, MongoDB, Cloudflare Tunnel/WARP và thống kê sử dụng."""
 
     def __init__(
         self,
@@ -37,6 +38,7 @@ class MonitoringService:
         usage_stats: UsageStats,
         memory_watchdog: Optional[MemoryWatchdog] = None,
         cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
+        warp_proxy: Optional[WarpProxyService] = None,
         start_time: Optional[float] = None,
     ):
         self._config = config_repo
@@ -48,6 +50,7 @@ class MonitoringService:
         self._stats = usage_stats
         self._memory_watchdog = memory_watchdog
         self._cloudflare_tunnel = cloudflare_tunnel
+        self._warp_proxy = warp_proxy
         self.start_time = start_time if start_time is not None else time.time()
 
     def uptime_seconds(self) -> float:
@@ -112,6 +115,8 @@ class MonitoringService:
             for guild in sorted(bot_guilds, key=lambda item: item.name.lower())
         ]
 
+        if self._warp_proxy is not None:
+            await self._warp_proxy.refresh_status()
         watchdog_status = (
             self._memory_watchdog.status_snapshot()
             if self._memory_watchdog is not None

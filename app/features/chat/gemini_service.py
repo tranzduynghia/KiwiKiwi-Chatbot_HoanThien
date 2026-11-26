@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from google.genai import errors as genai_errors
 from google.genai import types
 
+from app.core.warp_proxy import is_proxy_transport_error
 from app.features.config.repository import ConfigRepository
 from app.features.models.cooldown import ModelCooldownTracker
 from app.features.models.metadata import version_of
@@ -23,10 +24,17 @@ class GeminiChatService:
         gemini_client: Any,
         config_repo: ConfigRepository,
         model_cooldowns: ModelCooldownTracker,
+        *,
+        on_proxy_error: Optional[Callable[[Exception], Awaitable[bool]]] = None,
     ):
         self._gemini = gemini_client
         self._config = config_repo
         self._cooldowns = model_cooldowns
+        self._on_proxy_error = on_proxy_error
+
+    def set_client(self, gemini_client: Any) -> None:
+        """Cập nhật nóng đối tượng `genai.Client` khi chuyển đổi định tuyến Outbound giữa Cloudflare WARP và Direct."""
+        self._gemini = gemini_client
 
     def build_thinking_configs(self, model_id: str, level: str) -> list[tuple[str, types.ThinkingConfig]]:
         """Tạo danh sách ứng viên `ThinkingConfig` tương thích theo từng thế hệ model (2.5 so với 3+)."""
@@ -68,7 +76,7 @@ class GeminiChatService:
         max_retries: Optional[int] = None,
         timeout_sec: Optional[float] = None,
     ) -> tuple[Any, Optional[str]]:
-        """Gọi trực tiếp một model Gemini với cơ chế hạ bậc thinking (nếu lỗi 400) và thử lại (nếu 500/503)."""
+        """Gọi trực tiếp một model Gemini với cơ chế hạ bậc thinking (nếu lỗi 400), tự fallback Direct nếu WARP proxy lỗi và thử lại (nếu 500/503)."""
         acfg = self._config.ask_cfg()
         retries = max_retries if max_retries is not None else int(acfg.get("max_retries", 3))
         timeout = timeout_sec if timeout_sec is not None else float(acfg.get("gemini_timeout_seconds", 170.0))
@@ -82,8 +90,10 @@ class GeminiChatService:
                 attempts.append((types.GenerateContentConfig(**base_kwargs, thinking_config=thinking_cfg), used_level))
         attempts.append((types.GenerateContentConfig(**base_kwargs), None))
 
+        proxy_fallback_used = False
         for idx, (cfg, thinking_used) in enumerate(attempts):
-            for retry in range(retries):
+            retry = 0
+            while retry < retries:
                 try:
                     resp = await asyncio.wait_for(
                         self._gemini.aio.models.generate_content(model=model, contents=contents, config=cfg),
@@ -93,10 +103,22 @@ class GeminiChatService:
                 except genai_errors.APIError as exc:
                     if exc.code in (500, 503) and retry < retries - 1:
                         await asyncio.sleep(2 * (retry + 1))
+                        retry += 1
                         continue
                     if exc.code == 400 and idx < len(attempts) - 1:
                         log.info("400 với thinking config, thử lại không thinking: %s", exc.message)
                         break
+                    raise
+                except Exception as exc:
+                    if (
+                        not proxy_fallback_used
+                        and self._on_proxy_error is not None
+                        and is_proxy_transport_error(exc)
+                    ):
+                        fell_back = bool(await self._on_proxy_error(exc))
+                        if fell_back:
+                            proxy_fallback_used = True
+                            continue
                     raise
         raise RuntimeError("Không gọi được Gemini")
 

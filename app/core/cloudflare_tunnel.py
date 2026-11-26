@@ -35,6 +35,7 @@ class CloudflareTunnelService:
         *,
         local_port: int = 10000,
         outbound_proxy_url: str = "",
+        warp_proxy: Optional[Any] = None,
         binary_path: str = "cloudflared",
         spawn_subprocess: Optional[Callable[..., Awaitable[Any]]] = None,
         quick_url_wait_seconds: float = 2.0,
@@ -44,6 +45,7 @@ class CloudflareTunnelService:
             raise ValueError("local_port phải nằm trong khoảng 1..65535.")
         self.local_port = port_int
         self.outbound_proxy_url = (outbound_proxy_url or "").strip()
+        self._warp_proxy = warp_proxy
         self.binary_path = binary_path
         self._spawn = spawn_subprocess or asyncio.create_subprocess_exec
         self._quick_url_wait_seconds = max(0.05, float(quick_url_wait_seconds))
@@ -250,12 +252,22 @@ class CloudflareTunnelService:
 
             return self.status_snapshot()
 
+    def attach_warp_proxy(self, warp_proxy: Optional[Any]) -> None:
+        """Gắn `WarpProxyService` vào `CloudflareTunnelService` để tổng hợp trạng thái Outbound WARP chung trên `/api/status`."""
+        self._warp_proxy = warp_proxy
+
     def status_snapshot(self) -> dict[str, Any]:
-        """Xuất dữ liệu telemetry trực tiếp của Cloudflare Tunnel cho API `/api/status` và Dashboard."""
+        """Xuất dữ liệu telemetry trực tiếp của Cloudflare Tunnel và Cloudflare WARP Outbound cho API `/api/status` và Dashboard."""
         running = self.is_running
         pid = getattr(self._process, "pid", None) if running else None
-        outbound_configured = bool(self.outbound_proxy_url)
-        return {
+        warp_snap = self._warp_proxy.status_snapshot() if self._warp_proxy is not None else None
+        if warp_snap is not None:
+            outbound_mode = warp_snap["outbound_mode"]
+            outbound_configured = bool(self.outbound_proxy_url or warp_snap["connected"] or warp_snap["active"])
+        else:
+            outbound_configured = bool(self.outbound_proxy_url)
+            outbound_mode = "proxy" if outbound_configured else "direct"
+        snapshot: dict[str, Any] = {
             "enabled": self._enabled,
             "running": running,
             "mode": self._mode,
@@ -264,7 +276,19 @@ class CloudflareTunnelService:
             "pid": pid,
             "last_error": self._last_error,
             "tunnel_only_inbound": self._tunnel_only_inbound,
-            "outbound_mode": "proxy" if outbound_configured else "direct",
+            "outbound_mode": outbound_mode,
             "outbound_proxy_configured": outbound_configured,
             "started_at": self._started_at if running else None,
         }
+        if warp_snap is not None:
+            snapshot.update({
+                "warp": warp_snap,
+                "warp_enabled": warp_snap["enabled"],
+                "warp_connected": warp_snap["connected"],
+                "warp_active": warp_snap["active"],
+                "warp_fallback_direct": warp_snap["fallback_direct"],
+                "warp_ram_mb": warp_snap["warp_ram_mb"],
+                "warp_pid": warp_snap["warp_pid"],
+                "warp_proxy_url": warp_snap["proxy_url"],
+            })
+        return snapshot

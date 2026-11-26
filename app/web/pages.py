@@ -1,6 +1,7 @@
 """Router render các trang HTML giao diện (/, /login, /dashboard) của Web Dashboard."""
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Callable, Optional
 
@@ -17,6 +18,23 @@ from app.features.monitoring.stats import UsageStats
 
 # Mã phiên bản tài nguyên tĩnh giúp trình duyệt luôn nạp bản JS/CSS mới nhất sau mỗi lần deploy
 ASSET_VERSION = str(int(time.time()))
+
+# Loại bỏ mọi comment HTML (<!-- ... -->) ngoài khối script/style/textarea để DevTools hoàn toàn sạch
+_HTML_PROTECTED_BLOCK_RE = re.compile(
+    r"(<(?:script|style|textarea)\b[^>]*>.*?</(?:script|style|textarea)>)",
+    re.IGNORECASE | re.DOTALL,
+)
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _strip_html_comments(html_text: str) -> str:
+    """Gỡ bỏ comment HTML ở runtime mà không chạm tới nội dung bên trong `<script>`, `<style>` hoặc `<textarea>`."""
+    if not html_text or "<!--" not in html_text:
+        return html_text
+    parts = _HTML_PROTECTED_BLOCK_RE.split(html_text)
+    for idx in range(0, len(parts), 2):
+        parts[idx] = _HTML_COMMENT_RE.sub("", parts[idx])
+    return "".join(parts)
 
 
 def _extract_bot_branding(bot: Any) -> tuple[str, str]:
@@ -61,11 +79,10 @@ def _sanitize_login_error(error: Optional[str]) -> Optional[str]:
 
 
 def _render_template(templates: Jinja2Templates, request: Request, name: str, context: dict[str, Any]):
-    """Hỗ trợ tương thích cả phiên bản Starlette/FastAPI cũ và mới khi gọi TemplateResponse."""
-    try:
-        return templates.TemplateResponse(request=request, name=name, context=context)
-    except TypeError:
-        return templates.TemplateResponse(name, {"request": request, **context})
+    """Render template Jinja2 và gỡ bỏ mọi comment HTML ở runtime trước khi trả về trình duyệt."""
+    template = templates.get_template(name)
+    rendered = template.render({"request": request, **context})
+    return HTMLResponse(content=_strip_html_comments(rendered))
 
 
 def create_pages_router(

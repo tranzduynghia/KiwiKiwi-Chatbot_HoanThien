@@ -312,3 +312,73 @@ async def test_tunnel_api_hot_reload_token_masking_audit_and_inbound_lock(fake_d
         audit_items = audit_res.json()["items"]
         assert len(audit_items) >= 2
         assert secret_token not in str(audit_items)
+
+
+@pytest.mark.asyncio
+async def test_tunnel_boot_preconfiguration_from_env_vars(fake_db, fake_gemini, monkeypatch):
+    """Kiểm tra nạp sẵn Cloudflare Tunnel từ env (CF_TUNNEL_TOKEN / CLOUDFLARE_TUNNEL_TOKEN, CF_TUNNEL_MODE, CF_TUNNEL_ONLY, TRUST_PROXY_HEADERS)."""
+    from app.core.settings import build_default_config
+    from app.features.config.repository import ConfigRepository
+
+    # 1) Dùng CF_TUNNEL_TOKEN + CF_TUNNEL_MODE=named + CF_TUNNEL_ONLY=true + TRUST_PROXY_HEADERS=true
+    monkeypatch.setenv("CF_TUNNEL_TOKEN", "eyJ-env-primary-token-123456")
+    monkeypatch.delenv("CLOUDFLARE_TUNNEL_TOKEN", raising=False)
+    monkeypatch.setenv("CF_TUNNEL_MODE", "named")
+    monkeypatch.setenv("CF_TUNNEL_ONLY", "true")
+    monkeypatch.setenv("TRUST_PROXY_HEADERS", "true")
+
+    cfg_default = build_default_config()
+    assert cfg_default["tunnel"] == {
+        "cf_tunnel_enabled": True,
+        "cf_tunnel_mode": "named",
+        "cf_tunnel_token": "eyJ-env-primary-token-123456",
+        "tunnel_only_inbound": True,
+        "proxy_headers": True,
+        "warp_outbound_enabled": True,
+    }
+
+    # 2) Khi MongoDB đã có `bot_config` nhưng chưa lưu token -> attach_db tự nạp từ CLOUDFLARE_TUNNEL_TOKEN
+    monkeypatch.delenv("CF_TUNNEL_TOKEN", raising=False)
+    monkeypatch.setenv("CLOUDFLARE_TUNNEL_TOKEN", "eyJ-env-alias-token-789012")
+    await fake_db["bot_config"].replace_one(
+        {"_id": "global"},
+        {
+            "_id": "global",
+            "tunnel": {
+                "cf_tunnel_enabled": False,
+                "cf_tunnel_mode": "named",
+                "cf_tunnel_token": "",
+                "tunnel_only_inbound": False,
+                "proxy_headers": False,
+            },
+        },
+        upsert=True,
+    )
+    repo = ConfigRepository()
+    await repo.attach_db(fake_db)
+    assert repo.tunnel_cfg()["cf_tunnel_token"] == "eyJ-env-alias-token-789012"
+    assert repo.tunnel_cfg()["cf_tunnel_enabled"] is True
+    assert repo.tunnel_cfg()["tunnel_only_inbound"] is True
+    assert repo.tunnel_cfg()["proxy_headers"] is True
+
+    # 3) Khi MongoDB ĐÃ có token đã lưu -> KHÔNG bị biến môi trường ghi đè
+    monkeypatch.setenv("CF_TUNNEL_TOKEN", "eyJ-env-should-not-overwrite")
+    await fake_db["bot_config"].replace_one(
+        {"_id": "global"},
+        {
+            "_id": "global",
+            "tunnel": {
+                "cf_tunnel_enabled": False,
+                "cf_tunnel_mode": "named",
+                "cf_tunnel_token": "eyJ-db-saved-token-wins",
+                "tunnel_only_inbound": False,
+                "proxy_headers": False,
+            },
+        },
+        upsert=True,
+    )
+    repo2 = ConfigRepository()
+    await repo2.attach_db(fake_db)
+    assert repo2.tunnel_cfg()["cf_tunnel_token"] == "eyJ-db-saved-token-wins"
+    assert repo2.tunnel_cfg()["cf_tunnel_enabled"] is False
+

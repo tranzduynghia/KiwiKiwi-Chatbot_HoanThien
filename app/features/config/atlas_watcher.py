@@ -22,7 +22,14 @@ log = logging.getLogger("gemini-bot.atlas-watcher")
 DEFAULT_ATLAS_WATCH_INTERVAL_SECONDS = 5.0
 ATLAS_EXTERNAL_SYNC_SOURCE = "MongoDB Atlas External Sync"
 TUNNEL_PROCESS_KEYS = ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token")
-TUNNEL_ALL_KEYS = ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token", "tunnel_only_inbound", "proxy_headers")
+TUNNEL_ALL_KEYS = (
+    "cf_tunnel_enabled",
+    "cf_tunnel_mode",
+    "cf_tunnel_token",
+    "tunnel_only_inbound",
+    "proxy_headers",
+    "warp_outbound_enabled",
+)
 METADATA_IGNORE_KEYS = {"_id", "updated_at", "updated_by"}
 
 
@@ -114,6 +121,7 @@ class AtlasConfigWatcher:
         config_service: ConfigService,
         audit_service: AuditService,
         cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
+        warp_proxy: Optional[Any] = None,
         apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
         poll_interval_seconds: float = DEFAULT_ATLAS_WATCH_INTERVAL_SECONDS,
     ):
@@ -121,6 +129,7 @@ class AtlasConfigWatcher:
         self._config_service = config_service
         self._audit = audit_service
         self._cloudflare_tunnel = cloudflare_tunnel
+        self._warp_proxy = warp_proxy
         self._apply_presence_fn = apply_presence_fn
         self.poll_interval_seconds = max(0.2, float(poll_interval_seconds))
 
@@ -182,12 +191,15 @@ class AtlasConfigWatcher:
             self._config_repo.apply_external_config(remote_normalized)
             self._config_service.notify_callbacks()
 
-            # 2) Áp dụng nóng Cloudflare Tunnel nếu bất kỳ trường điều khiển tiến trình hoặc khóa inbound nào thay đổi
+            # 2) Áp dụng nóng Cloudflare Tunnel & WARP Outbound nếu bất kỳ trường điều khiển nào thay đổi
             old_tunnel = resolve_effective_tunnel_cfg(current_snapshot)
             new_tunnel = resolve_effective_tunnel_cfg(remote_normalized)
             tunnel_process_changed = any(old_tunnel.get(k) != new_tunnel.get(k) for k in TUNNEL_PROCESS_KEYS)
             tunnel_inbound_changed = bool(old_tunnel.get("tunnel_only_inbound", False)) != bool(
                 new_tunnel.get("tunnel_only_inbound", False)
+            )
+            warp_changed = bool(old_tunnel.get("warp_outbound_enabled", True)) != bool(
+                new_tunnel.get("warp_outbound_enabled", True)
             )
             tunnel_reloaded = False
 
@@ -202,6 +214,15 @@ class AtlasConfigWatcher:
                     self._cloudflare_tunnel.set_tunnel_only_inbound(
                         bool(new_tunnel.get("tunnel_only_inbound", False))
                     )
+
+            if self._warp_proxy is not None and warp_changed:
+                try:
+                    await self._warp_proxy.set_enabled(
+                        bool(new_tunnel.get("warp_outbound_enabled", True)),
+                        force_probe=True,
+                    )
+                except Exception as exc:
+                    log.warning("Lỗi hot-reload Cloudflare WARP từ thay đổi Atlas: %s", exc)
 
             # 3) Áp dụng nóng Discord Presence nếu người dùng chỉnh nhánh `presence` trực tiếp trong Atlas
             presence_reloaded = False

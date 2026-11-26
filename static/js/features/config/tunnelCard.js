@@ -8,7 +8,7 @@
  */
 
 import { apiRequest, sanitizeHttpUrl, showToast } from "../../core/api.js";
-import { computeFormDiff, showConfirmModal } from "../../core/confirmSave.js";
+import { computeFormDiff, confirmSaveChanges, showConfirmModal } from "../../core/confirmSave.js";
 
 const TOGGLE_BTN_BASE_CLASS =
   "w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-white border shadow-sm transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -30,6 +30,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
   let hasSavedToken = false;
   let hasTelemetry = false;
   let isTunnelActive = false;
+  let isTogglingWarp = false;
   let initialState = null;
 
   function syncModeInputs() {
@@ -66,8 +67,10 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const tokenHintEl = document.getElementById("cf-token-hint");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
     const proxyHeadersEl = document.getElementById("cf-proxy-headers");
+    const warpToggleEl = document.getElementById("cf-warp-outbound-toggle");
 
     const loadedMode = tunnel.cf_tunnel_mode === "quick" ? "quick" : "named";
+    const warpEnabled = tunnel.warp_outbound_enabled !== undefined ? Boolean(tunnel.warp_outbound_enabled) : true;
     if (modeEl) modeEl.value = loadedMode;
     if (tokenEl) {
       tokenEl.value = "";
@@ -83,6 +86,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     }
     if (inboundLockEl) inboundLockEl.checked = Boolean(tunnel.tunnel_only_inbound);
     if (proxyHeadersEl) proxyHeadersEl.checked = Boolean(tunnel.proxy_headers);
+    if (warpToggleEl && !isTogglingWarp) warpToggleEl.checked = warpEnabled;
 
     const enabledNow = Boolean(tunnel.cf_tunnel_enabled);
     initialState = {
@@ -92,6 +96,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         cf_tunnel_token: hasSavedToken ? "••••••••••••" : "",
         tunnel_only_inbound: Boolean(tunnel.tunnel_only_inbound),
         proxy_headers: Boolean(tunnel.proxy_headers),
+        warp_outbound_enabled: warpEnabled,
       },
     };
 
@@ -107,6 +112,13 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
 
     const badgeEl = document.getElementById("cf-status-badge");
     const outboundEl = document.getElementById("cf-outbound-badge");
+    const outboundDotEl = document.getElementById("cf-outbound-dot");
+    const outboundTextEl = document.getElementById("cf-outbound-text");
+    const warpStatePillEl = document.getElementById("cf-warp-state-pill");
+    const warpRamBadgeEl = document.getElementById("cf-warp-ram-badge");
+    const warpEndpointEl = document.getElementById("cf-warp-endpoint");
+    const warpDetailEl = document.getElementById("cf-warp-detail");
+    const warpToggleEl = document.getElementById("cf-warp-outbound-toggle");
     const originEl = document.getElementById("cf-origin-url");
     const urlWrapEl = document.getElementById("cf-public-url-wrap");
     const urlLinkEl = document.getElementById("cf-public-url");
@@ -130,15 +142,77 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       badgeEl.className = `text-[11px] font-medium px-2.5 py-0.5 rounded-full border transition-colors duration-200 ${cls}`;
     }
 
+    const warpInfo = telemetry.warp || {};
+    const warpActive = Boolean(
+      telemetry.warp_active ?? warpInfo.active ?? telemetry.outbound_mode === "proxy"
+    );
+    const warpEnabled = Boolean(
+      telemetry.warp_enabled ?? warpInfo.enabled ?? initialState?.tunnel?.warp_outbound_enabled ?? true
+    );
+    const warpFallback = Boolean(
+      telemetry.warp_fallback_direct ?? warpInfo.fallback_direct ?? (warpEnabled && !warpActive)
+    );
+    const warpRamMb = telemetry.warp_ram_mb ?? warpInfo.warp_ram_mb ?? null;
+    const warpPid = telemetry.warp_pid ?? warpInfo.warp_pid ?? null;
+    const warpProxyUrl = telemetry.warp_proxy_url || warpInfo.proxy_url || "http://127.0.0.1:40000";
+
     if (outboundEl) {
-      const isProxy = telemetry.outbound_mode === "proxy";
-      const nextText = isProxy ? "Outbound: Proxy (WARP)" : "Outbound: Direct";
-      if (outboundEl.textContent !== nextText) outboundEl.textContent = nextText;
-      outboundEl.className = `text-[10px] font-mono px-2 py-0.5 rounded-full border ${
-        isProxy
-          ? "bg-sky-500/15 text-sky-300 border-sky-500/30"
+      const nextText = warpActive ? "Outbound: Cloudflare WARP" : "Outbound: Direct";
+      if (outboundTextEl) {
+        if (outboundTextEl.textContent !== nextText) outboundTextEl.textContent = nextText;
+      } else if (outboundEl.textContent !== nextText) {
+        outboundEl.textContent = nextText;
+      }
+      if (outboundDotEl) {
+        outboundDotEl.classList.toggle("hidden", !warpActive);
+      }
+      outboundEl.className = `inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-0.5 rounded-full border transition-colors duration-200 ${
+        warpActive
+          ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
           : "bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
       }`;
+    }
+
+    if (warpStatePillEl) {
+      let pillText = "Đã tắt (Direct)";
+      let pillCls = "bg-[#181d27] text-[#8b95a7] border-[#2a3140]";
+      if (warpActive) {
+        pillText = "WARP Kết nối";
+        pillCls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+      } else if (warpFallback) {
+        pillText = "Fallback Direct";
+        pillCls = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+      }
+      if (warpStatePillEl.textContent !== pillText) warpStatePillEl.textContent = pillText;
+      warpStatePillEl.className = `text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors duration-200 ${pillCls}`;
+    }
+
+    if (warpRamBadgeEl) {
+      const ramText =
+        warpRamMb !== null && warpRamMb !== undefined
+          ? `WARP RAM: ${warpRamMb} MB${warpPid ? ` · PID ${warpPid}` : ""}`
+          : "WARP RAM: —";
+      if (warpRamBadgeEl.textContent !== ramText) warpRamBadgeEl.textContent = ramText;
+    }
+
+    if (warpEndpointEl && warpEndpointEl.textContent !== warpProxyUrl) {
+      warpEndpointEl.textContent = warpProxyUrl;
+    }
+
+    if (warpDetailEl) {
+      let detailText = "Đã tắt WARP Outbound — Gemini & Discord dùng Direct · MongoDB Atlas: Direct TLS";
+      if (warpActive) {
+        const ramPart = warpRamMb !== null && warpRamMb !== undefined ? ` (${warpRamMb} MB RAM)` : "";
+        detailText = `Gemini API & Discord đang đi qua Cloudflare WARP${ramPart} · MongoDB Atlas: Direct TLS`;
+      } else if (warpFallback) {
+        detailText = "WARP proxy 127.0.0.1:40000 chưa phản hồi — tự động dùng Direct · MongoDB Atlas: Direct TLS";
+      }
+      if (warpDetailEl.textContent !== detailText) warpDetailEl.textContent = detailText;
+    }
+
+    if (warpToggleEl && !isTogglingWarp && initialState?.tunnel) {
+      warpToggleEl.checked = warpEnabled;
+      initialState.tunnel.warp_outbound_enabled = warpEnabled;
     }
 
     if (telemetry.origin_url) {
@@ -177,6 +251,60 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     syncToggleButton(Boolean(telemetry.running));
   }
 
+  async function submitWarpToggle(nextEnabled) {
+    const warpToggleEl = document.getElementById("cf-warp-outbound-toggle");
+    const prevEnabled = Boolean(initialState?.tunnel?.warp_outbound_enabled ?? !nextEnabled);
+
+    isTogglingWarp = true;
+    try {
+      const outcome = await confirmSaveChanges({
+        title: nextEnabled
+          ? "Xác nhận bật Outbound qua Cloudflare WARP"
+          : "Xác nhận tắt Outbound Cloudflare WARP",
+        subtitle:
+          "Định tuyến Gemini API & Discord sẽ chuyển nóng ngay lập tức (MongoDB Atlas luôn giữ kết nối TLS trực tiếp)",
+        before: { tunnel: { warp_outbound_enabled: prevEnabled } },
+        after: { tunnel: { warp_outbound_enabled: Boolean(nextEnabled) } },
+        confirmLabel: nextEnabled ? "Bật WARP Outbound" : "Chuyển về Direct",
+        confirmTone: nextEnabled ? "success" : "danger",
+        onConfirm: async (changes) => {
+          const res = await apiRequest("/api/config/warp", {
+            method: "PUT",
+            body: JSON.stringify({
+              warp_outbound_enabled: Boolean(nextEnabled),
+              changes,
+            }),
+          });
+          if (res.config) {
+            fill(res.config);
+          }
+          if (res.cloudflare_tunnel) {
+            renderTelemetry(res.cloudflare_tunnel);
+          }
+          const warpActive = Boolean(res.warp?.active ?? res.cloudflare_tunnel?.warp_active);
+          if (!nextEnabled) {
+            showToast("⏹ Đã tắt Cloudflare WARP Outbound — chuyển sang kết nối Direct.");
+          } else if (warpActive) {
+            showToast("⚡ Đã bật Outbound qua Cloudflare WARP (127.0.0.1:40000)!");
+          } else {
+            showToast(
+              "⚠️ Đã bật cấu hình WARP nhưng 127.0.0.1:40000 chưa phản hồi — tạm dùng Direct fallback.",
+              false
+            );
+          }
+          if (onConfigSaved) await onConfigSaved();
+        },
+      });
+      if (!outcome?.confirmed && warpToggleEl) {
+        warpToggleEl.checked = prevEnabled;
+      }
+    } catch {
+      if (warpToggleEl) warpToggleEl.checked = prevEnabled;
+    } finally {
+      isTogglingWarp = false;
+    }
+  }
+
   /**
    * Mở Hộp thoại Xác nhận trong ứng dụng bắt buộc cho cả 3 thao tác: `start` (Bật), `stop` (Tắt), `update` (Cập nhật).
    */
@@ -185,11 +313,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const tokenEl = document.getElementById("cf-tunnel-token");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
     const proxyHeadersEl = document.getElementById("cf-proxy-headers");
+    const warpToggleEl = document.getElementById("cf-warp-outbound-toggle");
 
     const mode = modeEl ? modeEl.value : "named";
     const tokenVal = tokenEl ? tokenEl.value.trim() : "";
     const tunnelOnlyInbound = Boolean(inboundLockEl && inboundLockEl.checked);
     const proxyHeaders = Boolean(proxyHeadersEl && proxyHeadersEl.checked);
+    const warpOutboundEnabled = warpToggleEl
+      ? Boolean(warpToggleEl.checked)
+      : Boolean(initialState?.tunnel?.warp_outbound_enabled ?? true);
     const enabled = action !== "stop";
 
     if (enabled && mode === "named" && !tokenVal && !hasSavedToken) {
@@ -204,6 +336,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         cf_tunnel_token: hasSavedToken ? "••••••••••••" : "",
         tunnel_only_inbound: false,
         proxy_headers: false,
+        warp_outbound_enabled: true,
       },
     };
 
@@ -219,6 +352,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         cf_tunnel_token: effectiveTokenAfter,
         tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
         proxy_headers: proxyHeaders,
+        warp_outbound_enabled: warpOutboundEnabled,
       },
     };
 
@@ -309,6 +443,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
             cf_tunnel_token: tokenVal || null,
             tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
             proxy_headers: proxyHeaders,
+            warp_outbound_enabled: warpOutboundEnabled,
             changes,
           }),
         });
@@ -383,7 +518,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       syncToggleButton(toggleBtn.dataset.tunnelActive === "true");
     }
 
-    // Ủy quyền sự kiện click trên khung thẻ Tunnel để không bao giờ mất listener khi nút đổi trạng thái động
+    // Ủy quyền sự kiện click/change trên khung thẻ Tunnel để không bao giờ mất listener khi nút đổi trạng thái động
     const tunnelCardEl = document.getElementById("cf-tunnel-card") || document;
     tunnelCardEl.addEventListener("click", (event) => {
       const target = event.target;
@@ -409,6 +544,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         copyOriginToClipboard();
       }
     });
+
+    if (isAdmin) {
+      tunnelCardEl.addEventListener("change", (event) => {
+        const target = event.target;
+        if (target && target.id === "cf-warp-outbound-toggle" && !target.disabled) {
+          submitWarpToggle(Boolean(target.checked));
+        }
+      });
+    }
   }
 
   return { fill, renderTelemetry, bindEvents };

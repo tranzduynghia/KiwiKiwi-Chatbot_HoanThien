@@ -35,9 +35,16 @@ Sao chép `_.env.example` thành `.env` (hoặc cấu hình trong Environment Va
 | `DISCORD_CLIENT_ID` | Khi dùng OAuth2 | Client ID trong Discord Developer Portal → **OAuth2** |
 | `DISCORD_CLIENT_SECRET` | Khi dùng OAuth2 | Client Secret trong Discord Developer Portal → **OAuth2** |
 | `DISCORD_REDIRECT_URI` | Tuỳ chọn | Mặc định tự ghép `${DASHBOARD_PUBLIC_URL}/auth/discord/callback` |
+| `CF_TUNNEL_TOKEN` / `CLOUDFLARE_TUNNEL_TOKEN` | Không | Token Cloudflare Named Tunnel nạp sẵn lúc khởi động container (khi MongoDB chưa có token đã lưu) |
+| `CF_TUNNEL_MODE` | Không | Chế độ Tunnel mặc định: `named` hoặc `quick` (mặc định `named`) |
+| `CF_TUNNEL_ONLY` | Không | `true` = bật sẵn khóa `tunnel_only_inbound` (chỉ nhận truy cập qua Cloudflare Tunnel, giữ mở `/health`) |
+| `TRUST_PROXY_HEADERS` | Không | `true` = bật sẵn đọc `X-Forwarded-Proto` / `X-Forwarded-For` / `CF-Connecting-IP` từ proxy tin cậy |
 | `TRUSTED_PROXY_IPS` | Không | Danh sách IP/CIDR reverse proxy tin cậy cách nhau dấu phẩy (mặc định chỉ loopback `127.0.0.1/8`, `::1/128` cho `cloudflared` nội bộ) |
 | `CLOUDFLARE_TUNNEL_SECRET_HEADER` / `CLOUDFLARE_TUNNEL_SECRET_VALUE` | Không | Cặp tên/giá trị header bí mật bổ sung do Cloudflare Transform Rule chèn khi bật `tunnel_only_inbound` |
-| `OUTBOUND_PROXY_URL` | Không | Proxy outbound (VD: Cloudflare WARP SOCKS/HTTP) cho Discord & Gemini SDK |
+| `OUTBOUND_PROXY_URL` | Không | Ghi đè URL proxy outbound cho Discord & Gemini SDK (mặc định tự phát hiện WARP tại `http://127.0.0.1:40000`) |
+| `WARP_ENABLED` / `WARP_OUTBOUND_ENABLED` | Không | Bật/tắt Cloudflare WARP User-Space Proxy (`127.0.0.1:40000`) khi khởi động container và mặc định trên Dashboard (mặc định `true`, tự động fallback Direct nếu không kết nối được; MongoDB Atlas luôn giữ TLS trực tiếp) |
+| `WARP_PROXY_PORT` | Không | Cổng cục bộ của WARP user-space proxy (mặc định `40000`) |
+| `WARP_LICENSE_KEY` / `WARP_CONNECTOR_TOKEN` | Tuỳ chọn | License key WARP+ hoặc Zero Trust WARP Connector token (chỉ đọc lúc container khởi động, không bao giờ lưu DB hay lộ qua API) |
 | `INITIAL_ADMIN_USERNAME` | Khởi tạo lần đầu | Tên đăng nhập Admin tự động tạo nếu `dashboard_users` đang trống |
 | `INITIAL_ADMIN_PASSWORD` | Khởi tạo lần đầu | Mật khẩu Admin tự động tạo (tối thiểu 6 ký tự) |
 | `INITIAL_ADMIN_DISCORD_IDS` | Khởi tạo lần đầu | Các Discord User ID làm Admin ban đầu (cách nhau bằng dấu phẩy) |

@@ -42,5 +42,13 @@ class TunnelConfigPayload(BaseModel):
     cf_tunnel_token: Optional[str] = Field(default=None, max_length=4096)
     tunnel_only_inbound: bool = False
     proxy_headers: bool = False
+    warp_outbound_enabled: Optional[bool] = None
     clear_token: bool = False
+    changes: Optional[dict[str, dict[str, Any]]] = None
+
+
+class WarpConfigPayload(BaseModel):
+    """Payload bật/tắt nhanh định tuyến Outbound qua Cloudflare WARP User-Space Proxy (127.0.0.1:40000)."""
+
+    warp_outbound_enabled: bool
     changes: Optional[dict[str, dict[str, Any]]] = None

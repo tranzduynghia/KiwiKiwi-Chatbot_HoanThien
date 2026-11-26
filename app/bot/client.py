@@ -29,7 +29,11 @@ class AskBot(discord.Client):
     """Tiến trình bot Discord kiêm máy chủ Web Dashboard FastAPI chạy chung vòng lặp asyncio."""
 
     def __init__(self, container: Any):
-        proxy_url = (getattr(container.settings, "outbound_proxy_url", "") or "").strip() or None
+        warp_proxy = getattr(container, "warp_proxy", None)
+        if warp_proxy is not None:
+            proxy_url = warp_proxy.effective_proxy_url() or None
+        else:
+            proxy_url = (getattr(container.settings, "outbound_proxy_url", "") or "").strip() or None
         super().__init__(intents=discord.Intents.default(), proxy=proxy_url)
         self.container = container
         self.tree = app_commands.CommandTree(self)
@@ -43,6 +47,11 @@ class AskBot(discord.Client):
         self.container.atlas_config_watcher.attach_presence_hook(
             lambda presence_cfg: apply_bot_presence(self, presence_cfg)
         )
+        if warp_proxy is not None:
+            def _update_discord_proxy(new_proxy: Optional[str]) -> None:
+                if getattr(self, "http", None) is not None:
+                    self.http.proxy = new_proxy or None
+            warp_proxy.register_route_hook(_update_discord_proxy)
         self._register_commands()
 
     def _register_commands(self) -> None:
@@ -80,12 +89,15 @@ class AskBot(discord.Client):
         register_error_handler(self.tree)
 
     async def setup_hook(self) -> None:
-        """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, tự bật Cloudflare Tunnel (nếu bật), tải model và đồng bộ slash commands."""
+        """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, áp dụng Cloudflare WARP/Tunnel, tải model và đồng bộ slash commands."""
         settings = self.container.settings
         await self.start_web()  # Mở cổng sớm để nền tảng host (Northflank/Render) nhận diện service
         await self.init_database()  # Kết nối MongoDB + nạp cấu hình động trước khi sync & chạy
 
         tunnel_cfg = self.container.config_repo.tunnel_cfg()
+        if getattr(self.container, "warp_proxy", None) is not None:
+            warp_enabled = bool(tunnel_cfg.get("warp_outbound_enabled", settings.warp_outbound_enabled))
+            await self.container.warp_proxy.set_enabled(warp_enabled, force_probe=True)
         if tunnel_cfg.get("cf_tunnel_enabled"):
             await self.container.cloudflare_tunnel.apply_config(tunnel_cfg)
 
@@ -110,6 +122,12 @@ class AskBot(discord.Client):
             synced = await self.tree.sync()
             scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
 
+        warp_proxy = getattr(self.container, "warp_proxy", None)
+        outbound_label = (
+            f"Cloudflare WARP ({warp_proxy.safe_proxy_url})"
+            if warp_proxy is not None and warp_proxy.is_active
+            else ("proxy" if settings.outbound_proxy_url else "direct")
+        )
         log.info("Đã đồng bộ slash commands: %s — phạm vi: %s", ", ".join("/" + cmd.name for cmd in synced), scope)
         log.info(
             "Phiên bản %s · google-genai %s (API %s) · discord.py %s · pymongo %s · RAM tiến trình: %s · Outbound: %s",
@@ -119,7 +137,7 @@ class AskBot(discord.Client):
             discord.__version__,
             pymongo.version,
             format_bytes(psutil.Process().memory_info().rss),
-            "proxy" if settings.outbound_proxy_url else "direct",
+            outbound_label,
         )
 
     async def start_web(self) -> None:

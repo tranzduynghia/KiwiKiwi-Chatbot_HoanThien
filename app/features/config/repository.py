@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Any, Optional
 
-from app.core.settings import build_default_config
+from app.core.settings import build_default_config, build_env_tunnel_defaults, has_env_tunnel_overrides
 from app.core.utils import deep_merge
 
 log = logging.getLogger("gemini-bot.config")
@@ -46,7 +46,7 @@ class ConfigRepository:
         return self._config
 
     async def attach_db(self, db: Any) -> None:
-        """Gắn collection `bot_config` và khởi tạo/nạp cấu hình mặc định nếu chưa có bản đệm mới."""
+        """Gắn collection `bot_config`, nạp cấu hình và áp dụng biến môi trường Tunnel nếu MongoDB chưa lưu token."""
         self.collection = db["bot_config"]
         if self._pending_config is not None:
             return
@@ -58,7 +58,16 @@ class ConfigRepository:
                 self._config = default_doc
                 log.info("Đã khởi tạo cấu hình mặc định trong MongoDB collection `bot_config`.")
             else:
-                self._config = deep_merge(build_default_config(), existing)
+                merged = deep_merge(build_default_config(), existing)
+                tunnel_node = merged.get("tunnel") if isinstance(merged.get("tunnel"), dict) else {}
+                saved_token = str(tunnel_node.get("cf_tunnel_token") or merged.get("cf_tunnel_token") or "").strip()
+                if not saved_token and has_env_tunnel_overrides():
+                    env_tunnel = build_env_tunnel_defaults()
+                    if env_tunnel.get("cf_tunnel_token") or not tunnel_node.get("cf_tunnel_enabled"):
+                        merged["tunnel"] = {**tunnel_node, **env_tunnel}
+                        await self.collection.replace_one({"_id": "global"}, merged, upsert=True)
+                        log.info("Đã nạp sẵn cấu hình Cloudflare Tunnel từ biến môi trường vào `bot_config` (chưa có token trong MongoDB).")
+                self._config = merged
             self._loaded_at = time.monotonic()
         except Exception as exc:
             log.warning("Lỗi khởi tạo dữ liệu bot_config trên MongoDB: %s", exc)
@@ -126,9 +135,16 @@ class ConfigRepository:
         return self._config.get("presence", {})
 
     def tunnel_cfg(self) -> dict[str, Any]:
-        """Trả về nhánh cấu hình Cloudflare Tunnel hiện hành (hỗ trợ cả trường lồng `tunnel.*` lẫn trường phẳng ở gốc tài liệu)."""
+        """Trả về nhánh cấu hình Cloudflare Tunnel & WARP hiện hành (hỗ trợ cả trường lồng `tunnel.*` lẫn trường phẳng ở gốc tài liệu)."""
         base = dict(self._config.get("tunnel") or {})
-        for key in ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token", "tunnel_only_inbound"):
+        for key in (
+            "cf_tunnel_enabled",
+            "cf_tunnel_mode",
+            "cf_tunnel_token",
+            "tunnel_only_inbound",
+            "proxy_headers",
+            "warp_outbound_enabled",
+        ):
             if key in self._config:
                 base[key] = self._config[key]
         return base

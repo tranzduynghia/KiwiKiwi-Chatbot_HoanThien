@@ -468,13 +468,14 @@
           </span>
           <span
             id="cf-outbound-badge"
-            class="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
+            class="inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-0.5 rounded-full border bg-[#181d27] text-[#8b95a7] border-[#2a3140] transition-colors duration-200"
           >
-            Outbound: Direct
+            <span id="cf-outbound-dot" class="hidden w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span id="cf-outbound-text">Outbound: Direct</span>
           </span>
         </div>
         <p class="text-[11px] text-[#8b95a7] mt-1">
-          Quản lý đường hầm Zero Trust / Quick Tunnel trực tiếp trong container — áp dụng nóng không cần khởi động lại bot
+          Quản lý đường hầm Zero Trust / Quick Tunnel và định tuyến Outbound Cloudflare WARP trực tiếp trong container — áp dụng nóng không cần khởi động lại bot
         </p>
       </div>
       {% if user.is_admin %}
@@ -603,9 +604,36 @@
             <span class="w-10 h-5 bg-[#1e232e] rounded-full peer peer-checked:bg-sky-600 transition-colors duration-200 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform after:duration-200 peer-checked:after:translate-x-5"></span>
           </label>
         </div>
+
+        {# Công tắc bật/tắt nhanh định tuyến Outbound Cloudflare WARP (127.0.0.1:40000) #}
+        <div class="rounded-lg bg-[#0a0d12] border border-[#1e232e] px-3.5 py-2.5 flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <div class="flex flex-wrap items-center gap-2">
+              <label for="cf-warp-outbound-toggle" class="text-xs font-medium text-slate-200 cursor-pointer">
+                ⚡ Outbound qua Cloudflare WARP (<code>127.0.0.1:40000</code>)
+              </label>
+              <span
+                id="cf-warp-state-pill"
+                class="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
+              >
+                Direct
+              </span>
+              <span id="cf-warp-ram-badge" class="text-[10px] font-mono text-[#5e6778]">
+                WARP RAM: —
+              </span>
+            </div>
+            <p class="text-[11px] text-[#8b95a7] mt-0.5 leading-snug">
+              Định tuyến Gemini API &amp; Discord qua WARP user-space proxy; tự động chuyển Direct nếu proxy ngừng phản hồi (MongoDB Atlas luôn giữ TLS trực tiếp).
+            </p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer shrink-0">
+            <input id="cf-warp-outbound-toggle" type="checkbox" class="sr-only peer" {{ '' if user.is_admin else 'disabled' }} />
+            <span class="w-10 h-5 bg-[#1e232e] rounded-full peer peer-checked:bg-emerald-600 transition-colors duration-200 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-transform after:duration-200 peer-checked:after:translate-x-5"></span>
+          </label>
+        </div>
       </div>
 
-      {# Thông tin kết nối trực tiếp, Public URL & hướng dẫn 2 chế độ Tunnel #}
+      {# Thông tin kết nối trực tiếp, Public URL, WARP Outbound & hướng dẫn 2 chế độ Tunnel #}
       <div class="lg:col-span-5 min-w-0 rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-3 text-xs">
         {# Hàng tiêu đề: tên thẻ bên trái + huy hiệu Origin nội bộ kèm nút sao chép 1 chạm bên phải #}
         <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
@@ -663,6 +691,17 @@
             rel="noopener noreferrer"
             class="font-mono text-xs text-emerald-300 hover:text-emerald-200 underline break-all"
           >—</a>
+        </div>
+
+        {# Trạng thái định tuyến Outbound Cloudflare WARP #}
+        <div class="rounded-lg bg-slate-900/60 border border-slate-800/80 p-2.5 space-y-1">
+          <div class="flex flex-wrap items-center justify-between gap-2 text-[10px]">
+            <span class="text-slate-300 font-medium select-none">Outbound Proxy (WARP)</span>
+            <code id="cf-warp-endpoint" class="font-mono text-slate-400 select-all">http://127.0.0.1:40000</code>
+          </div>
+          <div id="cf-warp-detail" class="text-[11px] text-slate-400 leading-snug select-none">
+            Direct (chưa kết nối WARP proxy) · MongoDB Atlas: Direct TLS
+          </div>
         </div>
 
         {# Bố cục 2 cột phân tách rõ ràng chế độ Named Tunnel và Quick Tunnel (có min-w-0 chống tràn ngang) #}

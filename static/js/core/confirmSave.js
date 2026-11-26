@@ -23,6 +23,7 @@ const SENSITIVE_KEY_TOKENS = [
   "hash",
   "signing_key",
   "private_key",
+  "license_key",
   "credential",
 ];
 const SAFE_NON_SECRET_KEYS = new Set([
@@ -30,6 +31,11 @@ const SAFE_NON_SECRET_KEYS = new Set([
   "cf_tunnel_has_token",
   "outbound_proxy_configured",
   "discord_oauth_enabled",
+  "warp_outbound_enabled",
+  "warp_enabled",
+  "warp_connected",
+  "warp_active",
+  "warp_fallback_direct",
 ]);
 const STATIC_SECRET_PLACEHOLDER = "••••••••••••";
 const LONG_TEXT_FIELD_KEYS = new Set(["system_prompt", "ocr_instruction"]);
@@ -83,12 +89,13 @@ const DEFAULT_FIELD_LABELS = {
   "presence.activity_type": "Loại hoạt động chính",
   "presence.activity_text": "Nội dung hoạt động chính",
   "presence.auto_rotate": "Luân phiên tự động (mỗi 20s)",
-  // Cloudflare Tunnel
+  // Cloudflare Tunnel & WARP
   "tunnel.cf_tunnel_enabled": "Trạng thái Cloudflare Tunnel",
   "tunnel.cf_tunnel_mode": "Chế độ Cloudflare Tunnel",
   "tunnel.cf_tunnel_token": "Cloudflare Tunnel Token",
   "tunnel.tunnel_only_inbound": "Chỉ nhận truy cập qua Cloudflare Tunnel",
   "tunnel.proxy_headers": "Tin cậy Proxy Headers (X-Forwarded-For / Proto)",
+  "tunnel.warp_outbound_enabled": "Định tuyến Outbound qua Cloudflare WARP (127.0.0.1:40000)",
   // Permissions & Dashboard Users
   "user_id": "Discord User ID",
   "label": "Nhãn ghi chú",

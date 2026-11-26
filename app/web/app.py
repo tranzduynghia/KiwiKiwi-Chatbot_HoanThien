@@ -228,6 +228,12 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             auth_deps=container.auth_deps,
             apply_presence_fn=lambda presence_cfg: apply_bot_presence(get_bot(), presence_cfg),
             apply_tunnel_fn=container.cloudflare_tunnel.apply_config,
+            apply_warp_fn=(
+                (lambda enabled: container.warp_proxy.set_enabled(enabled, force_probe=True))
+                if getattr(container, "warp_proxy", None) is not None
+                else None
+            ),
+            get_tunnel_status_fn=container.cloudflare_tunnel.status_snapshot,
         )
     )
     app.include_router(

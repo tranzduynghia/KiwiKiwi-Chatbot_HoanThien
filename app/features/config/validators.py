@@ -112,10 +112,12 @@ def sanitize_tunnel_config(
     cf_tunnel_token: str | None,
     tunnel_only_inbound: bool,
     proxy_headers: bool = False,
+    warp_outbound_enabled: bool | None = None,
+    existing_warp_enabled: bool = True,
     existing_token: str = "",
     clear_token: bool = False,
 ) -> dict[str, Any]:
-    """Chuẩn hóa cấu hình Cloudflare Tunnel; xác thực định dạng token an toàn và giữ nguyên token cũ nếu để trống."""
+    """Chuẩn hóa cấu hình Cloudflare Tunnel & WARP Outbound; xác thực định dạng token an toàn và giữ nguyên token cũ nếu để trống."""
     clean_mode = str(cf_tunnel_mode or "named").strip().lower()
     if clean_mode not in ALLOWED_TUNNEL_MODES:
         raise ValueError("Chế độ Cloudflare Tunnel không hợp lệ (chỉ nhận 'named' hoặc 'quick').")
@@ -134,10 +136,13 @@ def sanitize_tunnel_config(
             raise ValueError("Vui lòng nhập Cloudflare Tunnel Token khi bật chế độ Named Tunnel.")
         final_token = validate_cloudflare_tunnel_token(final_token)
 
+    effective_warp = bool(existing_warp_enabled) if warp_outbound_enabled is None else bool(warp_outbound_enabled)
+
     return {
         "cf_tunnel_enabled": enabled,
         "cf_tunnel_mode": clean_mode,
         "cf_tunnel_token": final_token,
         "tunnel_only_inbound": bool(tunnel_only_inbound),
         "proxy_headers": bool(proxy_headers),
+        "warp_outbound_enabled": effective_warp,
     }

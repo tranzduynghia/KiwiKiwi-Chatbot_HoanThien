@@ -12,6 +12,7 @@ from app.features.config.schemas import (
     PresenceConfigPayload,
     PromptConfigPayload,
     TunnelConfigPayload,
+    WarpConfigPayload,
 )
 from app.features.config.service import ConfigService
 from app.features.config.validators import (
@@ -33,8 +34,10 @@ def create_config_router(
     auth_deps: Any,
     apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
     apply_tunnel_fn: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None,
+    apply_warp_fn: Optional[Callable[[bool], Awaitable[dict[str, Any]]]] = None,
+    get_tunnel_status_fn: Optional[Callable[[], dict[str, Any]]] = None,
 ) -> APIRouter:
-    """Tạo router cho `/api/config`, `/api/config/ask`, `/api/config/prompt`, `/api/config/presence` và `/api/config/tunnel`."""
+    """Tạo router cho `/api/config`, `/api/config/ask`, `/api/config/prompt`, `/api/config/presence`, `/api/config/tunnel` và `/api/config/warp`."""
     router = APIRouter(tags=["config"])
 
     @router.get("/api/config")
@@ -133,6 +136,7 @@ def create_config_router(
         current_cfg = await config_service.get_config(force=True)
         existing_tunnel = current_cfg.get("tunnel") if isinstance(current_cfg.get("tunnel"), dict) else {}
         existing_token = str(existing_tunnel.get("cf_tunnel_token") or "")
+        existing_warp = bool(existing_tunnel.get("warp_outbound_enabled", True))
 
         try:
             clean_tunnel = sanitize_tunnel_config(
@@ -141,6 +145,8 @@ def create_config_router(
                 cf_tunnel_token=payload.cf_tunnel_token,
                 tunnel_only_inbound=payload.tunnel_only_inbound,
                 proxy_headers=payload.proxy_headers,
+                warp_outbound_enabled=payload.warp_outbound_enabled,
+                existing_warp_enabled=existing_warp,
                 existing_token=existing_token,
                 clear_token=payload.clear_token,
             )
@@ -163,6 +169,9 @@ def create_config_router(
             client_changes=payload.changes,
         )
 
+        if apply_warp_fn is not None and payload.warp_outbound_enabled is not None:
+            await apply_warp_fn(clean_tunnel["warp_outbound_enabled"])
+
         tunnel_status: Optional[dict[str, Any]] = None
         if apply_tunnel_fn is not None:
             tunnel_status = await apply_tunnel_fn(clean_tunnel)
@@ -170,6 +179,42 @@ def create_config_router(
         return {
             "ok": True,
             "config": _mask_config_secrets(updated),
+            "cloudflare_tunnel": tunnel_status,
+            "sync": sync_coordinator.sync_status(),
+        }
+
+    @router.put("/api/config/warp")
+    async def api_update_warp_config(
+        payload: WarpConfigPayload,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Bật/tắt nóng định tuyến Outbound (Gemini & Discord) qua Cloudflare WARP User-Space Proxy (127.0.0.1:40000)."""
+        enabled = bool(payload.warp_outbound_enabled)
+        actor, actor_type = auth_deps.actor_label(user)
+        action_summary = (
+            "Bật định tuyến Outbound qua Cloudflare WARP (127.0.0.1:40000)"
+            if enabled
+            else "Tắt định tuyến Outbound Cloudflare WARP (chuyển về Direct)"
+        )
+        updated = await config_service.update_config(
+            {"tunnel": {"warp_outbound_enabled": enabled}},
+            updated_by=actor,
+            actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(user),
+            section="tunnel",
+            summary=action_summary,
+            client_changes=payload.changes,
+        )
+
+        warp_status: Optional[dict[str, Any]] = None
+        if apply_warp_fn is not None:
+            warp_status = await apply_warp_fn(enabled)
+
+        tunnel_status = get_tunnel_status_fn() if callable(get_tunnel_status_fn) else None
+        return {
+            "ok": True,
+            "config": _mask_config_secrets(updated),
+            "warp": warp_status,
             "cloudflare_tunnel": tunnel_status,
             "sync": sync_coordinator.sync_status(),
         }

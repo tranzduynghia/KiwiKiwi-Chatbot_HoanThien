@@ -20,6 +20,7 @@ TUNNEL_LEGACY_TOP_LEVEL_KEYS = (
     "cf_tunnel_token",
     "tunnel_only_inbound",
     "proxy_headers",
+    "warp_outbound_enabled",
 )
 
 

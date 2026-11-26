@@ -41,6 +41,10 @@ class ModelRegistry:
         self.updated_at: float = 0.0
         self.last_error: Optional[str] = None
 
+    def set_client(self, gemini_client: Any) -> None:
+        """Cập nhật nóng đối tượng `genai.Client` khi chuyển đổi định tuyến Outbound giữa Cloudflare WARP và Direct."""
+        self._gemini = gemini_client
+
     async def refresh(self) -> None:
         """Tải danh sách model hỗ trợ `generateContent` trực tiếp từ Gemini API."""
         discovered: list[ModelInfo] = []

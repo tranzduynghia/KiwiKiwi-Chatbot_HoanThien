@@ -54,6 +54,7 @@ SENSITIVE_KEY_TOKENS = (
     "hash",
     "signing_key",
     "private_key",
+    "license_key",
     "credential",
 )
 
@@ -119,11 +120,16 @@ class AppSettings:
     discord_client_secret: str = ""
     discord_redirect_uri: str = ""
     outbound_proxy_url: str = ""
+    warp_proxy_port: int = 40000
+    warp_outbound_enabled: bool = True
     cache_ttl_seconds: float = 5.0
 
     @classmethod
     def from_env(cls) -> "AppSettings":
         """Khởi tạo đối tượng cấu hình từ toàn bộ biến môi trường hiện tại."""
+        raw_warp_port = parse_int_env("WARP_PROXY_PORT", 40000)
+        warp_port = raw_warp_port if 1 <= raw_warp_port <= 65535 else 40000
+        warp_default = parse_bool_env("WARP_OUTBOUND_ENABLED", parse_bool_env("WARP_ENABLED", True))
         return cls(
             discord_token=(os.getenv("DISCORD_TOKEN") or "").strip(),
             gemini_api_key=(os.getenv("GEMINI_API_KEY") or "").strip(),
@@ -138,7 +144,48 @@ class AppSettings:
             discord_client_secret=(os.getenv("DISCORD_CLIENT_SECRET") or "").strip(),
             discord_redirect_uri=(os.getenv("DISCORD_REDIRECT_URI") or "").strip(),
             outbound_proxy_url=(os.getenv("OUTBOUND_PROXY_URL") or "").strip(),
+            warp_proxy_port=warp_port,
+            warp_outbound_enabled=warp_default,
         )
+
+
+def build_env_tunnel_defaults() -> dict[str, Any]:
+    """Đọc cấu hình Cloudflare Tunnel, WARP Outbound & Proxy Headers mặc định từ biến môi trường khi khởi động container."""
+    env_token = (os.getenv("CF_TUNNEL_TOKEN") or os.getenv("CLOUDFLARE_TUNNEL_TOKEN") or "").strip()
+    raw_mode = (os.getenv("CF_TUNNEL_MODE") or "").strip().lower()
+    mode = raw_mode if raw_mode in ("named", "quick") else "named"
+
+    tunnel_only = parse_bool_env("CF_TUNNEL_ONLY", False)
+    proxy_headers = parse_bool_env("TRUST_PROXY_HEADERS", False)
+    warp_outbound_enabled = parse_bool_env("WARP_OUTBOUND_ENABLED", parse_bool_env("WARP_ENABLED", True))
+
+    # Tự động bật Tunnel nếu cung cấp token hoặc đặt rõ CF_TUNNEL_MODE=quick (trừ khi CF_TUNNEL_ENABLED=false)
+    default_enabled = bool(env_token) if mode == "named" else (raw_mode == "quick")
+    enabled = parse_bool_env("CF_TUNNEL_ENABLED", default_enabled)
+
+    return {
+        "cf_tunnel_enabled": enabled,
+        "cf_tunnel_mode": mode,
+        "cf_tunnel_token": env_token,
+        "tunnel_only_inbound": tunnel_only,
+        "proxy_headers": proxy_headers,
+        "warp_outbound_enabled": warp_outbound_enabled,
+    }
+
+
+def has_env_tunnel_overrides() -> bool:
+    """Kiểm tra có biến môi trường cấu hình Cloudflare Tunnel / Proxy Headers nào được đặt hay không."""
+    return any(
+        os.getenv(var) is not None and (os.getenv(var) or "").strip() != ""
+        for var in (
+            "CF_TUNNEL_TOKEN",
+            "CLOUDFLARE_TUNNEL_TOKEN",
+            "CF_TUNNEL_MODE",
+            "CF_TUNNEL_ONLY",
+            "TRUST_PROXY_HEADERS",
+            "CF_TUNNEL_ENABLED",
+        )
+    )
 
 
 def build_default_config() -> dict[str, Any]:
@@ -194,13 +241,7 @@ def build_default_config() -> dict[str, Any]:
             "activity_text": "m!help",
             "auto_rotate": False,
         },
-        "tunnel": {
-            "cf_tunnel_enabled": False,
-            "cf_tunnel_mode": "named",
-            "cf_tunnel_token": "",
-            "tunnel_only_inbound": False,
-            "proxy_headers": False,
-        },
+        "tunnel": build_env_tunnel_defaults(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",
     }

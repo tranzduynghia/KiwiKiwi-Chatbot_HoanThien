@@ -33,6 +33,11 @@ SAFE_NON_SECRET_KEYS = frozenset({
     "cf_tunnel_has_token",
     "outbound_proxy_configured",
     "discord_oauth_enabled",
+    "warp_outbound_enabled",
+    "warp_enabled",
+    "warp_connected",
+    "warp_active",
+    "warp_fallback_direct",
     "tokens",
     "total_token_count",
 })
@@ -50,7 +55,7 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"[MN][A-Za-z\d]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"), "[REDACTED_TOKEN]"),
     (
         re.compile(
-            r"((?:api[_-]?key|token|secret|password|passwd|pepper|auth|key)\s*[=:]\s*)([^\s&'\",;]+)",
+            r"((?:api[_-]?key|license[_-]?key|token|secret|password|passwd|pepper|auth|key)\s*[=:]\s*)([^\s&'\",;]+)",
             re.IGNORECASE,
         ),
         r"\1[REDACTED]",
