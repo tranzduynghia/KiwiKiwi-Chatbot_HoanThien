@@ -4,6 +4,7 @@
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
+import { showConfirmModal } from "../../core/confirmSave.js";
 
 function buildSmoothSplinePath(points) {
   if (!points.length) return "";
@@ -373,42 +374,64 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
     document.getElementById("btn-refresh-status").addEventListener("click", () => loadStatus(false, { silent: false }));
     document.getElementById("btn-check-gemini").addEventListener("click", () => loadStatus(true, { silent: false }));
     document.getElementById("btn-clear-cd").addEventListener("click", async () => {
-      try {
-        const res = await apiRequest("/api/models/clear-cooldowns", { method: "POST" });
-        showToast(`Đã xóa cooldown của ${res.cleared} model.`);
-        loadStatus(false, { silent: true });
-      } catch (err) {
-        showToast(err.message, false);
-      }
+      await showConfirmModal({
+        title: "Xác nhận xóa toàn bộ Cooldown Model Gemini",
+        subtitle: "Tất cả model đang tạm nghỉ vì 429 Quota hoặc quá tải sẽ được mở khóa ngay lập tức",
+        changes: [
+          {
+            key: "models.cooldowns",
+            label: "Trạng thái Cooldown Model",
+            before: "Đang áp dụng cooldown tự động",
+            after: "Đặt lại về 0 (sẵn sàng gọi ngay)",
+          },
+        ],
+        confirmLabel: "Xác nhận xóa",
+        onConfirm: async () => {
+          const res = await apiRequest("/api/models/clear-cooldowns", { method: "POST" });
+          showToast(`Đã xóa cooldown của ${res.cleared} model.`);
+          loadStatus(false, { silent: true });
+        },
+      });
     });
 
     const testWatchdogBtn = document.getElementById("btn-test-watchdog");
     if (testWatchdogBtn) {
       testWatchdogBtn.addEventListener("click", async () => {
-        const confirmed = window.confirm(
-          "Chạy mô phỏng quy trình 4 bước Memory Watchdog (Giải phóng đệm 20MB → Đồng bộ MongoDB Atlas → Dọn cache RAM & GC → Cấp phát lại đệm)?"
-        );
-        if (!confirmed) return;
-
-        const originalLabel = testWatchdogBtn.textContent;
-        testWatchdogBtn.disabled = true;
-        testWatchdogBtn.textContent = "⏳ Đang chạy...";
-        try {
-          const res = await apiRequest("/api/system/watchdog/test", { method: "POST" });
-          if (res.memory_watchdog) {
-            renderWatchdogIndicator(res.memory_watchdog);
-          }
-          const timeoutNote = res.sync_timed_out ? " (đồng bộ quá hạn 5s)" : "";
-          showToast(
-            `✅ Test Watchdog hoàn tất: đồng bộ ${res.synced_total ?? 0} bản ghi lên Atlas${timeoutNote}, dọn ${res.purged_total ?? 0} mục cache (GC: ${res.gc_collected ?? 0} đối tượng).`
-          );
-          loadStatus(false, { silent: true });
-        } catch (err) {
-          showToast(err.message || "Không thể chạy Test Watchdog.", false);
-        } finally {
-          testWatchdogBtn.disabled = false;
-          testWatchdogBtn.textContent = originalLabel;
-        }
+        await showConfirmModal({
+          title: "Xác nhận chạy mô phỏng Memory Watchdog",
+          subtitle: "Kiểm thử toàn bộ quy trình 4 bước Sync-Before-Purge mà không gây tràn RAM thật",
+          warning:
+            "Thao tác sẽ giải phóng tạm vùng đệm 20MB, xả bộ đệm lên MongoDB Atlas (timeout 5s), dọn cache RAM không thiết yếu, gọi GC và ghi 1 bản ghi Audit Log (simulated=true).",
+          changes: [
+            {
+              key: "memory.watchdog_pipeline",
+              label: "Quy trình 4 bước Sync-Before-Purge",
+              before: "Đang chờ (Sẵn sàng 20 MB)",
+              after: "Giải phóng 20MB → Sync Atlas → Purge Cache & GC → Cấp phát lại",
+              isHighImpact: true,
+            },
+          ],
+          confirmLabel: "Chạy Test Watchdog",
+          onConfirm: async () => {
+            const originalLabel = testWatchdogBtn.textContent;
+            testWatchdogBtn.disabled = true;
+            testWatchdogBtn.textContent = "⏳ Đang chạy...";
+            try {
+              const res = await apiRequest("/api/system/watchdog/test", { method: "POST" });
+              if (res.memory_watchdog) {
+                renderWatchdogIndicator(res.memory_watchdog);
+              }
+              const timeoutNote = res.sync_timed_out ? " (đồng bộ quá hạn 5s)" : "";
+              showToast(
+                `✅ Test Watchdog hoàn tất: đồng bộ ${res.synced_total ?? 0} bản ghi lên Atlas${timeoutNote}, dọn ${res.purged_total ?? 0} mục cache (GC: ${res.gc_collected ?? 0} đối tượng).`
+              );
+              loadStatus(false, { silent: true });
+            } finally {
+              testWatchdogBtn.disabled = false;
+              testWatchdogBtn.textContent = originalLabel;
+            }
+          },
+        });
       });
     }
   }

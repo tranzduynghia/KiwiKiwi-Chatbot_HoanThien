@@ -4,7 +4,7 @@
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
-import { confirmSaveChanges } from "../../core/confirmSave.js";
+import { confirmSaveChanges, showConfirmModal } from "../../core/confirmSave.js";
 
 export function createPermissionsTabController({ isAdmin }) {
   let discordPermsById = new Map();
@@ -144,14 +144,36 @@ export function createPermissionsTabController({ isAdmin }) {
       const row = btn.closest("tr[data-user-id]");
       if (!row) return;
       const uid = row.dataset.userId;
-      if (!confirm(`Xóa quyền của Discord User ID ${uid}?`)) return;
-      try {
-        await apiRequest(`/api/permissions/discord/${encodeURIComponent(uid)}`, { method: "DELETE" });
-        showToast(`Đã xóa Discord ID ${uid}.`);
-        await loadPermissions();
-      } catch (err) {
-        showToast(err.message, false);
-      }
+      const existing = discordPermsById.get(uid);
+      await showConfirmModal({
+        title: `Xác nhận xóa quyền Discord ID ${uid}`,
+        subtitle: "Người dùng này sẽ mất toàn bộ quyền truy cập Dashboard và lệnh quản trị /status",
+        warning:
+          "Hành động này thu hồi ngay lập tức quyền truy cập của Discord User ID khỏi hệ thống và ghi vào Audit Log.",
+        changes: [
+          {
+            key: "user_id",
+            label: "Discord User ID bị xóa",
+            before: existing?.label ? `${uid} (${existing.label})` : uid,
+            after: "(Đã thu hồi toàn bộ quyền)",
+            isHighImpact: Boolean(existing?.is_admin),
+          },
+          {
+            key: "is_admin",
+            label: "Quyền Quản trị viên (Admin)",
+            before: Boolean(existing?.is_admin),
+            after: false,
+            isHighImpact: Boolean(existing?.is_admin),
+          },
+        ],
+        confirmLabel: "Xác nhận xóa",
+        confirmTone: "danger",
+        onConfirm: async () => {
+          await apiRequest(`/api/permissions/discord/${encodeURIComponent(uid)}`, { method: "DELETE" });
+          showToast(`Đã xóa Discord ID ${uid}.`);
+          await loadPermissions();
+        },
+      });
     });
 
     // Biểu mẫu thêm Discord User ID
@@ -240,14 +262,28 @@ export function createPermissionsTabController({ isAdmin }) {
       const username = row.dataset.username;
 
       if (btn.dataset.action === "change-password") {
-        const newPassword = prompt(`Nhập mật khẩu mới cho '${username}' (tối thiểu 6 ký tự):`);
-        if (!newPassword) return;
-        await confirmSaveChanges({
-          title: `Xác nhận đổi mật khẩu cho '${username}'`,
-          subtitle: "Mật khẩu mới sẽ có hiệu lực ngay ở lần đăng nhập kế tiếp",
-          before: { password: "••••• (đã lưu)" },
-          after: { password: newPassword },
-          onConfirm: async (changes) => {
+        await showConfirmModal({
+          title: `Đổi mật khẩu cho tài khoản '${username}'`,
+          subtitle: "Mật khẩu mới sẽ được băm scrypt trên server và có hiệu lực ở lần đăng nhập kế tiếp",
+          inputField: {
+            label: `Mật khẩu mới cho '${username}' (tối thiểu 6 ký tự)`,
+            placeholder: "Nhập mật khẩu mới...",
+            type: "password",
+            minLength: 6,
+            minLengthMessage: "Mật khẩu mới phải có tối thiểu 6 ký tự.",
+            fieldKey: "password",
+            beforeValue: "••••• (đã lưu)",
+          },
+          changes: [
+            {
+              key: "username",
+              label: "Tài khoản áp dụng",
+              before: username,
+              after: username,
+            },
+          ],
+          confirmLabel: "Xác nhận đổi mật khẩu",
+          onConfirm: async (changes, _entries, newPassword) => {
             await apiRequest(`/api/permissions/users/${encodeURIComponent(username)}/password`, {
               method: "PUT",
               body: JSON.stringify({ password: newPassword, changes }),
@@ -256,14 +292,27 @@ export function createPermissionsTabController({ isAdmin }) {
           },
         });
       } else if (btn.dataset.action === "delete-user") {
-        if (!confirm(`Xóa tài khoản '${username}'?`)) return;
-        try {
-          await apiRequest(`/api/permissions/users/${encodeURIComponent(username)}`, { method: "DELETE" });
-          showToast(`Đã xóa tài khoản ${username}.`);
-          await loadPermissions();
-        } catch (err) {
-          showToast(err.message, false);
-        }
+        await showConfirmModal({
+          title: `Xác nhận xóa tài khoản '${username}'`,
+          subtitle: "Tài khoản này sẽ không thể đăng nhập Dashboard được nữa",
+          warning: `Xóa tài khoản Dashboard '${username}' sẽ có hiệu lực ngay lập tức và được ghi vào Audit Log.`,
+          changes: [
+            {
+              key: "username",
+              label: "Tài khoản Dashboard bị xóa",
+              before: username,
+              after: "(Đã xóa khỏi hệ thống)",
+              isHighImpact: true,
+            },
+          ],
+          confirmLabel: "Xác nhận xóa",
+          confirmTone: "danger",
+          onConfirm: async () => {
+            await apiRequest(`/api/permissions/users/${encodeURIComponent(username)}`, { method: "DELETE" });
+            showToast(`Đã xóa tài khoản ${username}.`);
+            await loadPermissions();
+          },
+        });
       }
     });
   }

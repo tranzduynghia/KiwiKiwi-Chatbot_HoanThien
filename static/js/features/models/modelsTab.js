@@ -202,8 +202,20 @@ export function createModelsTabController({ onRefreshAll }) {
       else if (btn.dataset.action === "remove") removeAutoChain(index);
     });
 
-    // Ủy quyền sự kiện cho bảng ghi đè từng model
+    // Ủy quyền sự kiện cho bảng ghi đè từng model (bắt cả `input` khi gõ trực tiếp lẫn `change` khi đổi checkbox/dropdown)
     const modelsTbody = document.getElementById("models-tbody");
+    modelsTbody.addEventListener("input", (event) => {
+      const row = event.target.closest("tr[data-model-id]");
+      if (!row) return;
+      const modelId = row.dataset.modelId;
+      const field = event.target.dataset.field;
+      if (field === "display_name") {
+        setOverride(modelId, "display_name", event.target.value);
+      } else if (field === "tag") {
+        setOverride(modelId, "tag", event.target.value);
+      }
+    });
+
     modelsTbody.addEventListener("change", (event) => {
       const row = event.target.closest("tr[data-model-id]");
       if (!row) return;
