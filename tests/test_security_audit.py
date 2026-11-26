@@ -233,11 +233,34 @@ async def test_tunnel_only_inbound_blocks_forged_headers_from_external_ip(app_co
     # Mô phỏng request đi qua `cloudflared` cục bộ (127.0.0.1) kèm header Cloudflare hợp lệ -> cho phép 200
     loopback_transport = httpx.ASGITransport(app=web_app, client=("127.0.0.1", 54321))
     async with httpx.AsyncClient(transport=loopback_transport, base_url="http://127.0.0.1:10000") as local_client:
-        legit = await local_client.get("/login", headers={"Cf-Ray": "89ab123456-SIN"})
+        legit = await local_client.get(
+            "/login",
+            headers={
+                "Cf-Ray": "89ab123456-SIN",
+                "CF-Connecting-IP": "198.51.100.5",
+                "X-Forwarded-For": "198.51.100.5",
+                "X-Forwarded-Proto": "https",
+            },
+        )
         assert legit.status_code == 200
         # Loopback nhưng KHÔNG có header CF -> vẫn bị chặn 403
         no_cf = await local_client.get("/login")
         assert no_cf.status_code == 403
+
+        # Bật động `proxy_headers=True` trong cấu hình tunnel: vẫn cho phép qua Tunnel (không phá vỡ `tunnel_only_inbound`)
+        cfg["tunnel"]["proxy_headers"] = True
+        app_container.config_repo.apply_external_config(cfg)
+        with_proxy_headers = await local_client.get(
+            "/login",
+            headers={
+                "Cf-Ray": "89ab123456-SIN",
+                "CF-Connecting-IP": "198.51.100.5",
+                "X-Forwarded-For": "198.51.100.5",
+                "X-Forwarded-Proto": "https",
+            },
+        )
+        assert with_proxy_headers.status_code == 200
+        assert "strict-transport-security" in with_proxy_headers.headers
 
     assert is_trusted_proxy_ip("127.0.0.1") is True
     assert is_trusted_proxy_ip("::1") is True

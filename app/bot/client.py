@@ -131,6 +131,7 @@ class AskBot(discord.Client):
             port=self.container.settings.port,
             log_level="warning",
             access_log=False,
+            proxy_headers=False,
         )
         server = uvicorn.Server(uv_cfg)
         # Để discord.py quản lý tín hiệu dừng tiến trình (SIGINT/SIGTERM)

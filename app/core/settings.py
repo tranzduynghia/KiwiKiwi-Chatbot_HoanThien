@@ -198,6 +198,7 @@ def build_default_config() -> dict[str, Any]:
             "cf_tunnel_mode": "named",
             "cf_tunnel_token": "",
             "tunnel_only_inbound": False,
+            "proxy_headers": False,
         },
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",

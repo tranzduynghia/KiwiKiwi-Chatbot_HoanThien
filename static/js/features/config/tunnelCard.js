@@ -32,6 +32,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const tokenEl = document.getElementById("cf-tunnel-token");
     const tokenHintEl = document.getElementById("cf-token-hint");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
+    const proxyHeadersEl = document.getElementById("cf-proxy-headers");
 
     const loadedMode = tunnel.cf_tunnel_mode === "quick" ? "quick" : "named";
     if (modeEl) modeEl.value = loadedMode;
@@ -48,6 +49,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       tokenHintEl.className = `text-[10px] ${hasSavedToken ? "text-emerald-400" : "text-[#5e6778]"}`;
     }
     if (inboundLockEl) inboundLockEl.checked = Boolean(tunnel.tunnel_only_inbound);
+    if (proxyHeadersEl) proxyHeadersEl.checked = Boolean(tunnel.proxy_headers);
 
     initialState = {
       tunnel: {
@@ -55,6 +57,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         cf_tunnel_mode: loadedMode,
         cf_tunnel_token: hasSavedToken ? "••••••••••••" : "",
         tunnel_only_inbound: Boolean(tunnel.tunnel_only_inbound),
+        proxy_headers: Boolean(tunnel.proxy_headers),
       },
     };
 
@@ -136,10 +139,12 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const modeEl = document.getElementById("cf-tunnel-mode");
     const tokenEl = document.getElementById("cf-tunnel-token");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
+    const proxyHeadersEl = document.getElementById("cf-proxy-headers");
 
     const mode = modeEl ? modeEl.value : "named";
     const tokenVal = tokenEl ? tokenEl.value.trim() : "";
     const tunnelOnlyInbound = Boolean(inboundLockEl && inboundLockEl.checked);
+    const proxyHeaders = Boolean(proxyHeadersEl && proxyHeadersEl.checked);
 
     if (enabled && mode === "named" && !tokenVal && !hasSavedToken) {
       showToast("Vui lòng nhập Cloudflare Tunnel Token trước khi bật chế độ Named Tunnel.", false);
@@ -152,6 +157,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         cf_tunnel_mode: "named",
         cf_tunnel_token: "",
         tunnel_only_inbound: false,
+        proxy_headers: false,
       },
     };
     const nextState = {
@@ -160,6 +166,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         cf_tunnel_mode: mode,
         cf_tunnel_token: tokenVal || beforeState.tunnel.cf_tunnel_token,
         tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
+        proxy_headers: proxyHeaders,
       },
     };
 
@@ -177,6 +184,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
             cf_tunnel_mode: mode,
             cf_tunnel_token: tokenVal || null,
             tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
+            proxy_headers: proxyHeaders,
             changes,
           }),
         });

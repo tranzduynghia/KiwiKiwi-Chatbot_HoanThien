@@ -107,25 +107,47 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
 
     @app.middleware("http")
     async def security_and_tunnel_middleware(request: Request, call_next):
-        """Thực thi biên tin cậy Cloudflare Tunnel, giới hạn kích thước payload và gắn HTTP Security Headers."""
+        """Thực thi biên tin cậy Cloudflare Tunnel, tùy chọn proxy_headers động, giới hạn payload và HTTP Security Headers."""
+        current_config = container.config_repo.current_config
+        tunnel_cfg = current_config.get("tunnel") if isinstance(current_config.get("tunnel"), dict) else {}
+        raw_peer_host = request.client.host if request.client else None
+        peer_trusted = is_trusted_proxy_ip(raw_peer_host)
+
         # 1) Kiểm tra biên tin cậy Cloudflare Tunnel (`tunnel_only_inbound`), luôn giữ mở `/health`
         if request.url.path != "/health":
-            current_config = container.config_repo.current_config
-            tunnel_cfg = current_config.get("tunnel") if isinstance(current_config.get("tunnel"), dict) else {}
             tunnel_only_inbound = (
                 bool(current_config.get("tunnel_only_inbound", False))
                 if "tunnel_only_inbound" in current_config
                 else bool(tunnel_cfg.get("tunnel_only_inbound", False))
             )
             if tunnel_only_inbound:
-                peer_host = request.client.host if request.client else None
-                peer_trusted = is_trusted_proxy_ip(peer_host)
                 has_valid_cf = _has_valid_cloudflare_headers(request)
                 if not (peer_trusted and has_valid_cf):
                     detail = "Truy cập trực tiếp bị chặn: chỉ cho phép truy cập thông qua Cloudflare Tunnel."
                     if request.url.path.startswith("/api/"):
                         return JSONResponse({"detail": detail}, status_code=403)
                     return PlainTextResponse(detail, status_code=403)
+
+        # 1b) Áp dụng động `proxy_headers` (chỉ tin X-Forwarded-Proto / X-Forwarded-For / CF-Connecting-IP từ proxy tin cậy)
+        proxy_headers_enabled = (
+            bool(current_config.get("proxy_headers", False))
+            if "proxy_headers" in current_config
+            else bool(tunnel_cfg.get("proxy_headers", False))
+        )
+        if proxy_headers_enabled and peer_trusted:
+            forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+            if forwarded_proto in ("http", "https"):
+                request.scope["scheme"] = forwarded_proto
+            forwarded_ip = (
+                (request.headers.get("cf-connecting-ip") or "").strip()
+                or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+            )
+            if forwarded_ip:
+                try:
+                    ipaddress.ip_address(forwarded_ip)
+                    request.scope["client"] = (forwarded_ip, 0)
+                except ValueError:
+                    pass
 
         # 2) Giới hạn kích thước thân request (chống DoS OOM trên container 488MB)
         if request.method in ("POST", "PUT", "PATCH"):

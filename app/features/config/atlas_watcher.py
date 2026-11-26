@@ -22,7 +22,7 @@ log = logging.getLogger("gemini-bot.atlas-watcher")
 DEFAULT_ATLAS_WATCH_INTERVAL_SECONDS = 5.0
 ATLAS_EXTERNAL_SYNC_SOURCE = "MongoDB Atlas External Sync"
 TUNNEL_PROCESS_KEYS = ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token")
-TUNNEL_ALL_KEYS = ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token", "tunnel_only_inbound")
+TUNNEL_ALL_KEYS = ("cf_tunnel_enabled", "cf_tunnel_mode", "cf_tunnel_token", "tunnel_only_inbound", "proxy_headers")
 METADATA_IGNORE_KEYS = {"_id", "updated_at", "updated_by"}
 
 

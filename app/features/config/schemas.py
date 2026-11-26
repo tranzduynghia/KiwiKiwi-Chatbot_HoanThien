@@ -41,5 +41,6 @@ class TunnelConfigPayload(BaseModel):
     cf_tunnel_mode: str = Field(default="named", max_length=20)
     cf_tunnel_token: Optional[str] = Field(default=None, max_length=4096)
     tunnel_only_inbound: bool = False
+    proxy_headers: bool = False
     clear_token: bool = False
     changes: Optional[dict[str, dict[str, Any]]] = None

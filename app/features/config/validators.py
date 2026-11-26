@@ -111,6 +111,7 @@ def sanitize_tunnel_config(
     cf_tunnel_mode: str,
     cf_tunnel_token: str | None,
     tunnel_only_inbound: bool,
+    proxy_headers: bool = False,
     existing_token: str = "",
     clear_token: bool = False,
 ) -> dict[str, Any]:
@@ -138,4 +139,5 @@ def sanitize_tunnel_config(
         "cf_tunnel_mode": clean_mode,
         "cf_tunnel_token": final_token,
         "tunnel_only_inbound": bool(tunnel_only_inbound),
+        "proxy_headers": bool(proxy_headers),
     }

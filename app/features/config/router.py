@@ -140,6 +140,7 @@ def create_config_router(
                 cf_tunnel_mode=payload.cf_tunnel_mode,
                 cf_tunnel_token=payload.cf_tunnel_token,
                 tunnel_only_inbound=payload.tunnel_only_inbound,
+                proxy_headers=payload.proxy_headers,
                 existing_token=existing_token,
                 clear_token=payload.clear_token,
             )

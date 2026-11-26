@@ -86,6 +86,7 @@ const DEFAULT_FIELD_LABELS = {
   "tunnel.cf_tunnel_mode": "Chế độ Cloudflare Tunnel",
   "tunnel.cf_tunnel_token": "Cloudflare Tunnel Token",
   "tunnel.tunnel_only_inbound": "Chỉ nhận truy cập qua Cloudflare Tunnel",
+  "tunnel.proxy_headers": "Tin cậy Proxy Headers (X-Forwarded-For / Proto)",
   // Permissions & Dashboard Users
   "user_id": "Discord User ID",
   "label": "Nhãn ghi chú",
