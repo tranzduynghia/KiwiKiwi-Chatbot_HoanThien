@@ -5,6 +5,7 @@
  */
 
 import { apiRequest, escapeHtml, sanitizeHttpUrl, showToast } from "../../core/api.js";
+import { closeModalAnimated, openModalAnimated } from "../../core/modalTransition.js";
 
 const SENSITIVE_FIELD_TOKENS = [
   "password",
@@ -175,8 +176,7 @@ export function createAuditTabController() {
   function closeAuditDetailModal() {
     const modal = document.getElementById("audit-detail-modal");
     if (!modal) return;
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
+    closeModalAnimated(modal);
   }
 
   function openAuditDetail(index) {
@@ -256,14 +256,7 @@ export function createAuditTabController() {
       `;
     }
 
-    const panel = modal.firstElementChild;
-    if (panel) {
-      panel.classList.remove("ox-modal-enter");
-      void panel.offsetWidth;
-      panel.classList.add("ox-modal-enter");
-    }
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
+    openModalAnimated(modal);
   }
 
   async function loadAuditLogs({ silent = false, page = null, animateTransition = false } = {}) {

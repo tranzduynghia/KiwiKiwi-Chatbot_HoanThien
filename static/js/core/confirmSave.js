@@ -9,6 +9,7 @@
  */
 
 import { escapeHtml, showToast } from "./api.js";
+import { closeModalAnimated, openModalAnimated } from "./modalTransition.js";
 
 const SENSITIVE_KEY_TOKENS = [
   "password",
@@ -562,20 +563,15 @@ export function showConfirmModal({
     }
   }
 
-  // Chạy lại hiệu ứng scale/fade-in mượt trên mỗi lần mở hộp thoại
-  if (panel) {
-    panel.classList.remove("ox-modal-enter");
-    void panel.offsetWidth;
-    panel.classList.add("ox-modal-enter");
-  }
-  modal.classList.remove("hidden");
-  modal.classList.add("flex");
+  // Chạy hiệu ứng mở đối xứng (fade-in + scale-up + trượt nhẹ) mượt trên mỗi lần mở hộp thoại
+  openModalAnimated(modal, panel);
   if (inputField && inputEl) {
-    setTimeout(() => inputEl.focus(), 40);
+    setTimeout(() => inputEl.focus(), 60);
   }
 
   return new Promise((resolve) => {
     let isSaving = false;
+    let isClosing = false;
 
     function setLoading(loading) {
       isSaving = loading;
@@ -588,32 +584,34 @@ export function showConfirmModal({
     }
 
     function cleanupAndClose(outcome) {
+      if (isClosing) return;
+      isClosing = true;
       document.removeEventListener("keydown", onKeyDown);
       modal.removeEventListener("click", onBackdropClick);
       cancelBtn.removeEventListener("click", onCancel);
       if (closeBtn) closeBtn.removeEventListener("click", onCancel);
       submitBtn.removeEventListener("click", onSubmit);
       if (inputEl) inputEl.removeEventListener("keydown", onInputEnter);
-      setLoading(false);
-      modal.classList.add("hidden");
-      modal.classList.remove("flex");
-      resolve(outcome);
+      closeModalAnimated(modal, panel, () => {
+        setLoading(false);
+        resolve(outcome);
+      });
     }
 
     function onCancel() {
-      if (isSaving) return;
+      if (isSaving || isClosing) return;
       cleanupAndClose({ confirmed: false, cancelled: true, changes: changesMap });
     }
 
     function onKeyDown(event) {
-      if (event.key === "Escape" && !isSaving) {
+      if (event.key === "Escape" && !isSaving && !isClosing) {
         event.preventDefault();
         onCancel();
       }
     }
 
     function onBackdropClick(event) {
-      if (event.target === modal && !isSaving) {
+      if (event.target === modal && !isSaving && !isClosing) {
         onCancel();
       }
     }

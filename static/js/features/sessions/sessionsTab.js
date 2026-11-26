@@ -6,6 +6,7 @@
  */
 
 import { apiRequest, escapeHtml, sanitizeHttpUrl, showToast } from "../../core/api.js";
+import { closeModalAnimated, openModalAnimated } from "../../core/modalTransition.js";
 
 const PAGE_SIZE = 50;
 
@@ -102,8 +103,7 @@ export function createSessionsTabController() {
   function closeSessionDetailModal() {
     const modal = document.getElementById("session-detail-modal");
     if (!modal) return;
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
+    closeModalAnimated(modal);
   }
 
   async function openSessionDetail(chatId) {
@@ -113,14 +113,7 @@ export function createSessionsTabController() {
     const msgsEl = document.getElementById("session-detail-messages");
     if (!modal || !headerEl || !metaEl || !msgsEl) return;
 
-    const panel = modal.firstElementChild;
-    if (panel) {
-      panel.classList.remove("ox-modal-enter");
-      void panel.offsetWidth;
-      panel.classList.add("ox-modal-enter");
-    }
-    modal.classList.remove("hidden");
-    modal.classList.add("flex");
+    openModalAnimated(modal);
     headerEl.innerHTML = '<h3 id="session-detail-title" class="text-sm font-semibold text-white">Đang tải chi tiết phiên chat...</h3>';
     metaEl.innerHTML = "";
     msgsEl.innerHTML = '<div class="py-8 text-center text-xs text-[#8b95a7]">Đang nạp toàn bộ hội thoại từ MongoDB Atlas...</div>';
