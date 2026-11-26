@@ -1,4 +1,4 @@
-<!-- Tab Tra cứu & duyệt toàn bộ nội dung phiên chat từ MongoDB Atlas kèm Modal xem chi tiết -->
+{# Tab Tra cứu & duyệt toàn bộ nội dung phiên chat từ MongoDB Atlas kèm Modal xem chi tiết #}
 <section id="tab-sessions" class="tab-panel hidden space-y-5">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
@@ -12,7 +12,7 @@
     </span>
   </div>
 
-  <!-- Thanh bộ lọc đa điều kiện (chặn submit mặc định để không tải lại trang) -->
+  {# Thanh bộ lọc đa điều kiện (chặn submit mặc định để không tải lại trang) #}
   <form id="form-search-sessions" class="card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
     <div class="lg:col-span-3">
       <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-q">Từ khóa nội dung / Mã chat</label>
@@ -61,7 +61,7 @@
     </div>
   </form>
 
-  <!-- Bảng báo cáo tổng hợp: mỗi phiên chat (session_id) hiển thị đúng 1 dòng tóm tắt -->
+  {# Bảng báo cáo tổng hợp: mỗi phiên chat (session_id) hiển thị đúng 1 dòng tóm tắt #}
   <div class="card p-5 space-y-4">
     <div class="overflow-x-auto">
       <table class="w-full text-left text-xs border-collapse">
@@ -80,7 +80,7 @@
       </table>
     </div>
 
-    <!-- Thanh phân trang duyệt toàn bộ bản ghi -->
+    {# Thanh phân trang duyệt toàn bộ bản ghi #}
     <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#1e232e] text-xs text-[#8b95a7]">
       <div id="sessions-page-info" class="font-mono">Trang 1</div>
       <div class="flex items-center gap-2">
@@ -90,7 +90,7 @@
     </div>
   </div>
 
-  <!-- Modal xem chi tiết toàn bộ hội thoại của một phiên chat (không chuyển trang) -->
+  {# Modal xem chi tiết toàn bộ hội thoại của một phiên chat (không chuyển trang) #}
   <div
     id="session-detail-modal"
     class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
@@ -99,7 +99,7 @@
     aria-labelledby="session-detail-title"
   >
     <div class="card w-full max-w-3xl max-h-[86vh] flex flex-col shadow-2xl overflow-hidden border border-[#2a3140]">
-      <!-- Tiêu đề Modal -->
+      {# Tiêu đề Modal #}
       <div class="p-4 border-b border-[#1e232e] flex items-start justify-between gap-3 bg-[#0e1117]">
         <div id="session-detail-header" class="flex items-center gap-3 min-w-0">
           <h3 id="session-detail-title" class="text-sm font-semibold text-white">Chi tiết phiên chat</h3>
@@ -113,10 +113,10 @@
         >✕</button>
       </div>
 
-      <!-- Siêu dữ liệu phiên chat -->
+      {# Siêu dữ liệu phiên chat #}
       <div id="session-detail-meta" class="px-4 py-2.5 bg-[#0a0d12] border-b border-[#1e232e] flex flex-wrap items-center gap-3 text-[11px] text-[#8b95a7]"></div>
 
-      <!-- Danh sách toàn bộ tin nhắn theo thứ tự thời gian -->
+      {# Danh sách toàn bộ tin nhắn theo thứ tự thời gian #}
       <div id="session-detail-messages" class="p-4 space-y-3 overflow-y-auto flex-1 bg-[#0c0f14]"></div>
     </div>
   </div>

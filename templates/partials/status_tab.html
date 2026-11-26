@@ -1,6 +1,6 @@
-<!-- Tab 1: Bảng điều khiển tổng quan theo bố cục Oxfin Dark Admin (Biểu đồ cột + 6 thẻ hình thoi + Biểu đồ đường) -->
+{# Tab 1: Bảng điều khiển tổng quan theo bố cục Oxfin Dark Admin (Biểu đồ cột + 6 thẻ hình thoi + Biểu đồ đường) #}
 <section id="tab-status" class="tab-panel space-y-5">
-  <!-- Tiêu đề và điều khiển làm mới -->
+  {# Tiêu đề và điều khiển làm mới #}
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h1 class="text-lg font-semibold tracking-tight text-white">Tổng quan hệ thống Bot</h1>
@@ -16,11 +16,11 @@
     </div>
   </div>
 
-  <!-- Lưới chính 2 cột bất đối xứng giống mẫu Oxfin -->
+  {# Lưới chính 2 cột bất đối xứng giống mẫu Oxfin #}
   <div class="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
-    <!-- CỘT TRÁI (7/12): Biểu đồ cột thống kê + 2 thẻ tiến độ RAM & MongoDB -->
+    {# CỘT TRÁI (7/12): Biểu đồ cột thống kê + 2 thẻ tiến độ RAM & MongoDB #}
     <div class="xl:col-span-7 space-y-5">
-      <!-- Thẻ biểu đồ cột (kiểu "Tickets" trong Oxfin) -->
+      {# Thẻ biểu đồ cột (kiểu "Tickets" trong Oxfin) #}
       <div class="card p-5">
         <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
           <div>
@@ -30,7 +30,7 @@
           <span id="st-botname" class="text-xs font-mono text-[#8b95a7] bg-[#0a0d12] border border-[#1e232e] px-2.5 py-1 rounded-md">—</span>
         </div>
 
-        <!-- Vùng biểu đồ cột -->
+        {# Vùng biểu đồ cột #}
         <div id="ox-usage-chart" class="ox-bar-chart">
           <div class="ox-bar-grid">
             <div class="ox-bar-grid-line"><span class="ox-bar-grid-label" id="chart-y-max">10</span></div>
@@ -42,9 +42,9 @@
         <div id="ox-usage-labels" class="flex justify-around gap-3 pl-[34px] pr-2 mt-2 text-[10px] text-[#8b95a7]"></div>
       </div>
 
-      <!-- 2 thẻ tiến độ song song (kiểu "Today's Tickets" & "New Tickets" trong Oxfin) -->
+      {# 2 thẻ tiến độ song song (kiểu "Today's Tickets" & "New Tickets" trong Oxfin) #}
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-5">
-        <!-- Thẻ tài nguyên RAM & CPU -->
+        {# Thẻ tài nguyên RAM & CPU #}
         <div class="card p-5 space-y-3">
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-semibold text-white">Tài nguyên RAM &amp; CPU</h3>
@@ -83,7 +83,7 @@
           </div>
         </div>
 
-        <!-- Thẻ MongoDB Atlas & Dung lượng -->
+        {# Thẻ MongoDB Atlas & Dung lượng #}
         <div class="card p-5 space-y-3">
           <div class="flex items-center justify-between">
             <h3 class="text-sm font-semibold text-white">MongoDB Atlas</h3>
@@ -107,11 +107,11 @@
       </div>
     </div>
 
-    <!-- CỘT PHẢI (5/12): Lưới 3x2 thẻ KPI hình thoi + Biểu đồ đường độ trễ & Chuỗi Auto -->
+    {# CỘT PHẢI (5/12): Lưới 3x2 thẻ KPI hình thoi + Biểu đồ đường độ trễ & Chuỗi Auto #}
     <div class="xl:col-span-5 space-y-5">
-      <!-- 6 thẻ KPI biểu tượng hình thoi tự co giãn, không cắt chữ khi zoom -->
+      {# 6 thẻ KPI biểu tượng hình thoi tự co giãn, không cắt chữ khi zoom #}
       <div class="ox-kpi-grid">
-        <!-- 1. Trạng thái & Ping -->
+        {# 1. Trạng thái & Ping #}
         <div class="ox-kpi-card">
           <div class="ox-diamond ox-diamond-crimson">
             <div class="ox-diamond-inner">
@@ -126,7 +126,7 @@
           </div>
         </div>
 
-        <!-- 2. Phiên chat đang hoạt động -->
+        {# 2. Phiên chat đang hoạt động #}
         <div class="ox-kpi-card">
           <div class="ox-diamond ox-diamond-blue">
             <div class="ox-diamond-inner">
@@ -141,7 +141,7 @@
           </div>
         </div>
 
-        <!-- 3. Phiên đã lưu -->
+        {# 3. Phiên đã lưu #}
         <div class="ox-kpi-card">
           <div class="ox-diamond ox-diamond-lime">
             <div class="ox-diamond-inner">
@@ -158,7 +158,7 @@
           </div>
         </div>
 
-        <!-- 4. Model Gemini phát hiện -->
+        {# 4. Model Gemini phát hiện #}
         <div class="ox-kpi-card">
           <div class="ox-diamond ox-diamond-violet">
             <div class="ox-diamond-inner">
@@ -174,7 +174,7 @@
           </div>
         </div>
 
-        <!-- 5. Yêu cầu hôm nay -->
+        {# 5. Yêu cầu hôm nay #}
         <div class="ox-kpi-card">
           <div class="ox-diamond ox-diamond-orange">
             <div class="ox-diamond-inner">
@@ -189,7 +189,7 @@
           </div>
         </div>
 
-        <!-- 6. Số Server Discord -->
+        {# 6. Số Server Discord #}
         <div class="ox-kpi-card">
           <div class="ox-diamond ox-diamond-magenta">
             <div class="ox-diamond-inner">
@@ -207,7 +207,7 @@
         </div>
       </div>
 
-      <!-- Thẻ biểu đồ đường vàng (kiểu "Avg. Response Time" trong Oxfin) + Chuỗi Auto Gemini -->
+      {# Thẻ biểu đồ đường vàng (kiểu "Avg. Response Time" trong Oxfin) + Chuỗi Auto Gemini #}
       <div class="card p-5 space-y-3.5">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -220,7 +220,7 @@
           </div>
         </div>
 
-        <!-- Biểu đồ đường cong màu vàng hổ phách -->
+        {# Biểu đồ đường cong màu vàng hổ phách #}
         <div class="bg-[#0a0d12] border border-[#1e232e] rounded-lg p-3">
           <svg id="ox-latency-svg" viewBox="0 0 360 110" class="w-full h-[110px] overflow-visible" aria-label="Biểu đồ độ trễ">
             <line x1="28" y1="15" x2="352" y2="15" stroke="#1e232e" stroke-dasharray="3 3" />
@@ -244,7 +244,7 @@
           </div>
         </div>
 
-        <!-- Chuỗi Auto đang áp dụng -->
+        {# Chuỗi Auto đang áp dụng #}
         <div>
           <div class="text-[11px] text-[#8b95a7] mb-1.5">Chuỗi Auto đang áp dụng:</div>
           <div id="st-auto-chain" class="flex flex-wrap items-center gap-1.5 text-xs"></div>
@@ -253,7 +253,7 @@
     </div>
   </div>
 
-  <!-- Thẻ điều khiển Trạng thái hiển thị & Hoạt động Discord của Bot (Presence & Status) -->
+  {# Thẻ điều khiển Trạng thái hiển thị & Hoạt động Discord của Bot (Presence & Status) #}
   <div class="card p-5 space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -266,9 +266,9 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-      <!-- Cột cấu hình (7/12): Trạng thái Online + Custom Status (bong bóng chữ) + Hoạt động chính -->
+      {# Cột cấu hình (7/12): Trạng thái Online + Custom Status (bong bóng chữ) + Hoạt động chính #}
       <div class="lg:col-span-7 space-y-4">
-        <!-- Bộ chọn Trạng thái hiển thị kèm chấm màu -->
+        {# Bộ chọn Trạng thái hiển thị kèm chấm màu #}
         <div>
           <label class="block text-xs text-[#8b95a7] mb-2">Trạng thái hiển thị</label>
           <div id="presence-status-group" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -311,7 +311,7 @@
           </div>
         </div>
 
-        <!-- Custom Status độc lập (Bong bóng chữ cạnh avatar) -->
+        {# Custom Status độc lập (Bong bóng chữ cạnh avatar) #}
         <div>
           <div class="flex items-center justify-between gap-2 mb-1.5">
             <label class="block text-xs text-[#8b95a7]" for="presence-custom-status">
@@ -329,7 +329,7 @@
           />
         </div>
 
-        <!-- Hoạt động chính độc lập (Primary Activity) -->
+        {# Hoạt động chính độc lập (Primary Activity) #}
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
           <div class="sm:col-span-5">
             <label class="block text-xs text-[#8b95a7] mb-1.5" for="presence-activity-type">Hoạt động chính</label>
@@ -354,7 +354,7 @@
           </div>
         </div>
 
-        <!-- Công tắc Luân phiên tự động mỗi 20s vs Gộp thông minh (Smart Merge) -->
+        {# Công tắc Luân phiên tự động mỗi 20s vs Gộp thông minh (Smart Merge) #}
         <div class="rounded-lg bg-[#0a0d12] border border-[#1e232e] px-3.5 py-2.5 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <label for="presence-auto-rotate" class="block text-xs font-medium text-slate-200 cursor-pointer">
@@ -371,7 +371,7 @@
         </div>
       </div>
 
-      <!-- Cột xem trước trực tiếp (5/12): Mô phỏng chính xác giao diện Discord theo chế độ Smart Merge hoặc Luân phiên 20s -->
+      {# Cột xem trước trực tiếp (5/12): Mô phỏng chính xác giao diện Discord theo chế độ Smart Merge hoặc Luân phiên 20s #}
       <div class="lg:col-span-5">
         <div class="flex items-center justify-between gap-2 mb-2">
           <span class="text-xs text-[#8b95a7]">Xem trước trên Discord</span>
@@ -384,7 +384,7 @@
         </div>
         <div class="rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-3">
           <div class="flex items-start gap-3.5">
-            <!-- Avatar bot + chấm trạng thái -->
+            {# Avatar bot + chấm trạng thái #}
             <div class="relative shrink-0 mt-0.5">
               <img
                 id="presence-preview-avatar"
@@ -405,9 +405,9 @@
               ></span>
             </div>
 
-            <!-- Thông tin hồ sơ + Bong bóng chữ + Dòng hoạt động -->
+            {# Thông tin hồ sơ + Bong bóng chữ + Dòng hoạt động #}
             <div class="min-w-0 flex-1 space-y-1.5">
-              <!-- Bong bóng Custom Status giống Discord (ẩn tự động khi không hiển thị bong bóng) -->
+              {# Bong bóng Custom Status giống Discord (ẩn tự động khi không hiển thị bong bóng) #}
               <div id="presence-preview-custom-wrap" class="hidden pl-2">
                 <div class="relative inline-flex items-center max-w-full px-3 py-1.5 rounded-2xl bg-[#181d27] border border-[#2a3140] text-xs text-slate-100 shadow-sm">
                   <span class="w-2 h-2 rounded-full bg-[#181d27] border border-[#2a3140] absolute -left-2 bottom-2" aria-hidden="true"></span>
@@ -435,13 +435,13 @@
     </div>
   </div>
 
-  <!-- Thẻ điều khiển Cloudflare Tunnel (cloudflared) hỗ trợ hot-reload không cần restart bot -->
+  {# Thẻ điều khiển Cloudflare Tunnel (cloudflared) hỗ trợ hot-reload không cần restart bot #}
   <div class="card p-5 space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
         <div class="flex flex-wrap items-center gap-2">
           <h3 class="font-semibold text-sm text-white inline-flex items-center gap-2">
-            <!-- Biểu tượng đám mây Cloudflare chính thức (SVG inline, không tải tài nguyên ngoài) -->
+            {# Biểu tượng đám mây Cloudflare chính thức (SVG inline, không tải tài nguyên ngoài) #}
             <svg
               class="w-6 h-6 inline-block align-middle shrink-0"
               viewBox="0 0 24 24"
@@ -488,7 +488,7 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-      <!-- Chọn chế độ Tunnel & nhập Token bảo mật -->
+      {# Chọn chế độ Tunnel & nhập Token bảo mật #}
       <div class="lg:col-span-7 space-y-3">
         <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
           <div class="sm:col-span-5">
@@ -514,7 +514,7 @@
           </div>
         </div>
 
-        <!-- Công tắc Chỉ nhận truy cập qua Cloudflare Tunnel -->
+        {# Công tắc Chỉ nhận truy cập qua Cloudflare Tunnel #}
         <div class="rounded-lg bg-[#0a0d12] border border-[#1e232e] px-3.5 py-2.5 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <label for="cf-tunnel-only-inbound" class="block text-xs font-medium text-slate-200 cursor-pointer">
@@ -530,11 +530,11 @@
           </label>
         </div>
 
-        <!-- Công tắc Proxy Headers (X-Forwarded-For / X-Forwarded-Proto) -->
+        {# Công tắc Proxy Headers (X-Forwarded-For / X-Forwarded-Proto) #}
         <div class="rounded-lg bg-[#0a0d12] border border-[#1e232e] px-3.5 py-2.5 flex items-center justify-between gap-3">
           <div class="min-w-0">
             <label for="cf-proxy-headers" class="inline-flex items-center gap-1.5 text-xs font-medium text-slate-200 cursor-pointer">
-              <!-- Biểu tượng khiên bảo vệ Proxy Headers (SVG inline) -->
+              {# Biểu tượng khiên bảo vệ Proxy Headers (SVG inline) #}
               <svg
                 class="w-4 h-4 text-sky-400 inline-block align-middle shrink-0"
                 viewBox="0 0 24 24"
@@ -561,7 +561,7 @@
         </div>
       </div>
 
-      <!-- Thông tin kết nối trực tiếp, Public URL & lỗi -->
+      {# Thông tin kết nối trực tiếp, Public URL & lỗi #}
       <div class="lg:col-span-5 rounded-xl bg-[#0a0d12] border border-[#1e232e] p-4 space-y-2.5 text-xs">
         <div class="flex items-center justify-between text-[#8b95a7]">
           <span class="font-medium text-slate-200">Thông tin kết nối trực tiếp</span>
@@ -589,7 +589,7 @@
     </div>
   </div>
 
-  <!-- Hàng dưới: Chi tiết sử dụng + Danh sách Server Discord -->
+  {# Hàng dưới: Chi tiết sử dụng + Danh sách Server Discord #}
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
     <div class="card p-5 space-y-2.5">
       <h3 class="font-semibold text-sm text-white">📈 Chi tiết thống kê sử dụng</h3>

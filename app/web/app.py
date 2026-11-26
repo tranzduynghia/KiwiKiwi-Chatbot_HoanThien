@@ -12,7 +12,6 @@ from typing import Any, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.bot.presence import apply_bot_presence, stop_presence_rotation
@@ -25,6 +24,7 @@ from app.features.monitoring.router import create_monitoring_router
 from app.features.permissions.router import create_permissions_router
 from app.features.sessions.router import create_sessions_router
 from app.web.pages import create_pages_router
+from app.web.static_assets import create_sanitized_static_router
 
 log = logging.getLogger("gemini-bot.web")
 
@@ -189,7 +189,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         return response
 
     if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+        app.include_router(create_sanitized_static_router(STATIC_DIR))
 
     app.include_router(
         create_pages_router(

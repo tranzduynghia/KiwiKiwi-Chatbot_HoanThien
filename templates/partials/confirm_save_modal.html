@@ -1,4 +1,4 @@
-<!-- Hộp thoại xác nhận lưu & thao tác toàn cục (Dark Glass Modal kèm bảng Before/After, xem trước Prompt và cảnh báo tác động cao) -->
+{# Hộp thoại xác nhận lưu & thao tác toàn cục (Dark Glass Modal kèm bảng Before/After, xem trước Prompt và cảnh báo tác động cao) #}
 <div
   id="confirm-save-modal"
   class="fixed inset-0 z-[60] hidden items-center justify-center p-4 bg-black/75 backdrop-blur-md"
@@ -10,7 +10,7 @@
     id="confirm-save-panel"
     class="ox-modal-enter card w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden border border-[#2a3140] bg-[#10141c]/95 backdrop-blur-md"
   >
-    <!-- Tiêu đề hộp thoại -->
+    {# Tiêu đề hộp thoại #}
     <div class="p-4 border-b border-[#1e232e] flex items-start justify-between gap-3 bg-[#0e1117]/95">
       <div class="min-w-0">
         <div class="flex items-center gap-2">
@@ -39,9 +39,9 @@
       </button>
     </div>
 
-    <!-- Nội dung chính: Biểu ngữ cảnh báo tác động cao + Ô nhập tùy chọn + Bảng so sánh Trước / Sau -->
+    {# Nội dung chính: Biểu ngữ cảnh báo tác động cao + Ô nhập tùy chọn + Bảng so sánh Trước / Sau #}
     <div class="p-4 overflow-y-auto space-y-3.5 flex-1">
-      <!-- Biểu ngữ cảnh báo màu vàng khi phát hiện cài đặt/thao tác có tác động lớn -->
+      {# Biểu ngữ cảnh báo màu vàng khi phát hiện cài đặt/thao tác có tác động lớn #}
       <div
         id="confirm-save-warning"
         class="hidden rounded-xl bg-amber-500/10 border border-amber-500/35 px-3.5 py-3 text-xs text-amber-200 space-y-1.5"
@@ -54,7 +54,7 @@
         <ul id="confirm-save-warning-list" class="list-disc pl-5 space-y-1 text-[11px] text-amber-100/90 leading-relaxed"></ul>
       </div>
 
-      <!-- Ô nhập liệu trong ứng dụng (thay thế hoàn toàn window.prompt cho thao tác đổi mật khẩu, v.v.) -->
+      {# Ô nhập liệu trong ứng dụng (thay thế hoàn toàn window.prompt cho thao tác đổi mật khẩu, v.v.) #}
       <div
         id="confirm-save-input-wrap"
         class="hidden rounded-xl border border-[#252b38] bg-[#0a0d12] p-3.5 space-y-2"
@@ -70,7 +70,7 @@
         <p id="confirm-save-input-error" class="hidden text-[11px] text-rose-400"></p>
       </div>
 
-      <!-- Bảng tóm tắt Giá trị cũ (Before) -> Giá trị mới (After) -->
+      {# Bảng tóm tắt Giá trị cũ (Before) -> Giá trị mới (After) #}
       <div id="confirm-save-table-wrap" class="rounded-xl border border-[#1e232e] bg-[#0a0d12] overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs border-collapse">
@@ -87,7 +87,7 @@
       </div>
     </div>
 
-    <!-- Thanh nút hành động: Hủy bỏ & Xác nhận lưu -->
+    {# Thanh nút hành động: Hủy bỏ & Xác nhận lưu #}
     <div class="px-4 py-3 border-t border-[#1e232e] bg-[#0e1117]/95 flex flex-wrap items-center justify-between gap-2">
       <span id="confirm-save-count" class="text-[11px] text-[#8b95a7] font-mono">0 thay đổi</span>
       <div class="flex items-center gap-2">

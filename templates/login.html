@@ -12,10 +12,10 @@
   <link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_version }}" />
 </head>
 <body class="ox-body min-h-screen flex items-center justify-center p-4">
-  <!-- Khung đăng nhập phong cách Oxfin Dark Admin -->
+  {# Khung đăng nhập phong cách Oxfin Dark Admin #}
   <div class="w-full max-w-md card p-7 shadow-2xl">
     <div class="text-center mb-6">
-      <!-- Ảnh đại diện Discord trực tiếp của bot (fallback về biểu tượng 3 hình thoi nếu offline/lỗi tải ảnh) -->
+      {# Ảnh đại diện Discord trực tiếp của bot (fallback về biểu tượng 3 hình thoi nếu offline/lỗi tải ảnh) #}
       <div class="flex justify-center mb-3">
         {% if bot_avatar_url %}
         <img
@@ -41,14 +41,14 @@
       <p class="text-xs text-[#8b95a7] mt-1">Quản trị &amp; cấu hình bot theo thời gian thực</p>
     </div>
 
-    <!-- Cảnh báo khi chưa kết nối MongoDB Atlas -->
+    {# Cảnh báo khi chưa kết nối MongoDB Atlas #}
     {% if not db_connected %}
     <div class="mb-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
       ⚠️ Bot chưa kết nối MongoDB Atlas (<code>MONGODB_URI</code>). Hãy kiểm tra biến môi trường trước khi đăng nhập.
     </div>
     {% endif %}
 
-    <!-- Thông báo lỗi từ server hoặc client -->
+    {# Thông báo lỗi từ server hoặc client #}
     {% if error %}
     <div id="server-error" class="mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm">
       {{ error }}
@@ -57,7 +57,7 @@
 
     <div id="client-error" class="hidden mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm"></div>
 
-    <!-- Biểu mẫu đăng nhập bằng tên đăng nhập và mật khẩu -->
+    {# Biểu mẫu đăng nhập bằng tên đăng nhập và mật khẩu #}
     <form id="login-form" class="space-y-4">
       <div>
         <label class="block text-xs font-medium text-[#8b95a7] mb-1.5" for="username">Tên đăng nhập</label>
@@ -93,7 +93,7 @@
       <div class="relative flex justify-center text-xs"><span class="bg-[#131720] px-3 text-[#5e6778]">hoặc</span></div>
     </div>
 
-    <!-- Đăng nhập bằng Discord OAuth2 (biểu tượng Clyde chính thức) -->
+    {# Đăng nhập bằng Discord OAuth2 (biểu tượng Clyde chính thức) #}
     {% if discord_oauth_enabled %}
     <a
       href="/auth/discord"
@@ -121,7 +121,7 @@
     {% endif %}
   </div>
 
-  <!-- Module xử lý đăng nhập tách riêng -->
+  {# Module xử lý đăng nhập tách riêng #}
   <script type="module" src="/static/js/features/auth/login.js?v={{ asset_version }}"></script>
 </body>
 </html>

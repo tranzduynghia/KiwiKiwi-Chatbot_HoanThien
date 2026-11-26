@@ -1,7 +1,7 @@
-<!-- Thanh Topbar cố định gồm nút thu gọn sidebar, ô tìm kiếm nhanh và thông tin tài khoản -->
+{# Thanh Topbar cố định gồm nút thu gọn sidebar, ô tìm kiếm nhanh và thông tin tài khoản #}
 <header class="ox-topbar">
   <div class="flex items-center gap-3 flex-1 min-w-0">
-    <!-- Nút bật/tắt sidebar -->
+    {# Nút bật/tắt sidebar #}
     <button type="button" id="btn-toggle-sidebar" class="ox-icon-btn" title="Thu gọn / mở rộng menu" aria-label="Thu gọn menu">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
         <line x1="4" y1="7" x2="20" y2="7" />
@@ -10,7 +10,7 @@
       </svg>
     </button>
 
-    <!-- Ô tìm kiếm nhanh toàn cục -->
+    {# Ô tìm kiếm nhanh toàn cục #}
     <div class="ox-search-box hidden sm:block">
       <svg class="w-4 h-4 text-[#5e6778] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8" />
@@ -25,7 +25,7 @@
     </div>
   </div>
 
-  <!-- Cụm trạng thái, nút thao tác nhanh và hồ sơ quản trị viên -->
+  {# Cụm trạng thái, nút thao tác nhanh và hồ sơ quản trị viên #}
   <div class="flex items-center gap-2.5 shrink-0">
     <span id="hdr-status-badge" class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[#181d27] text-[#8b95a7] border border-[#252b38]">
       Đang tải...
@@ -48,7 +48,7 @@
 
     <div class="h-6 w-px bg-[#1e232e] mx-0.5 hidden sm:block"></div>
 
-    <!-- Thông tin người dùng giống mẫu Oxfin -->
+    {# Thông tin người dùng giống mẫu Oxfin #}
     <div class="flex items-center gap-2.5">
       <div class="text-right hidden md:block leading-tight">
         <div class="text-xs font-semibold text-slate-100">{{ user.display_name }}</div>
