@@ -8,16 +8,16 @@ import time
 from typing import Any, Callable, Optional
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.core.security import sanitize_https_url
+from app.core.security import apply_no_store_noindex_headers, is_prefetch_request, sanitize_https_url
 from app.core.settings import DEFAULT_OCR_INSTRUCTION, DEFAULT_SYSTEM_PROMPT
 from app.core.sync import WriteBehindSyncCoordinator
 from app.core.timezone import format_timezone_badge, resolve_request_timezone
 from app.features.auth.dependencies import AuthDependencies
 from app.features.auth.oauth import DiscordOAuthService
-from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS
+from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS, TEMP_DRAFT_DOC_KEY
 from app.features.legal.sanitizer import build_google_fonts_stylesheet_urls
 from app.features.monitoring.stats import UsageStats
 
@@ -200,7 +200,7 @@ def create_pages_router(
             },
         )
 
-    async def _render_public_legal(request: Request, doc_key: str):
+    async def _render_public_legal(request: Request, doc_key: str, *, is_temp_draft: bool = False):
         tz_name, tz_info = resolve_request_timezone(request.headers)
         tz_badge = format_timezone_badge(tz_name, tz_info)
         if legal_service is not None:
@@ -230,10 +230,14 @@ def create_pages_router(
             "policies": "Chính sách bảo mật",
             "guidelines": "Chính sách cộng đồng",
         }
-        nav_items = [
-            {"key": k, "path": f"/{k}", "label": public_nav_labels.get(k, LEGAL_DOC_LABELS[k])}
-            for k in LEGAL_DOC_KEYS
-        ]
+        nav_items = (
+            []
+            if is_temp_draft
+            else [
+                {"key": k, "path": f"/{k}", "label": public_nav_labels.get(k, LEGAL_DOC_LABELS[k])}
+                for k in LEGAL_DOC_KEYS
+            ]
+        )
         google_fonts_urls = build_google_fonts_stylesheet_urls(doc.get("body", ""))
         response = _render_template(
             templates,
@@ -243,6 +247,7 @@ def create_pages_router(
                 "doc": doc,
                 "nav_items": nav_items,
                 "active_key": doc_key,
+                "is_temp_draft": is_temp_draft,
                 "timezone_name": tz_name,
                 "timezone_label": tz_badge,
                 "google_fonts_urls": google_fonts_urls,
@@ -252,10 +257,25 @@ def create_pages_router(
                 "build_sha": BUILD_SHA,
             },
         )
+        if is_temp_draft:
+            return apply_no_store_noindex_headers(response)
         # Bật Cloudflare CDN Edge caching cho 5 trang pháp lý công khai (tự purge khi Admin lưu CMS)
         response.headers["Cache-Control"] = PUBLIC_LEGAL_CACHE_CONTROL
         response.headers["Vary"] = "CF-Timezone"
         return response
+
+    @router.get("/temp", response_class=HTMLResponse)
+    async def private_temp_draft_page(request: Request):
+        if is_prefetch_request(request.headers):
+            return apply_no_store_noindex_headers(
+                PlainTextResponse("Prefetch/prerender bị chặn đối với trang nháp /temp.", status_code=403)
+            )
+        user = await auth_deps.get_current_user(request)
+        if not user:
+            return apply_no_store_noindex_headers(
+                PlainTextResponse("Chưa xác thực.", status_code=401)
+            )
+        return await _render_public_legal(request, TEMP_DRAFT_DOC_KEY, is_temp_draft=True)
 
     @router.get("/toslinks", response_class=HTMLResponse)
     async def public_toslinks_page(request: Request):

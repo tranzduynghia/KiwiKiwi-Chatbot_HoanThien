@@ -31,3 +31,23 @@ class UpdateDiscordPromptPayload(BaseModel):
     discord_tos_button_label: str = Field(..., min_length=1, max_length=60)
     changes: Optional[dict[str, Any]] = None
 
+
+class SaveTempDocumentPayload(BaseModel):
+    """Payload lưu nội dung Rich-Text vào trang nháp `/temp` trên MongoDB."""
+
+    title: str = Field(..., min_length=2, max_length=160)
+    subtitle: str = Field(default="", max_length=240)
+    body: str = Field(..., min_length=10, max_length=48000)
+    changes: Optional[dict[str, Any]] = None
+
+
+class PushTempDocumentPayload(BaseModel):
+    """Payload đẩy nội dung từ trang nháp `/temp` sang 1 trong 5 trang pháp lý công khai."""
+
+    target_doc_key: Literal["toslinks", "legal", "terms", "policies", "guidelines"]
+    title: Optional[str] = Field(default=None, min_length=2, max_length=160)
+    subtitle: Optional[str] = Field(default=None, max_length=240)
+    body: Optional[str] = Field(default=None, min_length=10, max_length=48000)
+    active_tos_version: Optional[str] = Field(default=None, max_length=24)
+    changes: Optional[dict[str, Any]] = None
+

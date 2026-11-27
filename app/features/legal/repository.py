@@ -7,7 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.timezone import parse_utc_datetime
-from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS, build_default_legal_document
+from app.features.legal.defaults import (
+    ALL_CMS_DOC_KEYS,
+    LEGAL_DOC_KEYS,
+    LEGAL_DOC_LABELS,
+    TEMP_DRAFT_LABEL,
+    build_default_legal_document,
+)
 from app.features.legal.sanitizer import sanitize_legal_html
 
 log = logging.getLogger("gemini-bot.legal")
@@ -74,7 +80,7 @@ class LegalDocumentRepository:
         from app.features.legal.defaults import DEFAULT_LEGAL_AUTHOR_NAME
 
         key = str(doc_key or "").strip().lower()
-        if key not in LEGAL_DOC_KEYS:
+        if key not in ALL_CMS_DOC_KEYS:
             raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
 
         default_doc = build_default_legal_document(key)
@@ -103,7 +109,7 @@ class LegalDocumentRepository:
         avatar_url = validate_discord_avatar_url(raw.get("updated_by_avatar_url"))
         return {
             "key": key,
-            "label": LEGAL_DOC_LABELS[key],
+            "label": LEGAL_DOC_LABELS.get(key, TEMP_DRAFT_LABEL),
             "title": str(raw.get("title") or default_doc["title"]).strip(),
             "subtitle": str(raw.get("subtitle") if raw.get("subtitle") is not None else default_doc["subtitle"]).strip(),
             "body": sanitize_legal_html(raw_body),
@@ -127,7 +133,7 @@ class LegalDocumentRepository:
     ) -> dict[str, Any]:
         """Làm sạch HTML bằng allowlist và ghi thẳng xuống MongoDB `legal_documents` kèm tác giả & avatar."""
         key = str(doc_key or "").strip().lower()
-        if key not in LEGAL_DOC_KEYS:
+        if key not in ALL_CMS_DOC_KEYS:
             raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
 
         now_iso = updated_at or datetime.now(timezone.utc).isoformat()
@@ -138,7 +144,7 @@ class LegalDocumentRepository:
         doc = {
             "_id": key,
             "key": key,
-            "label": LEGAL_DOC_LABELS[key],
+            "label": LEGAL_DOC_LABELS.get(key, TEMP_DRAFT_LABEL),
             "title": str(title).strip()[:160],
             "subtitle": str(subtitle).strip()[:240],
             "body": clean_html,

@@ -13,6 +13,7 @@ from app.features.legal.defaults import (
     DEFAULT_ACTIVE_TOS_VERSION,
     LEGAL_DOC_KEYS,
     LEGAL_DOC_LABELS,
+    TEMP_DRAFT_DOC_KEY,
     validate_tos_version,
 )
 from app.features.legal.repository import LegalDocumentRepository, TosAcceptanceRepository
@@ -254,6 +255,144 @@ class LegalService:
                 flush=True,
             )
         return result
+
+    @staticmethod
+    def _resolve_author_info(
+        actor: str,
+        actor_type: str,
+        actor_meta: Optional[dict[str, Any]],
+    ) -> tuple[str, Optional[str]]:
+        """Trích xuất tên hiển thị và avatar Discord hợp lệ của tác giả lưu tài liệu."""
+        from app.features.legal.repository import validate_discord_avatar_url
+
+        meta_dict = actor_meta if isinstance(actor_meta, dict) else {}
+        author_name = str(meta_dict.get("actor_display_name") or "").strip()
+        if not author_name:
+            raw_actor = str(actor or "Admin").strip()
+            author_name = raw_actor.split(" (discord:")[0].strip() or raw_actor
+        author_avatar_url: Optional[str] = None
+        if str(actor_type or "").strip().lower() == "discord" or meta_dict.get("actor_discord_id"):
+            author_avatar_url = validate_discord_avatar_url(
+                meta_dict.get("actor_avatar_url"),
+                discord_user_id=meta_dict.get("actor_discord_id"),
+                discord_avatar=meta_dict.get("actor_discord_avatar"),
+            )
+        return author_name, author_avatar_url
+
+    async def get_temp_document(self, tz_info: Optional[ZoneInfo] = None) -> dict[str, Any]:
+        """Đọc trang nháp `/temp` theo yêu cầu từ MongoDB (không đệm HTML trong RAM, không lộ công khai)."""
+        return await self.get_doc(TEMP_DRAFT_DOC_KEY, tz_info=tz_info)
+
+    async def save_temp_document(
+        self,
+        *,
+        title: str,
+        subtitle: str = "",
+        body: str,
+        actor: str,
+        actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
+        client_changes: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Lưu nội dung Rich-Text vào trang nháp `/temp` trên MongoDB (không đổi phiên bản ToS, không purge cache công khai)."""
+        clean_title = " ".join(str(title or "").split()).strip()[:160]
+        clean_subtitle = " ".join(str(subtitle or "").split()).strip()[:240]
+        clean_body = sanitize_legal_html(body)
+        if len(clean_title) < 2:
+            raise ValueError("Tiêu đề trang nháp phải có ít nhất 2 ký tự.")
+        if len(clean_body) < 10:
+            raise ValueError("Nội dung trang nháp sau khi lọc an toàn phải có ít nhất 10 ký tự.")
+
+        old_doc = await self._documents.get_document(TEMP_DRAFT_DOC_KEY)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        author_name, author_avatar_url = self._resolve_author_info(actor, actor_type, actor_meta)
+
+        await self._documents.save_document(
+            doc_key=TEMP_DRAFT_DOC_KEY,
+            title=clean_title,
+            subtitle=clean_subtitle,
+            body_html=clean_body,
+            updated_by=actor,
+            updated_by_name=author_name,
+            updated_by_avatar_url=author_avatar_url,
+            updated_at=now_iso,
+        )
+
+        audit_changes: list[dict[str, Any]] = []
+        if old_doc.get("title") != clean_title:
+            audit_changes.append({
+                "field": "legal.docs.temp.title",
+                "before": old_doc.get("title"),
+                "after": clean_title,
+            })
+        if old_doc.get("subtitle") != clean_subtitle:
+            audit_changes.append({
+                "field": "legal.docs.temp.subtitle",
+                "before": old_doc.get("subtitle"),
+                "after": clean_subtitle,
+            })
+        if old_doc.get("body") != clean_body:
+            audit_changes.append({
+                "field": "legal.docs.temp.body",
+                "before": f"{len(str(old_doc.get('body') or ''))} ký tự HTML",
+                "after": f"{len(clean_body)} ký tự HTML",
+            })
+
+        if self._audit is not None:
+            await self._audit.record(
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=actor_meta,
+                action="legal_temp_save",
+                section="legal",
+                summary="Lưu bản nháp Rich-Text nội bộ (/temp)",
+                changes=audit_changes,
+                timestamp=now_iso,
+                source="Dashboard Legal CMS (/temp)",
+                flush=True,
+            )
+
+        return await self.get_temp_document()
+
+    async def push_temp_to_page(
+        self,
+        *,
+        target_doc_key: str,
+        title: Optional[str] = None,
+        subtitle: Optional[str] = None,
+        body: Optional[str] = None,
+        active_tos_version: Optional[str] = None,
+        actor: str,
+        actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
+        client_changes: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Đẩy nội dung từ `/temp` ghi đè sang 1 trong 5 trang pháp lý công khai kèm Audit Log & purge edge cache."""
+        target_key = str(target_doc_key or "").strip().lower()
+        if target_key not in LEGAL_DOC_KEYS:
+            raise ValueError(f"Trang đích không hợp lệ: {target_doc_key}")
+
+        if title is not None and body is not None:
+            source_title = title
+            source_subtitle = subtitle or ""
+            source_body = body
+        else:
+            temp_doc = await self._documents.get_document(TEMP_DRAFT_DOC_KEY)
+            source_title = title if title is not None else temp_doc.get("title", "")
+            source_subtitle = subtitle if subtitle is not None else temp_doc.get("subtitle", "")
+            source_body = body if body is not None else temp_doc.get("body", "")
+
+        return await self.update_document(
+            doc_key=target_key,
+            title=source_title,
+            subtitle=source_subtitle,
+            body=source_body,
+            active_tos_version=active_tos_version,
+            actor=actor,
+            actor_type=actor_type,
+            actor_meta=actor_meta,
+            client_changes=client_changes,
+        )
 
     async def update_document(
         self,

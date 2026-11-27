@@ -15,7 +15,12 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
 from app.bot.presence import apply_bot_presence, stop_presence_rotation
-from app.core.security import is_trusted_proxy_ip
+from app.core.security import (
+    apply_no_store_noindex_headers,
+    is_prefetch_request,
+    is_temp_draft_path,
+    is_trusted_proxy_ip,
+)
 from app.features.audit.router import create_audit_router
 from app.features.auth.dependencies import STEP_UP_DETAIL, StepUpRequiredError
 from app.features.auth.router import create_auth_router
@@ -124,6 +129,13 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         raw_peer_host = request.client.host if request.client else None
         peer_trusted = is_trusted_proxy_ip(raw_peer_host)
 
+        # 0) Chặn ngay lập tức mọi request prefetch/prerender tới trang nháp `/temp` và API `/temp`
+        if is_temp_draft_path(request.url.path) and is_prefetch_request(request.headers):
+            detail = "Prefetch/prerender bị chặn đối với trang nháp /temp."
+            if request.url.path.startswith("/api/"):
+                return apply_no_store_noindex_headers(JSONResponse({"detail": detail}, status_code=403))
+            return apply_no_store_noindex_headers(PlainTextResponse(detail, status_code=403))
+
         # 1) Kiểm tra biên tin cậy Cloudflare Tunnel (`tunnel_only_inbound`), luôn giữ mở `/health`
         if request.url.path != "/health":
             tunnel_only_inbound = (
@@ -192,7 +204,9 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         if container.auth_deps.is_secure_request(request):
             response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
-        if request.url.path.startswith(("/api/", "/auth/")):
+        if is_temp_draft_path(request.url.path):
+            apply_no_store_noindex_headers(response)
+        elif request.url.path.startswith(("/api/", "/auth/")):
             response.headers["Cache-Control"] = "no-store, max-age=0"
             response.headers["Pragma"] = "no-cache"
         elif request.url.path.startswith("/static/"):

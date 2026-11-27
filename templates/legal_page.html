@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  {% if is_temp_draft %}
+  <meta name="robots" content="noindex, nofollow" />
+  {% endif %}
   <meta name="description" content="{{ doc.title }} — {{ bot_display_name or 'KiwiKiwi' }} Bot" />
   <title>{{ doc.title }} · {{ bot_display_name or 'KiwiKiwi' }}</title>
   {# Nạp giao diện đồng bộ trước first paint (Zero-FOUC) #}
@@ -50,6 +53,12 @@
 
   {# Nội dung chính trang pháp lý công khai #}
   <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
+    {% if is_temp_draft %}
+    <div class="px-4 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/35 text-amber-300 text-xs flex flex-wrap items-center justify-between gap-2">
+      <span>📝 <strong>Bản nháp nội bộ (/temp)</strong> — Chỉ người dùng đã xác thực mới xem được, ẩn hoàn toàn khỏi công chúng &amp; công cụ tìm kiếm.</span>
+      <a href="/dashboard#legal" class="underline hover:opacity-80">← Quay lại Dashboard CMS</a>
+    </div>
+    {% else %}
     {# Thanh điều hướng 1 hàng giữa 5 tài liệu pháp lý (cuộn ngang mượt trên màn hình hẹp) #}
     <nav class="flex items-center gap-2 flex-nowrap overflow-x-auto pb-1" aria-label="Tài liệu pháp lý">
       {% for item in nav_items %}
@@ -61,6 +70,7 @@
       </a>
       {% endfor %}
     </nav>
+    {% endif %}
 
     {# Thẻ nội dung tài liệu hiện hành kèm phiên bản ToS và mốc cập nhật theo CF-Timezone #}
     <article class="card p-6 sm:p-8 space-y-6">

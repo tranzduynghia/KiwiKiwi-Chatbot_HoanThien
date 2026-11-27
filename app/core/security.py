@@ -381,3 +381,41 @@ class SessionTokenSigner:
             return data if isinstance(data, dict) else None
         except (BadSignature, SignatureExpired):
             return None
+
+
+NO_PREFETCH_CACHE_CONTROL = "no-store, no-cache, must-revalidate, private"
+NO_INDEX_ROBOTS_TAG = "noindex, nofollow"
+_PREFETCH_HEADER_TOKENS = ("prefetch", "prerender", "preview")
+
+
+def is_temp_draft_path(path: str) -> bool:
+    """Kiểm tra đường dẫn có thuộc trang nháp `/temp` hoặc các API `/temp` hay không."""
+    clean = str(path or "").split("?", 1)[0].rstrip("/") or "/"
+    return (
+        clean == "/temp"
+        or clean.startswith("/temp/")
+        or clean == "/api/temp"
+        or clean.startswith("/api/temp/")
+        or clean == "/api/legal/temp"
+        or clean.startswith("/api/legal/temp/")
+    )
+
+
+def is_prefetch_request(headers: Any) -> bool:
+    """Phát hiện các header prefetch/prerender/preview từ trình duyệt để chặn tải trước trang nháp."""
+    if headers is None:
+        return False
+    for header_name in ("sec-purpose", "purpose", "x-purpose", "x-moz", "sec-fetch-purpose"):
+        raw_val = str(headers.get(header_name) or "").strip().lower()
+        if raw_val and any(token in raw_val for token in _PREFETCH_HEADER_TOKENS):
+            return True
+    return False
+
+
+def apply_no_store_noindex_headers(response: Any) -> Any:
+    """Áp dụng header chống lưu đệm, chống prefetch và chống lập chỉ mục tìm kiếm cho tài nguyên nháp."""
+    response.headers["Cache-Control"] = NO_PREFETCH_CACHE_CONTROL
+    response.headers["Pragma"] = "no-cache"
+    response.headers["X-Robots-Tag"] = NO_INDEX_ROBOTS_TAG
+    response.headers["Vary"] = "Cookie, Sec-Purpose, Purpose, X-Purpose, X-Moz"
+    return response

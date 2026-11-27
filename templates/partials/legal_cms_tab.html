@@ -11,6 +11,7 @@
       <a href="/terms" target="_blank" rel="noopener noreferrer" class="btn-ghost text-xs">↗ /terms</a>
       <a href="/policies" target="_blank" rel="noopener noreferrer" class="btn-ghost text-xs">↗ /policies</a>
       <a href="/guidelines" target="_blank" rel="noopener noreferrer" class="btn-ghost text-xs">↗ /guidelines</a>
+      <a href="/temp" target="_blank" rel="noopener noreferrer" class="btn-ghost text-xs">↗ /temp (Nháp)</a>
     </div>
   </div>
 
@@ -39,13 +40,14 @@
       </div>
     </div>
 
-    {# Bộ chuyển đổi nhanh 5 trang Pháp lý #}
+    {# Bộ chuyển đổi nhanh 5 trang Pháp lý + Trang nháp /temp (chỉ tải theo yêu cầu, không prefetch) #}
     <div id="legal-page-tabs" class="flex flex-wrap gap-2" role="tablist" aria-label="Chọn trang pháp lý">
       <button type="button" class="ox-legal-page-tab" data-legal-page="toslinks" data-active="true">/toslinks · Danh mục</button>
       <button type="button" class="ox-legal-page-tab" data-legal-page="legal" data-active="false">/legal · Pháp lý</button>
       <button type="button" class="ox-legal-page-tab" data-legal-page="terms" data-active="false">/terms · Điều khoản</button>
       <button type="button" class="ox-legal-page-tab" data-legal-page="policies" data-active="false">/policies · Bảo mật</button>
       <button type="button" class="ox-legal-page-tab" data-legal-page="guidelines" data-active="false">/guidelines · Cộng đồng</button>
+      <button type="button" class="ox-legal-page-tab" data-legal-page="temp" data-active="false">/temp · Nháp</button>
     </div>
 
     {# Siêu dữ liệu trang: Tiêu đề, Phụ đề và Phiên bản ToS dùng chung #}
@@ -244,9 +246,22 @@
     </div>
 
     {% if user.is_admin %}
-    <div class="flex flex-wrap items-center justify-end gap-2 pt-1">
-      <button type="button" id="btn-reload-legal" class="btn-ghost text-xs">↻ Tải lại từ MongoDB</button>
-      <button type="button" id="btn-save-legal" class="btn-primary text-xs">💾 Lưu trang &amp; Phiên bản ToS</button>
+    <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+      {# Khối đẩy nội dung từ /temp sang 1 trong 5 trang công khai (chỉ hiện khi đang mở /temp) #}
+      <div id="legal-temp-push-wrap" class="hidden flex flex-wrap items-center gap-2">
+        <select id="legal-temp-push-target" class="ox-rte-select text-xs" aria-label="Chọn trang đích để ghi đè">
+          <option value="toslinks">/toslinks · Danh mục</option>
+          <option value="legal">/legal · Pháp lý</option>
+          <option value="terms">/terms · Điều khoản</option>
+          <option value="policies">/policies · Bảo mật</option>
+          <option value="guidelines">/guidelines · Cộng đồng</option>
+        </select>
+        <button type="button" id="btn-push-temp-legal" class="btn-primary text-xs">🚀 Đẩy sang trang</button>
+      </div>
+      <div class="flex flex-wrap items-center justify-end gap-2 ml-auto">
+        <button type="button" id="btn-reload-legal" class="btn-ghost text-xs">↻ Tải lại từ MongoDB</button>
+        <button type="button" id="btn-save-legal" class="btn-primary text-xs">💾 Lưu trang &amp; Phiên bản ToS</button>
+      </div>
     </div>
     {% endif %}
   </div>

@@ -928,6 +928,14 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     });
     const routeBadge = document.getElementById("legal-current-route-badge");
     if (routeBadge) routeBadge.textContent = `/${currentDocKey}`;
+    const tempPushWrap = document.getElementById("legal-temp-push-wrap");
+    if (tempPushWrap) {
+      tempPushWrap.classList.toggle("hidden", currentDocKey !== "temp");
+    }
+    const saveBtn = document.getElementById("btn-save-legal");
+    if (saveBtn) {
+      saveBtn.textContent = currentDocKey === "temp" ? "💾 Lưu bản nháp /temp" : "💾 Lưu trang & Phiên bản ToS";
+    }
   }
 
   async function loadPage(docKey = currentDocKey) {
@@ -935,9 +943,17 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     syncPageTabs();
     try {
       const tz = detectBrowserTimezone();
-      const params = new URLSearchParams({ doc_key: currentDocKey });
+      const params = new URLSearchParams();
       if (tz) params.set("tz", tz);
-      const data = await apiRequest(`/api/legal?${params.toString()}`, { cache: "no-store" });
+      let endpoint;
+      if (currentDocKey === "temp") {
+        const qs = params.toString();
+        endpoint = qs ? `/api/legal/temp?${qs}` : "/api/legal/temp";
+      } else {
+        params.set("doc_key", currentDocKey);
+        endpoint = `/api/legal?${params.toString()}`;
+      }
+      const data = await apiRequest(endpoint, { cache: "no-store" });
 
       activeTosVersion = data.active_tos_version || "v1.0";
       const doc = data.doc || { title: "", subtitle: "", body: "" };
@@ -1411,6 +1427,44 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
         const verVal = (document.getElementById("legal-tos-version")?.value || "").trim();
         const bodyHtml = editor ? editor.innerHTML.trim() : "";
 
+        if (currentDocKey === "temp") {
+          const nextTempSnapshot = {
+            "legal.docs.temp.title": titleVal,
+            "legal.docs.temp.subtitle": subVal,
+            "legal.docs.temp.body": bodyHtml,
+          };
+          await confirmSaveChanges({
+            title: "Xác nhận lưu bản nháp nội bộ /temp",
+            subtitle: "Nội dung được lọc an toàn trên server và lưu vào MongoDB (ẩn hoàn toàn khỏi công chúng)",
+            before: initialSnapshot || {},
+            after: nextTempSnapshot,
+            confirmLabel: "Xác nhận lưu nháp",
+            confirmTone: "primary",
+            onConfirm: async (changes) => {
+              const savedRes = await apiRequest("/api/legal/temp", {
+                method: "PUT",
+                cache: "no-store",
+                body: JSON.stringify({
+                  title: titleVal,
+                  subtitle: subVal,
+                  body: bodyHtml,
+                  changes,
+                }),
+              });
+              if (savedRes && savedRes.doc && editor) {
+                const canonicalHtml = sanitizePreviewHtml(savedRes.doc.body || "");
+                loadGoogleFontsUsedInHtml(canonicalHtml);
+                editor.innerHTML = canonicalHtml;
+                normalizeEditorDom(editor);
+                updateCharCount();
+              }
+              showToast("✅ Đã lưu bản nháp nội bộ /temp!");
+              await loadPage("temp");
+            },
+          });
+          return;
+        }
+
         if (!TOS_VERSION_RE.test(verVal)) {
           showToast("Phiên bản ToS phải theo định dạng vX.Y hoặc vX.Y.Z (ví dụ: v1.0, v1.1).", false);
           return;
@@ -1460,6 +1514,56 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
                 : `✅ Đã lưu nội dung Rich-Text cho /${currentDocKey}!`
             );
             await Promise.all([loadPage(currentDocKey), loadAcceptances("0")]);
+          },
+        });
+      });
+    }
+
+    const pushTempBtn = document.getElementById("btn-push-temp-legal");
+    if (pushTempBtn && isAdmin) {
+      pushTempBtn.addEventListener("click", async () => {
+        if (currentDocKey !== "temp") return;
+        if (editor) normalizeEditorDom(editor, { stripZeroWidth: true });
+        const targetSelect = document.getElementById("legal-temp-push-target");
+        const targetKey = (targetSelect?.value || "toslinks").trim().toLowerCase();
+        const titleVal = (document.getElementById("legal-doc-title")?.value || "").trim();
+        const subVal = (document.getElementById("legal-doc-subtitle")?.value || "").trim();
+        const verVal = (document.getElementById("legal-tos-version")?.value || "").trim();
+        const bodyHtml = editor ? editor.innerHTML.trim() : "";
+
+        if (!TOS_VERSION_RE.test(verVal)) {
+          showToast("Phiên bản ToS phải theo định dạng vX.Y hoặc vX.Y.Z (ví dụ: v1.0, v1.1).", false);
+          return;
+        }
+
+        const isBump = verVal !== activeTosVersion;
+        await confirmSaveChanges({
+          title: `Xác nhận đẩy bản nháp /temp sang /${targetKey}`,
+          subtitle: `Nội dung hiện tại trên /temp sẽ ghi đè lên trang công khai /${targetKey}, lưu MongoDB và xóa cache CDN`,
+          before: { [`legal.docs.${targetKey}.source`]: `Trang /${targetKey} hiện hành` },
+          after: {
+            [`legal.docs.${targetKey}.source`]: "Ghi đè từ /temp",
+            [`legal.docs.${targetKey}.title`]: titleVal,
+            [`legal.docs.${targetKey}.body`]: bodyHtml,
+            "legal.active_tos_version": verVal,
+          },
+          confirmLabel: `Xác nhận đẩy sang /${targetKey}`,
+          confirmTone: isBump ? "danger" : "primary",
+          onConfirm: async (changes) => {
+            await apiRequest("/api/legal/temp/push", {
+              method: "POST",
+              cache: "no-store",
+              body: JSON.stringify({
+                target_doc_key: targetKey,
+                title: titleVal,
+                subtitle: subVal,
+                body: bodyHtml,
+                active_tos_version: verVal,
+                changes,
+              }),
+            });
+            showToast(`🚀 Đã đẩy nội dung từ /temp sang /${targetKey}!`);
+            await Promise.all([loadPage("temp"), loadAcceptances("0")]);
           },
         });
       });

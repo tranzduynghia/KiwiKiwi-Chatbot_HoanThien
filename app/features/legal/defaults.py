@@ -6,6 +6,9 @@ import re
 from typing import Any, Optional
 
 LEGAL_DOC_KEYS = ("toslinks", "legal", "terms", "policies", "guidelines")
+TEMP_DRAFT_DOC_KEY = "temp"
+ALL_CMS_DOC_KEYS = (*LEGAL_DOC_KEYS, TEMP_DRAFT_DOC_KEY)
+TEMP_DRAFT_LABEL = "Trang nháp nội bộ (/temp)"
 DEFAULT_ACTIVE_TOS_VERSION = "v1.0"
 TOS_VERSION_RE = re.compile(r"^v\d+\.\d+(?:\.\d+)?$")
 PUBLIC_SITE_ORIGIN = "https://kiwikiwi.dpdns.org"
@@ -130,17 +133,32 @@ def build_default_legal_config() -> dict[str, Any]:
 
 DEFAULT_LEGAL_AUTHOR_NAME = "Hệ thống KiwiKiwi"
 
+DEFAULT_TEMP_DRAFT_DOC: dict[str, str] = {
+    "title": "Bản nháp Điều khoản & Pháp lý (/temp)",
+    "subtitle": "Không gian soạn thảo nháp nội bộ — ẩn hoàn toàn khỏi công chúng và công cụ tìm kiếm",
+    "body": (
+        "<h2>Bản nháp nội bộ (/temp)</h2>"
+        "<p>Sử dụng trình soạn thảo Rich-Text để chuẩn bị nội dung mới tại đây. "
+        "Khi đã hài lòng, hãy nhấn nút <strong>Đẩy sang trang</strong> để ghi đè lên một trong 5 trang công khai.</p>"
+    ),
+}
+
 
 def build_default_legal_document(doc_key: str) -> dict[str, Any]:
-    """Trả về bản sao nội dung mặc định của một trong 5 trang pháp lý (mốc cập nhật tĩnh, chỉ đổi khi Admin lưu)."""
+    """Trả về bản sao nội dung mặc định của một trong 5 trang pháp lý hoặc trang nháp `/temp`."""
     key = str(doc_key or "").strip().lower()
-    if key not in DEFAULT_LEGAL_DOCS:
+    if key == TEMP_DRAFT_DOC_KEY:
+        base = copy.deepcopy(DEFAULT_TEMP_DRAFT_DOC)
+        label = TEMP_DRAFT_LABEL
+    elif key in DEFAULT_LEGAL_DOCS:
+        base = copy.deepcopy(DEFAULT_LEGAL_DOCS[key])
+        label = LEGAL_DOC_LABELS[key]
+    else:
         raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
-    base = copy.deepcopy(DEFAULT_LEGAL_DOCS[key])
     return {
         "_id": key,
         "key": key,
-        "label": LEGAL_DOC_LABELS[key],
+        "label": label,
         "title": base["title"],
         "subtitle": base["subtitle"],
         "body": base["body"],
