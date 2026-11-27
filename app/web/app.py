@@ -218,6 +218,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             get_bot=get_bot,
             auth_deps=container.auth_deps,
             memory_watchdog=container.memory_watchdog,
+            lifecycle_controller=getattr(container, "lifecycle_controller", None),
         )
     )
     app.include_router(

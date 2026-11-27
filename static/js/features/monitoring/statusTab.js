@@ -460,6 +460,107 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
             }
           },
         });
+        return;
+      }
+
+      const reloadCmdBtn = target.closest("#btn-reload-commands");
+      if (reloadCmdBtn && !reloadCmdBtn.disabled) {
+        await showConfirmModal({
+          title: "Xác nhận Reload Module Lệnh (Giữ kết nối)",
+          subtitle: "Nạp lại 4 module lệnh Discord kèm thu gom rác RAM mà không ngắt kết nối bot",
+          changes: [
+            {
+              key: "lifecycle.reload_commands",
+              label: "Phạm vi nạp lại",
+              before: "Các module lệnh đang chạy",
+              after: "Reload 4 module lệnh + dừng View tồn đọng + gc.collect() (giữ nguyên Gateway/WARP/Tunnel/DB)",
+            },
+          ],
+          confirmLabel: "Xác nhận Reload Lệnh",
+          onConfirm: async () => {
+            const origHtml = reloadCmdBtn.innerHTML;
+            reloadCmdBtn.disabled = true;
+            reloadCmdBtn.textContent = "⏳ Đang reload module lệnh...";
+            try {
+              const res = await apiRequest("/api/system/reload-commands", { method: "POST" });
+              showToast(
+                `✅ Đã reload ${res.reloaded_count} module lệnh trong ${res.duration_ms}ms · RSS: ${res.rss_before_mb} → ${res.rss_after_mb} MB (GC: ${res.gc_collected}).`
+              );
+              loadStatus(false, { silent: false });
+            } finally {
+              reloadCmdBtn.disabled = false;
+              reloadCmdBtn.innerHTML = origHtml;
+            }
+          },
+        });
+        return;
+      }
+
+      const softRestartBtn = target.closest("#btn-soft-restart");
+      if (softRestartBtn && !softRestartBtn.disabled) {
+        await showConfirmModal({
+          title: "Xác nhận Soft Restart Container (Làm sạch RAM)",
+          subtitle: "Đóng sạch Discord Bot & MongoDB rồi thoát mã 0 để Northflank khởi tạo container mới sạch RAM",
+          warning:
+            "Bot Discord và Web Dashboard sẽ tạm gián đoạn khoảng 3–5 giây trong lúc Northflank khởi động lại container. Mọi dữ liệu chờ đồng bộ sẽ được xả an toàn lên MongoDB Atlas trước khi thoát.",
+          changes: [
+            {
+              key: "lifecycle.soft_restart",
+              label: "Trạng thái tiến trình Container",
+              before: "Đang chạy",
+              after: "Soft Restart mượt mà (HTTP 202 Accepted → Flush DB → Exit 0 → Tự kết nối lại)",
+              isHighImpact: true,
+            },
+          ],
+          confirmLabel: "Xác nhận Soft Restart",
+          confirmTone: "danger",
+          onConfirm: async () => {
+            softRestartBtn.disabled = true;
+            const resp = await fetch("/api/system/soft-restart", {
+              method: "POST",
+              credentials: "same-origin",
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.status !== 202 && !resp.ok) {
+              softRestartBtn.disabled = false;
+              throw new Error(data.detail || `Lỗi kích hoạt Soft Restart (${resp.status}).`);
+            }
+
+            // Hiển thị lớp phủ đang khởi động lại và thăm dò /api/health cho tới khi container mới sẵn sàng
+            const overlay = document.getElementById("soft-restart-overlay");
+            const detailEl = document.getElementById("soft-restart-overlay-detail");
+            if (overlay) {
+              overlay.classList.remove("hidden");
+              overlay.classList.add("flex");
+            }
+
+            const startedAt = Date.now();
+            const pollHealth = async () => {
+              if (Date.now() - startedAt < 2200) {
+                setTimeout(pollHealth, 900);
+                return;
+              }
+              try {
+                const probe = await fetch("/api/health", { cache: "no-store" });
+                if (probe.ok) {
+                  if (detailEl) {
+                    detailEl.textContent = "✅ Container mới đã trực tuyến trở lại! Đang làm mới Dashboard...";
+                  }
+                  setTimeout(() => window.location.reload(), 600);
+                  return;
+                }
+              } catch {
+                // Kết nối đang reset trong lúc container khởi động lại — tiếp tục chờ
+              }
+              if (Date.now() - startedAt < 60000) {
+                setTimeout(pollHealth, 1200);
+              } else if (detailEl) {
+                detailEl.textContent = "Quá thời gian chờ tự kết nối lại. Vui lòng tải lại trang thủ công.";
+              }
+            };
+            setTimeout(pollHealth, 1500);
+          },
+        });
       }
     });
   }

@@ -6,6 +6,7 @@ from typing import Any, Callable, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 
+from app.bot.lifecycle import LifecycleController, LifecycleCooldownError
 from app.core.memory_watchdog import MemoryWatchdog
 from app.features.monitoring.service import MonitoringService
 
@@ -15,11 +16,13 @@ def create_monitoring_router(
     get_bot: Callable[[], Any],
     auth_deps: Any,
     memory_watchdog: Optional[MemoryWatchdog] = None,
+    lifecycle_controller: Optional[LifecycleController] = None,
 ) -> APIRouter:
-    """Tạo router phục vụ kiểm tra sức khỏe tiến trình, giám sát thời gian thực và mô phỏng MemoryWatchdog."""
+    """Tạo router phục vụ kiểm tra sức khỏe tiến trình, giám sát thời gian thực, MemoryWatchdog và điều khiển vòng đời Bot."""
     router = APIRouter(tags=["monitoring"])
 
     @router.api_route("/health", methods=["GET", "HEAD"])
+    @router.api_route("/api/health", methods=["GET", "HEAD"])
     async def health():
         bot = get_bot()
         return JSONResponse({
@@ -63,5 +66,56 @@ def create_monitoring_router(
             "sync_timed_out": event.get("sync_timed_out", False),
             "memory_watchdog": memory_watchdog.status_snapshot(),
         }
+
+    @router.post("/api/system/reload-commands")
+    async def api_reload_commands(
+        admin: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Hot-Reload an toàn 4 module lệnh Discord + gc.collect() (giữ nguyên Gateway, WARP, Tunnel và MongoDB)."""
+        if lifecycle_controller is None:
+            raise HTTPException(status_code=503, detail="LifecycleController chưa được khởi tạo.")
+
+        actor, actor_type = auth_deps.actor_label(admin)
+        try:
+            result = await lifecycle_controller.reload_command_modules(
+                get_bot(),
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
+                source="web_dashboard",
+            )
+            return result
+        except LifecycleCooldownError as exc:
+            return JSONResponse(
+                {"detail": str(exc), "retry_after": exc.retry_after},
+                status_code=exc.status_code,
+                headers={"Retry-After": str(max(1, int(exc.retry_after)))},
+            )
+
+    @router.post("/api/system/soft-restart")
+    async def api_soft_restart_container(
+        admin: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Trả HTTP 202 Accepted trước khi đóng sạch bot/DB và thoát mã 0 để Northflank khởi động lại container sạch RAM."""
+        if lifecycle_controller is None:
+            raise HTTPException(status_code=503, detail="LifecycleController chưa được khởi tạo.")
+
+        actor, actor_type = auth_deps.actor_label(admin)
+        try:
+            result = await lifecycle_controller.schedule_soft_restart(
+                get_bot(),
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
+                source="web_dashboard",
+                delay_seconds=1.0,
+            )
+            return JSONResponse(result, status_code=202)
+        except LifecycleCooldownError as exc:
+            return JSONResponse(
+                {"detail": str(exc), "retry_after": exc.retry_after},
+                status_code=exc.status_code,
+                headers={"Retry-After": str(max(1, int(exc.retry_after)))},
+            )
 
     return router

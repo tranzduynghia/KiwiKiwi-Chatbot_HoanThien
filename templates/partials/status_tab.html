@@ -137,6 +137,65 @@
           </div>
         </div>
       </div>
+
+      {% if user.is_admin %}
+      {# Thẻ Điều khiển Vòng đời Bot (Lifecycle Controls): Hot-Reload module lệnh & Soft-Restart sạch RAM #}
+      <div class="card p-5 space-y-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Điều khiển Vòng đời Bot (Lifecycle Controls)</h3>
+            <p class="text-[11px] text-[#8b95a7] mt-0.5">
+              Nạp nóng module lệnh kèm dọn rác RAM (giữ nguyên kết nối) hoặc khởi động lại mềm container trên Northflank
+            </p>
+          </div>
+          <span class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30">
+            Admin Only
+          </span>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <button
+            id="btn-reload-commands"
+            type="button"
+            class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-emerald-600/15 hover:bg-emerald-600/25 text-emerald-300 border border-emerald-500/35 transition-all duration-150 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>🔄</span>
+            <span>Reload Module Lệnh (Giữ kết nối)</span>
+          </button>
+          <button
+            id="btn-soft-restart"
+            type="button"
+            class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-lg text-xs font-semibold bg-rose-600/15 hover:bg-rose-600/25 text-rose-300 border border-rose-500/35 transition-all duration-150 active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>♻️</span>
+            <span>Soft Restart Container (Làm sạch RAM)</span>
+          </button>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    {# Lớp phủ toàn màn hình khi đang Soft Restart Container và chờ Northflank khởi động lại (3-5 giây) #}
+    <div
+      id="soft-restart-overlay"
+      class="fixed inset-0 z-[70] hidden items-center justify-center p-4 bg-slate-950/65 backdrop-blur-[3px]"
+      role="status"
+      aria-live="assertive"
+    >
+      <div class="card w-full max-w-md p-6 text-center space-y-4 shadow-2xl border border-rose-500/40">
+        <div class="mx-auto w-12 h-12 rounded-full bg-rose-500/15 border border-rose-500/40 flex items-center justify-center">
+          <svg class="animate-spin w-6 h-6 text-rose-400" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+            <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"></path>
+          </svg>
+        </div>
+        <div class="space-y-1">
+          <h3 class="text-base font-semibold text-white">Đang khởi động lại container (3–5 giây)...</h3>
+          <p id="soft-restart-overlay-detail" class="text-xs text-[#8b95a7] leading-relaxed">
+            Đã ghi nhận lệnh Soft Restart (HTTP 202). Hệ thống đang dọn sạch RAM và tự động kết nối lại ngay khi container mới sẵn sàng.
+          </p>
+        </div>
+      </div>
     </div>
 
     {# CỘT PHẢI (5/12): Lưới 3x2 thẻ KPI hình thoi + Biểu đồ đường độ trễ & Chuỗi Auto #}

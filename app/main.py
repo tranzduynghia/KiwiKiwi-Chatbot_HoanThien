@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 
 from app.bot.client import AskBot
+from app.bot.lifecycle import LifecycleController
 from app.bot.maintenance_gate import MaintenanceGate
 from app.bot.tos_gate import TosConsentGate
 from app.core.cloudflare_tunnel import CloudflareTunnelService
@@ -67,6 +68,7 @@ class AppContainer:
     config_service: ConfigService
     atlas_config_watcher: AtlasConfigWatcher
     maintenance_gate: MaintenanceGate
+    lifecycle_controller: LifecycleController
     legal_doc_repo: LegalDocumentRepository
     tos_acceptance_repo: TosAcceptanceRepository
     legal_service: LegalService
@@ -227,6 +229,11 @@ def build_container(
     model_cooldowns = ModelCooldownTracker()
     model_registry = ModelRegistry(gemini_client, config_repo, model_cooldowns)
     session_repo = SessionRepository(db_manager, config_repo, user_locks)
+    lifecycle_controller = LifecycleController(
+        audit_service=audit_service,
+        sync_coordinator=sync_coordinator,
+        session_repo=session_repo,
+    )
     user_lookup = DiscordUserLookupService()
     user_cooldowns = UserCooldownTracker()
 
@@ -376,6 +383,7 @@ def build_container(
         config_service=config_service,
         atlas_config_watcher=atlas_config_watcher,
         maintenance_gate=maintenance_gate,
+        lifecycle_controller=lifecycle_controller,
         legal_doc_repo=legal_doc_repo,
         tos_acceptance_repo=tos_acceptance_repo,
         legal_service=legal_service,

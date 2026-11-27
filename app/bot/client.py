@@ -133,10 +133,17 @@ class AskBot(discord.Client):
 
             http_client.connector = aiohttp.TCPConnector(limit=0, force_close=True, enable_cleanup_closed=True)
 
-    def _register_commands(self) -> None:
-        """Đăng ký toàn bộ slash commands từ các lát cắt tính năng và trình bắt lỗi chung."""
+    def register_all_commands(self) -> None:
+        """Đăng ký toàn bộ slash commands (đọc động từ module hiện hành để hỗ trợ Hot-Reload) và trình bắt lỗi chung."""
+        import importlib
+
         c = self.container
-        register_chat_commands(
+        chat_mod = importlib.import_module("app.features.chat.commands")
+        sessions_mod = importlib.import_module("app.features.sessions.commands")
+        monitoring_mod = importlib.import_module("app.features.monitoring.commands")
+        config_mod = importlib.import_module("app.features.config.commands")
+
+        chat_mod.register_chat_commands(
             self.tree,
             config_repo=c.config_repo,
             model_registry=c.model_registry,
@@ -148,13 +155,13 @@ class AskBot(discord.Client):
             user_locks=c.user_locks,
             gemini_semaphore=c.gemini_semaphore,
         )
-        register_session_commands(
+        sessions_mod.register_session_commands(
             self.tree,
             session_repo=c.session_repo,
             config_repo=c.config_repo,
             user_locks=c.user_locks,
         )
-        register_monitoring_commands(
+        monitoring_mod.register_monitoring_commands(
             self.tree,
             bot=self,
             monitoring_service=c.monitoring_service,
@@ -165,7 +172,19 @@ class AskBot(discord.Client):
             db_manager=c.db_manager,
             usage_stats=c.usage_stats,
         )
+        if getattr(c, "lifecycle_controller", None) is not None:
+            config_mod.register_config_commands(
+                self.tree,
+                bot=self,
+                permission_service=c.permission_service,
+                lifecycle_controller=c.lifecycle_controller,
+                maintenance_gate=getattr(c, "maintenance_gate", None),
+            )
         register_error_handler(self.tree)
+
+    def _register_commands(self) -> None:
+        """Bí danh tương thích gọi `register_all_commands` khi khởi tạo `AskBot`."""
+        self.register_all_commands()
 
     async def setup_hook(self) -> None:
         """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, áp dụng Cloudflare WARP/Tunnel, tải model và đồng bộ slash commands."""
