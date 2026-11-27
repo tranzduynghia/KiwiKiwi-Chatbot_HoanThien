@@ -45,6 +45,7 @@ const ALLOWED_PREVIEW_TAGS = new Set([
   "H1",
   "H2",
   "H3",
+  "H4",
   "STRONG",
   "B",
   "EM",
@@ -129,8 +130,17 @@ function loadGoogleFontsUsedInHtml(htmlStr) {
   }
 }
 
-function normalizeEditorDom(root) {
+function normalizeEditorDom(root, { stripZeroWidth = false } = {}) {
   if (!root) return;
+
+  // 0) Làm phẳng các thẻ <p>/<div> bị lồng nhầm bên trong H1-H4
+  Array.from(root.querySelectorAll("h1, h2, h3, h4")).forEach((heading) => {
+    Array.from(heading.querySelectorAll("p, div")).forEach((nested) => {
+      if (!nested.parentNode) return;
+      while (nested.firstChild) nested.parentNode.insertBefore(nested.firstChild, nested);
+      nested.remove();
+    });
+  });
 
   // 1) Đổi <b> -> <strong>, <i> -> <em>
   Array.from(root.querySelectorAll("b, i")).forEach((el) => {
@@ -139,6 +149,16 @@ function normalizeEditorDom(root) {
     if (el.getAttribute("style")) rep.setAttribute("style", el.getAttribute("style"));
     el.replaceWith(rep);
   });
+
+  if (stripZeroWidth) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let txt;
+    while ((txt = walker.nextNode())) {
+      if (txt.nodeValue && txt.nodeValue.includes("\u200B")) {
+        txt.nodeValue = txt.nodeValue.replace(/\u200B/g, "");
+      }
+    }
+  }
 
   // 2) Đưa khoảng trắng thừa ở biên trong thẻ định dạng ra ngoài (tránh lỗi **text **)
   Array.from(root.querySelectorAll("strong, em, u, s")).forEach((el) => {
@@ -201,10 +221,9 @@ function normalizeEditorDom(root) {
 function isElementBold(el) {
   if (!el || el.nodeType !== Node.ELEMENT_NODE) return false;
   if (el.tagName === "STRONG" || el.tagName === "B") return true;
-  const inlineW = (el.style && el.style.fontWeight) || "";
-  if (inlineW === "bold" || inlineW === "bolder" || parseInt(inlineW, 10) >= 600) return true;
-  const comp = window.getComputedStyle(el).fontWeight;
-  return comp === "bold" || comp === "bolder" || parseInt(comp, 10) >= 600;
+  const inlineW = ((el.style && el.style.fontWeight) || "").trim().toLowerCase();
+  if (!inlineW) return false;
+  return inlineW === "bold" || inlineW === "bolder" || parseInt(inlineW, 10) >= 600;
 }
 
 function isNodeInsideBold(node, root) {
@@ -478,19 +497,82 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
       sel.removeAllRanges();
       sel.addRange(nextRange);
     } else {
+      // Tách span cha nếu đang mang cùng thuộc tính CSS (tránh chồng nhiều <span style="font-size:...">)
+      let anc = range.commonAncestorContainer;
+      if (anc.nodeType === Node.TEXT_NODE) anc = anc.parentElement;
+      const styledAncestors = [];
+      while (anc && anc !== editor) {
+        if (anc.tagName === "SPAN" && anc.style && anc.style.getPropertyValue(cssProp)) {
+          styledAncestors.push(anc);
+        }
+        anc = anc.parentElement;
+      }
+      if (styledAncestors.length) {
+        const outermost = styledAncestors[styledAncestors.length - 1];
+        const bRange = document.createRange();
+        bRange.selectNodeContents(outermost);
+        bRange.setEnd(range.startContainer, range.startOffset);
+        const aRange = document.createRange();
+        aRange.selectNodeContents(outermost);
+        aRange.setStart(range.endContainer, range.endOffset);
+        const bFrag = bRange.extractContents();
+        const aFrag = aRange.extractContents();
+        const mFrag = range.extractContents();
+        const parent = outermost.parentNode;
+        if (parent) {
+          if ((bFrag.textContent || "").length > 0) {
+            const bClone = outermost.cloneNode(false);
+            bClone.appendChild(bFrag);
+            parent.insertBefore(bClone, outermost);
+          }
+          const mStart = document.createTextNode("");
+          const mEnd = document.createTextNode("");
+          parent.insertBefore(mStart, outermost);
+          parent.insertBefore(mFrag, outermost);
+          parent.insertBefore(mEnd, outermost);
+          if ((aFrag.textContent || "").length > 0) {
+            const aClone = outermost.cloneNode(false);
+            aClone.appendChild(aFrag);
+            parent.insertBefore(aClone, outermost);
+          }
+          outermost.remove();
+          range.setStartAfter(mStart);
+          range.setEndBefore(mEnd);
+          sel.removeAllRanges();
+          sel.addRange(range);
+          mStart.remove();
+          mEnd.remove();
+        }
+      }
+
       const frag = range.extractContents();
       Array.from(frag.querySelectorAll("[style]")).forEach((el) => {
         el.style.removeProperty(cssProp);
         if (!el.getAttribute("style")?.trim()) el.removeAttribute("style");
       });
-      const span = document.createElement("span");
-      if (cleanVal) span.style.setProperty(cssProp, cleanVal);
-      span.appendChild(frag);
-      range.insertNode(span);
-      const nextRange = document.createRange();
-      nextRange.selectNodeContents(span);
-      sel.removeAllRanges();
-      sel.addRange(nextRange);
+      if (cleanVal) {
+        const span = document.createElement("span");
+        span.style.setProperty(cssProp, cleanVal);
+        span.appendChild(frag);
+        range.insertNode(span);
+        const nextRange = document.createRange();
+        nextRange.selectNodeContents(span);
+        sel.removeAllRanges();
+        sel.addRange(nextRange);
+      } else {
+        const sMark = document.createTextNode("");
+        const eMark = document.createTextNode("");
+        range.insertNode(eMark);
+        range.insertNode(frag);
+        range.insertNode(sMark);
+        const nextRange = document.createRange();
+        nextRange.setStartAfter(sMark);
+        nextRange.setEndBefore(eMark);
+        sel.removeAllRanges();
+        sel.addRange(nextRange);
+        sMark.remove();
+        eMark.remove();
+      }
     }
     normalizeEditorDom(editor);
     saveSelection();
@@ -604,6 +686,21 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     if (boldBtn) {
       const isBoldActive = elements.length > 0 && elements.every((el) => isNodeInsideBold(el, editor));
       boldBtn.setAttribute("aria-pressed", String(isBoldActive));
+    }
+
+    const blockSelect = document.getElementById("rte-block-format");
+    if (blockSelect && document.activeElement !== blockSelect) {
+      let cur = range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer.parentElement : range.startContainer;
+      let detected = "p";
+      while (cur && cur !== editor) {
+        const tag = cur.tagName;
+        if (tag === "H1" || tag === "H2" || tag === "H3" || tag === "H4" || tag === "P") {
+          detected = tag.toLowerCase();
+          break;
+        }
+        cur = cur.parentElement;
+      }
+      blockSelect.value = detected;
     }
   }
 
@@ -1110,11 +1207,15 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
 
       const blockSelect = document.getElementById("rte-block-format");
       if (blockSelect) {
+        blockSelect.addEventListener("mousedown", () => saveSelection());
         blockSelect.addEventListener("change", () => {
+          const targetTag = ["p", "h1", "h2", "h3", "h4"].includes(blockSelect.value) ? blockSelect.value : "p";
           restoreSelection();
-          document.execCommand("formatBlock", false, blockSelect.value || "p");
+          document.execCommand("formatBlock", false, `<${targetTag}>`);
           if (editor) normalizeEditorDom(editor);
+          saveSelection();
           updateCharCount();
+          scheduleToolbarSync();
         });
       }
 
@@ -1131,9 +1232,12 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
         sizeInput.addEventListener("keydown", (event) => {
           if (event.key === "Enter") {
             event.preventDefault();
-            applyCustomFontSize(sizeInput.value);
+            event.stopPropagation();
+            const val = sizeInput.value;
+            setTimeout(() => applyCustomFontSize(val), 0);
           } else if (event.key === "Escape") {
             event.preventDefault();
+            event.stopPropagation();
             restoreSelection();
             scheduleToolbarSync();
           }
@@ -1141,13 +1245,24 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
         sizeInput.addEventListener("change", () => applyCustomFontSize(sizeInput.value));
       }
       const stepSize = (delta) => {
-        saveSelection();
         const cur = parseInt(sizeInput?.value || "14", 10);
         const base = Number.isNaN(cur) ? 14 : cur;
         applyCustomFontSize(String(Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, base + delta))));
       };
-      if (decBtn) decBtn.addEventListener("click", () => stepSize(-1));
-      if (incBtn) incBtn.addEventListener("click", () => stepSize(1));
+      if (decBtn) {
+        decBtn.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          saveSelection();
+        });
+        decBtn.addEventListener("click", () => stepSize(-1));
+      }
+      if (incBtn) {
+        incBtn.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          saveSelection();
+        });
+        incBtn.addEventListener("click", () => stepSize(1));
+      }
 
       const colorInput = document.getElementById("rte-text-color");
       if (colorInput) {
@@ -1228,7 +1343,7 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     if (saveBtn && isAdmin) {
       saveBtn.addEventListener("click", async () => {
         // BẮT BUỘC chuẩn hóa và đọc DOM đồng bộ ngay trước khi gửi PUT
-        if (editor) normalizeEditorDom(editor);
+        if (editor) normalizeEditorDom(editor, { stripZeroWidth: true });
         const titleVal = (document.getElementById("legal-doc-title")?.value || "").trim();
         const subVal = (document.getElementById("legal-doc-subtitle")?.value || "").trim();
         const verVal = (document.getElementById("legal-tos-version")?.value || "").trim();

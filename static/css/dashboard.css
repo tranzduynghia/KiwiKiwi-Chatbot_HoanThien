@@ -1312,6 +1312,13 @@ html[data-theme="light"] .presence-status-btn[data-selected="true"] {
   color: var(--text-primary);
 }
 
+.ox-legal-prose h4 {
+  font-size: 0.94rem;
+  font-weight: 600;
+  margin: 0.7rem 0 0.3rem;
+  color: var(--text-primary);
+}
+
 .ox-legal-prose p {
   margin: 0.55rem 0;
   color: var(--text-primary);

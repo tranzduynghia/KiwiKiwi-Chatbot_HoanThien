@@ -13,6 +13,7 @@ ALLOWED_TAGS = frozenset({
     "h1",
     "h2",
     "h3",
+    "h4",
     "strong",
     "b",
     "em",
