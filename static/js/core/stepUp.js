@@ -45,7 +45,7 @@ export function createStepUpController({
   }
 
   function getRemainingSeconds() {
-    if (!unlocked) return 0;
+    if (!unlocked || lastActivityAt <= 0) return 0;
     const elapsedMs = Math.max(0, Date.now() - lastActivityAt);
     return Math.max(0, Math.ceil((idleTimeoutMs - elapsedMs) / 1000));
   }
@@ -95,7 +95,7 @@ export function createStepUpController({
   }
 
   function onRealActivity(event) {
-    if (!unlocked) return;
+    if (!unlocked || lastActivityAt <= 0) return;
     const now = Date.now();
     if (event && event.type === "mousemove") {
       if (now - lastMouseMoveAt < 500) return;
@@ -139,7 +139,7 @@ export function createStepUpController({
   function startCountdownTimer() {
     stopCountdownTimer();
     countdownInterval = setInterval(() => {
-      if (!unlocked) {
+      if (!unlocked || lastActivityAt <= 0) {
         stopCountdownTimer();
         return;
       }
@@ -178,6 +178,13 @@ export function createStepUpController({
     const safeTab = targetTab === "sessions" ? "sessions" : "perms";
     pendingTargetTab = safeTab;
     pendingAfterUnlock = typeof afterUnlock === "function" ? afterUnlock : null;
+
+    // Đảm bảo bộ đếm 60s KHÔNG chạy hoặc tiến triển khi đang mở modal / chưa xác thực
+    if (!unlocked) {
+      lastActivityAt = 0;
+      stopCountdownTimer();
+      detachActivityListeners();
+    }
 
     const modal = document.getElementById("stepup-modal");
     const targetLabel = document.getElementById("stepup-target-label");
@@ -269,10 +276,14 @@ export function createStepUpController({
     }
   }
 
-  function unlock({ remainingSeconds = timeoutSeconds, targetTab = null } = {}) {
+  function unlock({ remainingSeconds = timeoutSeconds, targetTab = null, freshAuth = false } = {}) {
+    const now = Date.now();
     const clampedRemaining = Math.max(1, Math.min(timeoutSeconds, Number(remainingSeconds) || timeoutSeconds));
     unlocked = true;
-    lastActivityAt = Date.now() - Math.max(0, (timeoutSeconds - clampedRemaining) * 1000);
+    lastActivityAt = freshAuth
+      ? now
+      : now - Math.max(0, (timeoutSeconds - clampedRemaining) * 1000);
+    lastMouseMoveAt = 0;
     closeModal();
     attachActivityListeners();
     startCountdownTimer();
@@ -349,6 +360,7 @@ export function createStepUpController({
           unlock({
             remainingSeconds: Number(data.expires_in) || timeoutSeconds,
             targetTab: pendingTargetTab,
+            freshAuth: true,
           });
         } catch (err) {
           showModalError(err.message || "Mật khẩu xác thực không chính xác.");
@@ -384,7 +396,7 @@ export function createStepUpController({
 
     // Kiểm tra lại mốc thời gian delta Date.now() ngay khi quay lại tab trình duyệt
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && unlocked) {
+      if (!document.hidden && unlocked && lastActivityAt > 0) {
         if (Date.now() - lastActivityAt >= idleTimeoutMs) {
           lock({ notifyServer: true, openModalIfSensitive: true, reason: "timeout" });
         } else {
