@@ -4,7 +4,7 @@
  */
 
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
-import { confirmSaveChanges } from "../../core/confirmSave.js";
+import { confirmSaveChanges, showConfirmModal } from "../../core/confirmSave.js";
 import { closeModalAnimated, openModalAnimated } from "../../core/modalTransition.js";
 
 const TOS_VERSION_RE = /^v\d+\.\d+(?:\.\d+)?$/;
@@ -109,6 +109,40 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
   let nextCursor = null;
   let prevCursor = null;
   let currentSearch = "";
+  let discordPromptBaseUrl = "https://kiwikiwi.dpdns.org";
+  let discordPreviewMode = "welcome";
+  let initialDiscordPromptSnapshot = null;
+
+  function renderDiscordPromptPreview() {
+    const welcomeEl = document.getElementById("legal-discord-welcome-tpl");
+    const updateEl = document.getElementById("legal-discord-update-tpl");
+    const btnLabelEl = document.getElementById("legal-discord-btn-label");
+    const previewTextEl = document.getElementById("legal-discord-preview-text");
+    const previewBtnEl = document.getElementById("legal-discord-preview-btn");
+    const modeBadgeEl = document.getElementById("legal-discord-preview-mode-badge");
+    const welcomeTab = document.getElementById("btn-discord-preview-welcome");
+    const updateTab = document.getElementById("btn-discord-preview-update");
+
+    if (welcomeTab) welcomeTab.setAttribute("aria-pressed", String(discordPreviewMode === "welcome"));
+    if (updateTab) updateTab.setAttribute("aria-pressed", String(discordPreviewMode === "update"));
+    if (modeBadgeEl) {
+      modeBadgeEl.textContent = discordPreviewMode === "update" ? "Cập nhật phiên bản" : "Lần đầu";
+    }
+
+    const verVal = (document.getElementById("legal-tos-version")?.value || "").trim() || activeTosVersion || "v1.0";
+    const rawTpl =
+      discordPreviewMode === "update"
+        ? (updateEl?.value || "").trim()
+        : (welcomeEl?.value || "").trim();
+    const rendered = rawTpl
+      .replace(/\{version\}/g, verVal)
+      .replace(/\{previous_version\}/g, "v1.0")
+      .replace(/\{base_url\}/g, discordPromptBaseUrl);
+
+    if (previewTextEl) previewTextEl.textContent = rendered || "(Chưa nhập mẫu tin nhắn)";
+    const btnLabel = (btnLabelEl?.value || "").trim() || "Tôi đồng ý (Accept Terms)";
+    if (previewBtnEl) previewBtnEl.textContent = `✅ ${btnLabel}`;
+  }
 
   function getEditorEl() {
     return document.getElementById("legal-rte-editor");
@@ -246,6 +280,28 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
       if (verEl) verEl.value = activeTosVersion;
       if (editor) editor.innerHTML = sanitizePreviewHtml(doc.body || "");
 
+      // Nạp cấu hình mẫu tin nhắn yêu cầu đồng ý ToS trên Discord
+      const dp = data.discord_prompt || {};
+      discordPromptBaseUrl = dp.base_url || "https://kiwikiwi.dpdns.org";
+      const welcomeEl = document.getElementById("legal-discord-welcome-tpl");
+      const updateEl = document.getElementById("legal-discord-update-tpl");
+      const btnLabelEl = document.getElementById("legal-discord-btn-label");
+      if (welcomeEl && dp.discord_tos_welcome_template !== undefined) {
+        welcomeEl.value = dp.discord_tos_welcome_template || "";
+      }
+      if (updateEl && dp.discord_tos_update_template !== undefined) {
+        updateEl.value = dp.discord_tos_update_template || "";
+      }
+      if (btnLabelEl && dp.discord_tos_button_label !== undefined) {
+        btnLabelEl.value = dp.discord_tos_button_label || "";
+      }
+      initialDiscordPromptSnapshot = {
+        "legal.discord_tos_welcome_template": welcomeEl ? welcomeEl.value : "",
+        "legal.discord_tos_update_template": updateEl ? updateEl.value : "",
+        "legal.discord_tos_button_label": btnLabelEl ? btnLabelEl.value : "",
+      };
+      renderDiscordPromptPreview();
+
       initialSnapshot = {
         "legal.active_tos_version": activeTosVersion,
         [`legal.docs.${currentDocKey}.title`]: doc.title || "",
@@ -294,38 +350,42 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
       if (!tbody) return;
       if (!data.items.length) {
         tbody.innerHTML =
-          '<tr><td colspan="5" class="py-6 text-center text-[#8b95a7]">Chưa có người dùng nào ghi nhận chấp thuận ToS.</td></tr>';
+          '<tr><td colspan="6" class="py-6 text-center ox-text-secondary">Chưa có người dùng nào ghi nhận chấp thuận ToS.</td></tr>';
         return;
       }
 
       tbody.innerHTML = data.items
         .map((item) => {
           const verBadgeClass = item.is_current_version
-            ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/35"
-            : "bg-amber-500/15 text-amber-300 border-amber-500/35";
+            ? "ox-badge-emerald"
+            : "ox-badge-amber";
           const verNote = item.is_current_version ? "Hiện hành" : `Cũ (cần ${escapeHtml(data.active_tos_version)})`;
           const sourceBadge =
             item.consent_source === "web"
               ? '<span class="px-2 py-0.5 rounded-full text-[10px] bg-sky-500/15 text-sky-300 border border-sky-500/30">Web</span>'
               : '<span class="px-2 py-0.5 rounded-full text-[10px] bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">Discord</span>';
+          const revokeBtn = isAdmin
+            ? `<button type="button" data-revoke-tos-uid="${escapeHtml(item.discord_user_id)}" data-revoke-tos-ver="${escapeHtml(item.tos_accepted_version)}" data-revoke-tos-name="${escapeHtml(item.discord_username || item.discord_user_id)}" class="btn-danger text-[11px] px-2 py-1 whitespace-nowrap">Thu hồi</button>`
+            : "—";
           return `
-            <tr>
-              <td class="py-2.5 pr-3 font-mono text-slate-100">${escapeHtml(item.discord_user_id)}</td>
-              <td class="py-2.5 pr-3 text-slate-200 font-medium">${escapeHtml(item.discord_username || "—")}</td>
+            <tr class="ox-table-row">
+              <td class="py-2.5 pr-3 font-mono ox-text-primary">${escapeHtml(item.discord_user_id)}</td>
+              <td class="py-2.5 pr-3 ox-text-primary font-medium">${escapeHtml(item.discord_username || "—")}</td>
               <td class="py-2.5 pr-3">
                 <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border font-mono text-[10px] ${verBadgeClass}">
                   ${escapeHtml(item.tos_accepted_version)} · ${verNote}
                 </span>
               </td>
               <td class="py-2.5 pr-3">${sourceBadge}</td>
-              <td class="py-2.5 text-right font-mono text-slate-300">${escapeHtml(item.tos_accepted_at_formatted || "—")}</td>
+              <td class="py-2.5 pr-3 text-right font-mono ox-text-secondary">${escapeHtml(item.tos_accepted_at_formatted || "—")}</td>
+              <td class="py-2.5 text-right whitespace-nowrap">${revokeBtn}</td>
             </tr>
           `;
         })
         .join("");
     } catch (err) {
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
       }
     }
   }
@@ -569,6 +629,108 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     if (nextBtn) {
       nextBtn.addEventListener("click", () => {
         if (nextCursor !== null && nextCursor !== undefined) loadAcceptances(nextCursor);
+      });
+    }
+
+    // Xem trước trực tiếp & lưu mẫu tin nhắn yêu cầu đồng ý ToS trên Discord
+    const previewWelcomeBtn = document.getElementById("btn-discord-preview-welcome");
+    const previewUpdateBtn = document.getElementById("btn-discord-preview-update");
+    if (previewWelcomeBtn) {
+      previewWelcomeBtn.addEventListener("click", () => {
+        discordPreviewMode = "welcome";
+        renderDiscordPromptPreview();
+      });
+    }
+    if (previewUpdateBtn) {
+      previewUpdateBtn.addEventListener("click", () => {
+        discordPreviewMode = "update";
+        renderDiscordPromptPreview();
+      });
+    }
+    ["legal-discord-welcome-tpl", "legal-discord-update-tpl", "legal-discord-btn-label", "legal-tos-version"].forEach(
+      (id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("input", renderDiscordPromptPreview);
+      }
+    );
+
+    const saveDiscordPromptBtn = document.getElementById("btn-save-discord-prompt");
+    if (saveDiscordPromptBtn && isAdmin) {
+      saveDiscordPromptBtn.addEventListener("click", async () => {
+        const welcomeVal = (document.getElementById("legal-discord-welcome-tpl")?.value || "").trim();
+        const updateVal = (document.getElementById("legal-discord-update-tpl")?.value || "").trim();
+        const labelVal = (document.getElementById("legal-discord-btn-label")?.value || "").trim();
+        if (welcomeVal.length < 10 || updateVal.length < 10) {
+          showToast("Mỗi mẫu tin nhắn Discord phải có ít nhất 10 ký tự.", false);
+          return;
+        }
+        if (!labelVal || labelVal.length > 60) {
+          showToast("Nhãn nút đồng ý phải từ 1 đến 60 ký tự.", false);
+          return;
+        }
+
+        const nextPromptSnapshot = {
+          "legal.discord_tos_welcome_template": welcomeVal,
+          "legal.discord_tos_update_template": updateVal,
+          "legal.discord_tos_button_label": labelVal,
+        };
+        await confirmSaveChanges({
+          title: "Xác nhận lưu mẫu tin nhắn ToS trên Discord",
+          subtitle: "Áp dụng nóng cho mọi thông báo ephemeral yêu cầu đồng ý ToS và ghi vào Nhật ký chỉnh sửa",
+          before: initialDiscordPromptSnapshot || {},
+          after: nextPromptSnapshot,
+          confirmLabel: "Xác nhận lưu mẫu Discord",
+          onConfirm: async (changes) => {
+            await apiRequest("/api/legal/discord-prompt", {
+              method: "PUT",
+              body: JSON.stringify({
+                discord_tos_welcome_template: welcomeVal,
+                discord_tos_update_template: updateVal,
+                discord_tos_button_label: labelVal,
+                changes,
+              }),
+            });
+            initialDiscordPromptSnapshot = { ...nextPromptSnapshot };
+            showToast("✅ Đã lưu mẫu tin nhắn đồng ý ToS trên Discord!");
+          },
+        });
+      });
+    }
+
+    // Ủy quyền sự kiện cho nút Thu hồi (Revoke) trên từng dòng Danh sách chấp thuận ToS
+    const acceptTbody = document.getElementById("tos-accept-tbody");
+    if (acceptTbody && isAdmin) {
+      acceptTbody.addEventListener("click", async (event) => {
+        const btn = event.target.closest("button[data-revoke-tos-uid]");
+        if (!btn) return;
+        const uid = btn.dataset.revokeTosUid || "";
+        const prevVer = btn.dataset.revokeTosVer || "—";
+        const displayName = btn.dataset.revokeTosName || uid;
+        if (!uid) return;
+
+        await showConfirmModal({
+          title: `Thu hồi chấp thuận ToS của ${displayName}`,
+          subtitle: "Người dùng sẽ bị yêu cầu bấm đồng ý Điều khoản lại ở lượt dùng /ask, phiên AI hoặc /me tiếp theo",
+          warning: `Hành động này xóa ngay bản ghi chấp thuận phiên bản ${prevVer} của ID ${uid} khỏi MongoDB và bộ đệm RAM (ghi Audit Log TOS_CONSENT_REVOKED).`,
+          changes: [
+            {
+              key: `tos_acceptances.${uid}.tos_accepted_version`,
+              label: `Trạng thái đồng ý ToS (${uid})`,
+              before: prevVer,
+              after: "(Đã thu hồi — cần đồng ý lại)",
+              isHighImpact: true,
+            },
+          ],
+          confirmLabel: "Xác nhận thu hồi",
+          confirmTone: "danger",
+          onConfirm: async () => {
+            await apiRequest(`/api/legal/acceptances/${encodeURIComponent(uid)}/revoke`, {
+              method: "POST",
+            });
+            showToast(`🔄 Đã thu hồi chấp thuận ToS của ${displayName}.`);
+            await loadAcceptances(currentCursor);
+          },
+        });
       });
     }
   }

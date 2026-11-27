@@ -60,6 +60,7 @@ class MaintenanceGate:
         config_repo: ConfigRepository,
         audit_service: AuditService,
         permission_service: Any = None,
+        blacklist_repo: Any = None,
         admin_discord_id: str = "",
         block_log_throttle_seconds: float = DND_BLOCK_LOG_THROTTLE_SECONDS,
         monotonic_fn: Callable[[], float] = time.monotonic,
@@ -67,14 +68,30 @@ class MaintenanceGate:
         self._config_repo = config_repo
         self._audit = audit_service
         self._permission_service = permission_service
+        self._blacklist_repo = blacklist_repo
         self._configured_admin_ids = _parse_admin_discord_ids(admin_discord_id)
         self._block_log_throttle_seconds = max(1.0, float(block_log_throttle_seconds))
         self._monotonic = monotonic_fn
 
         self._bot_status: str = _normalize_status(config_repo.presence_cfg().get("status"))
         self._last_block_audit_at: dict[str, float] = {}
+        self._last_blacklist_audit_at: dict[str, float] = {}
         self._blocked_total: int = 0
+        self._blacklist_blocked_total: int = 0
         self._admin_bypass_total: int = 0
+
+    def set_blacklist_repo(self, blacklist_repo: Any) -> None:
+        """Gắn `BlacklistRepository` để kiểm tra danh sách đen O(1) ưu tiên cao nhất trước DND và ToS."""
+        self._blacklist_repo = blacklist_repo
+
+    @staticmethod
+    def format_blacklist_notice(reason: str) -> str:
+        """Soạn thông báo chặn người dùng nằm trong danh sách đen kèm lý do cấm."""
+        clean_reason = str(reason or "Vi phạm quy định sử dụng bot.").strip()
+        return (
+            "🚫 **Tài khoản của bạn đã bị hạn chế sử dụng KiwiKiwi Bot.**\n"
+            f"**Lý do:** {clean_reason}"
+        )
 
     @property
     def bot_status(self) -> str:
@@ -130,27 +147,89 @@ class MaintenanceGate:
         return False
 
     def purge_stale_throttles(self) -> int:
-        """Dọn các mốc rate-limit chặn DND đã hết hạn để tiết kiệm RAM cho container 488MB."""
+        """Dọn các mốc rate-limit chặn DND & Blacklist đã hết hạn để tiết kiệm RAM cho container 488MB."""
         now = self._monotonic()
         cutoff = now - self._block_log_throttle_seconds
-        stale_keys = [uid for uid, ts in self._last_block_audit_at.items() if ts < cutoff]
-        for uid in stale_keys:
-            self._last_block_audit_at.pop(uid, None)
-        return len(stale_keys)
+        removed = 0
+        for bucket in (self._last_block_audit_at, self._last_blacklist_audit_at):
+            stale_keys = [uid for uid, ts in bucket.items() if ts < cutoff]
+            for uid in stale_keys:
+                bucket.pop(uid, None)
+            removed += len(stale_keys)
+        return removed
 
-    def _should_record_block_audit(self, uid: str) -> bool:
+    def _should_record_throttled(self, bucket: dict[str, float], uid: str) -> bool:
         """Giới hạn tối đa 1 bản ghi Audit Log MongoDB mỗi người dùng trong mỗi 60 giây nhằm chống spam làm phình DB/RAM."""
         now = self._monotonic()
-        last_ts = self._last_block_audit_at.get(uid)
+        last_ts = bucket.get(uid)
         if last_ts is not None and (now - last_ts) < self._block_log_throttle_seconds:
             return False
-        self._last_block_audit_at[uid] = now
-        if len(self._last_block_audit_at) > DND_BLOCK_THROTTLE_MAX_USERS:
+        bucket[uid] = now
+        if len(bucket) > DND_BLOCK_THROTTLE_MAX_USERS:
             self.purge_stale_throttles()
-            while len(self._last_block_audit_at) > DND_BLOCK_THROTTLE_MAX_USERS:
-                oldest_uid = next(iter(self._last_block_audit_at))
-                self._last_block_audit_at.pop(oldest_uid, None)
+            while len(bucket) > DND_BLOCK_THROTTLE_MAX_USERS:
+                oldest_uid = next(iter(bucket))
+                bucket.pop(oldest_uid, None)
         return True
+
+    def _should_record_block_audit(self, uid: str) -> bool:
+        """Giới hạn tối đa 1 bản ghi Audit Log chặn DND mỗi người dùng trong mỗi 60 giây."""
+        return self._should_record_throttled(self._last_block_audit_at, uid)
+
+    def _should_record_blacklist_audit(self, uid: str) -> bool:
+        """Giới hạn tối đa 1 bản ghi Audit Log chặn Blacklist mỗi người dùng trong mỗi 60 giây."""
+        return self._should_record_throttled(self._last_blacklist_audit_at, uid)
+
+    def _get_blacklist_reason(self, user_id: int | str | None) -> Optional[str]:
+        """Tra cứu O(1) trong bộ đệm RAM xem Discord User ID có bị blacklist không."""
+        if self._blacklist_repo is None or user_id is None:
+            return None
+        return self._blacklist_repo.get_reason_fast(user_id)
+
+    async def _log_blacklist_blocked(self, user: Any, command_or_channel: str, reason: str) -> None:
+        """Ghi log ứng dụng `[BLACKLIST_BLOCK]` và ghi sự kiện Audit MongoDB có giới hạn tần suất 60 giây/user."""
+        uid = str(getattr(user, "id", "") or "unknown")
+        display_name = str(
+            getattr(user, "display_name", "")
+            or getattr(user, "name", "")
+            or f"user:{uid}"
+        )
+        log.info(
+            "[BLACKLIST_BLOCK] user_id=%s command_or_channel=%s reason=%s",
+            uid,
+            command_or_channel,
+            reason[:120],
+        )
+        if not self._should_record_blacklist_audit(uid):
+            return
+        try:
+            await self._audit.record(
+                actor=f"{display_name} (discord:{uid})",
+                actor_type="discord",
+                actor_meta={
+                    "actor_display_name": display_name,
+                    "actor_discord_id": uid,
+                },
+                action="BLACKLIST_REQUEST_BLOCKED",
+                section="discord_permissions",
+                summary=f"Chặn yêu cầu {command_or_channel} từ tài khoản bị blacklist ({uid})",
+                changes=[
+                    {
+                        "field": "blacklist_gate.blocked_target",
+                        "before": "allowed",
+                        "after": command_or_channel,
+                    }
+                ],
+                source="Discord Blacklist Gate",
+                extra_fields={
+                    "user_id": uid,
+                    "command_or_channel": command_or_channel,
+                    "reason": reason,
+                },
+                flush=True,
+            )
+        except Exception as exc:
+            log.warning("Không ghi được Audit Log cho sự kiện [BLACKLIST_BLOCK] (uid=%s): %s", uid, exc)
 
     async def record_status_transition(
         self,
@@ -251,13 +330,34 @@ class MaintenanceGate:
             log.warning("Không ghi được Audit Log cho sự kiện [DND_BLOCK] (uid=%s): %s", uid, exc)
 
     async def check_interaction(self, interaction: discord.Interaction) -> bool:
-        """Cổng kiểm soát toàn cục cho mọi Slash Command & Component Interaction khi `bot_status == 'dnd'`."""
-        if not self.is_dnd:
-            return True
-
+        """Cổng kiểm soát toàn cục ưu tiên cao nhất: Blacklist (O(1) RAM) -> DND bảo trì."""
         user = getattr(interaction, "user", None)
         user_id = getattr(user, "id", None)
         target = _describe_interaction_target(interaction)
+
+        # 1) Kiểm tra Danh sách đen (ưu tiên cao nhất — chạy trước cả DND, ToS và Gemini)
+        ban_reason = self._get_blacklist_reason(user_id)
+        if ban_reason is not None:
+            self._blacklist_blocked_total += 1
+            notice = self.format_blacklist_notice(ban_reason)
+            try:
+                response = getattr(interaction, "response", None)
+                if response is not None and not response.is_done():
+                    await response.send_message(notice, ephemeral=True)
+                else:
+                    followup = getattr(interaction, "followup", None)
+                    if followup is not None:
+                        await followup.send(notice, ephemeral=True)
+            except discord.HTTPException as exc:
+                log.warning("Không gửi được thông báo blacklist (ephemeral) cho user_id=%s: %s", user_id, exc)
+            except Exception as exc:
+                log.warning("Lỗi gửi phản hồi chặn blacklist cho user_id=%s: %s", user_id, exc)
+            await self._log_blacklist_blocked(user, target, ban_reason)
+            return False
+
+        # 2) Kiểm tra chế độ bảo trì Không làm phiền (DND)
+        if not self.is_dnd:
+            return True
 
         if await self.is_admin_user(user_id):
             self._admin_bypass_total += 1
@@ -286,14 +386,36 @@ class MaintenanceGate:
         return False
 
     async def check_message(self, message: discord.Message) -> bool:
-        """Cổng kiểm soát cho sự kiện `on_message` (nhắc tên bot, trả lời tin nhắn bot hoặc phiên chat AI đang mở) khi bật DND."""
-        if not self.is_dnd:
-            return True
-
+        """Cổng kiểm soát cho sự kiện `on_message` theo thứ tự ưu tiên: Blacklist -> DND bảo trì."""
         author = getattr(message, "author", None)
         user_id = getattr(author, "id", None)
         channel_id = getattr(getattr(message, "channel", None), "id", None)
         target = f"channel:{channel_id}" if channel_id else "message:direct"
+
+        # 1) Kiểm tra Danh sách đen trước cả DND và ToS
+        ban_reason = self._get_blacklist_reason(user_id)
+        if ban_reason is not None:
+            self._blacklist_blocked_total += 1
+            notice = self.format_blacklist_notice(ban_reason)
+            try:
+                reply_fn = getattr(message, "reply", None)
+                if callable(reply_fn):
+                    await reply_fn(
+                        notice,
+                        mention_author=False,
+                        allowed_mentions=discord.AllowedMentions.none(),
+                        delete_after=30,
+                    )
+            except discord.HTTPException as exc:
+                log.warning("Không gửi được phản hồi chặn blacklist trong on_message cho user_id=%s: %s", user_id, exc)
+            except Exception as exc:
+                log.warning("Lỗi gửi phản hồi chặn blacklist trong on_message cho user_id=%s: %s", user_id, exc)
+            await self._log_blacklist_blocked(author, target, ban_reason)
+            return False
+
+        # 2) Kiểm tra chế độ bảo trì DND
+        if not self.is_dnd:
+            return True
 
         if await self.is_admin_user(user_id):
             self._admin_bypass_total += 1

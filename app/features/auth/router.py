@@ -67,6 +67,7 @@ def create_auth_router(
     sync_coordinator: WriteBehindSyncCoordinator,
     auth_deps: AuthDependencies,
     login_history_repo: Optional[AdminLoginHistoryRepository] = None,
+    blacklist_repo: Any = None,
 ) -> APIRouter:
     """Tạo router cho `/auth/*`, `/api/me`, `/api/auth/login-history` và `/api/permissions/users*`."""
     router = APIRouter(tags=["auth"])
@@ -322,6 +323,14 @@ def create_auth_router(
     # ------------------------------------------------------------------
     @router.get("/api/me")
     async def api_me(user: dict[str, Any] = Depends(auth_deps.require_user)):
+        discord_id = str(user.get("discord_id") or "").strip()
+        if blacklist_repo is not None and discord_id:
+            ban_reason = blacklist_repo.get_reason_fast(discord_id)
+            if ban_reason is not None:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Tài khoản của bạn đã bị hạn chế sử dụng KiwiKiwi Bot. Lý do: {ban_reason}",
+                )
         return {"user": auth_deps.public_user_payload(user)}
 
     @router.get("/api/auth/login-history")

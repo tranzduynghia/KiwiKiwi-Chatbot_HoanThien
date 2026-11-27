@@ -126,6 +126,7 @@ def create_pages_router(
     get_tunnel_running: Optional[Callable[[], bool]] = None,
     get_bot_status: Optional[Callable[[], str]] = None,
     legal_service: Optional[Any] = None,
+    blacklist_repo: Optional[Any] = None,
 ) -> APIRouter:
     """Tạo router giao diện HTML cho trang gốc, đăng nhập, quản trị Dashboard và 4 trang Pháp lý công khai."""
     router = APIRouter(tags=["pages"])
@@ -269,5 +270,30 @@ def create_pages_router(
     @router.get("/guidelines", response_class=HTMLResponse)
     async def public_guidelines_page(request: Request):
         return await _render_public_legal(request, "guidelines")
+
+    @router.get("/me", response_class=HTMLResponse)
+    async def user_portal_page(request: Request):
+        user = await auth_deps.get_current_user(request)
+        if not user:
+            return RedirectResponse(url="/login", status_code=302)
+        discord_id = str(user.get("discord_id") or "").strip()
+        if blacklist_repo is not None and discord_id:
+            ban_reason = blacklist_repo.get_reason_fast(discord_id)
+            if ban_reason is not None:
+                from html import escape as _html_escape
+
+                safe_reason = _html_escape(ban_reason)
+                return HTMLResponse(
+                    content=(
+                        "<!DOCTYPE html><html lang='vi'><head><meta charset='UTF-8'>"
+                        "<title>Tài khoản bị hạn chế</title></head>"
+                        "<body style='font-family:system-ui,sans-serif;padding:2rem;max-width:600px;margin:auto;'>"
+                        "<h1>🚫 Tài khoản của bạn đã bị hạn chế sử dụng KiwiKiwi Bot.</h1>"
+                        f"<p><strong>Lý do:</strong> {safe_reason}</p>"
+                        "</body></html>"
+                    ),
+                    status_code=403,
+                )
+        return RedirectResponse(url="/", status_code=302)
 
     return router

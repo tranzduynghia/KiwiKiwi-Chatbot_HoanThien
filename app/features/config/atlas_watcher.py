@@ -125,6 +125,7 @@ class AtlasConfigWatcher:
         cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
         warp_proxy: Optional[Any] = None,
         maintenance_gate: Optional[Any] = None,
+        blacklist_repo: Optional[Any] = None,
         apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
         poll_interval_seconds: float = DEFAULT_ATLAS_WATCH_INTERVAL_SECONDS,
     ):
@@ -134,6 +135,7 @@ class AtlasConfigWatcher:
         self._cloudflare_tunnel = cloudflare_tunnel
         self._warp_proxy = warp_proxy
         self._maintenance_gate = maintenance_gate
+        self._blacklist_repo = blacklist_repo
         self._apply_presence_fn = apply_presence_fn
         self.poll_interval_seconds = max(0.2, float(poll_interval_seconds))
 
@@ -169,6 +171,8 @@ class AtlasConfigWatcher:
         async with self._poll_lock:
             if not self._config_repo.connected:
                 return {"changed": False, "skipped": True, "reason": "db_disconnected"}
+            if self._blacklist_repo is not None and getattr(self._blacklist_repo, "connected", False):
+                await self._blacklist_repo.reload_cache()
             if self._config_repo.pending_count > 0:
                 # Không ghi đè RAM khi Dashboard vừa lưu cấu hình mới và đang chờ xả lên Atlas
                 return {"changed": False, "skipped": True, "reason": "local_pending_write"}

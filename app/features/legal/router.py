@@ -5,10 +5,24 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from urllib.parse import urlparse
+
 from app.core.timezone import format_timezone_badge, resolve_request_timezone
 from app.features.auth.dependencies import AuthDependencies
-from app.features.legal.schemas import AcceptTosPayload, UpdateLegalDocumentPayload
+from app.features.legal.schemas import AcceptTosPayload, UpdateDiscordPromptPayload, UpdateLegalDocumentPayload
 from app.features.legal.service import LegalService
+
+
+def _validate_csrf_origin(request: Request) -> None:
+    """Xác thực header `Origin` khớp với `Host` để chống giả mạo yêu cầu xuyên nguồn (CSRF)."""
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return
+    parsed = urlparse(origin)
+    origin_host = (parsed.netloc or "").strip().lower()
+    req_host = (request.headers.get("host") or request.url.netloc or "").strip().lower()
+    if origin_host and req_host and origin_host != req_host:
+        raise HTTPException(status_code=403, detail="Origin không hợp lệ (bảo vệ CSRF).")
 
 
 def _web_user_consent_key(user: dict[str, Any]) -> tuple[str, str]:
@@ -54,6 +68,7 @@ def create_legal_router(
         request: Request,
         admin: dict[str, Any] = Depends(auth_deps.require_admin),
     ):
+        _validate_csrf_origin(request)
         tz_name, tz_info = resolve_request_timezone(request.headers)
         actor, actor_type = auth_deps.actor_label(admin)
         try:
@@ -78,6 +93,31 @@ def create_legal_router(
             "timezone_label": format_timezone_badge(tz_name, tz_info),
         }
 
+    @router.put("/discord-prompt")
+    async def api_update_discord_prompt(
+        payload: UpdateDiscordPromptPayload,
+        request: Request,
+        admin: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        _validate_csrf_origin(request)
+        actor, actor_type = auth_deps.actor_label(admin)
+        try:
+            updated = await legal_service.update_discord_prompt_config(
+                welcome_template=payload.discord_tos_welcome_template,
+                update_template=payload.discord_tos_update_template,
+                button_label=payload.discord_tos_button_label,
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
+                client_changes=payload.changes,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            "discord_prompt": updated,
+        }
+
     @router.get("/acceptances")
     async def api_list_tos_acceptances(
         request: Request,
@@ -98,6 +138,28 @@ def create_legal_router(
             **result,
             "timezone": tz_name,
             "timezone_label": format_timezone_badge(tz_name, tz_info),
+        }
+
+    @router.post("/acceptances/{discord_user_id}/revoke")
+    async def api_revoke_tos_acceptance(
+        discord_user_id: str,
+        request: Request,
+        admin: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        _validate_csrf_origin(request)
+        actor, actor_type = auth_deps.actor_label(admin)
+        try:
+            result = await legal_service.revoke_user_consent(
+                discord_user_id=discord_user_id,
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=auth_deps.actor_meta(admin),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {
+            "ok": True,
+            **result,
         }
 
     @router.get("/consent-status")

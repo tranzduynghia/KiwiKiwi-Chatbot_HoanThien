@@ -100,13 +100,31 @@ DEFAULT_LEGAL_DOCS: dict[str, dict[str, str]] = {
 
 
 DEFAULT_TOS_UPDATED_AT: Optional[str] = None
+DEFAULT_DISCORD_TOS_WELCOME_TEMPLATE = (
+    "📜 **Chào mừng bạn đến với KiwiKiwi Bot!**\n"
+    "Trước khi sử dụng lệnh `/ask` hoặc bắt đầu phiên AI, vui lòng đọc và đồng ý Điều khoản phiên bản `{version}`:\n"
+    "• Điều khoản Dịch vụ: {base_url}/terms\n"
+    "• Chính sách Quyền riêng tư: {base_url}/policies\n"
+    "• Nguyên tắc Cộng đồng: {base_url}/guidelines"
+)
+DEFAULT_DISCORD_TOS_UPDATE_TEMPLATE = (
+    "📜 **Điều khoản Dịch vụ đã được cập nhật lên phiên bản `{version}`** *(phiên bản cũ của bạn: `{previous_version}`)*\n"
+    "Vui lòng xem lại và nhấn nút xác nhận trước khi tiếp tục sử dụng `/ask` hoặc phiên AI:\n"
+    "• Điều khoản Dịch vụ: {base_url}/terms\n"
+    "• Chính sách Quyền riêng tư: {base_url}/policies\n"
+    "• Nguyên tắc Cộng đồng: {base_url}/guidelines"
+)
+DEFAULT_DISCORD_TOS_BUTTON_LABEL = "Tôi đồng ý (Accept Terms)"
 
 
 def build_default_legal_config() -> dict[str, Any]:
-    """Khởi tạo siêu dữ liệu nhánh `legal` gọn nhẹ trong `bot_config` (chỉ giữ phiên bản & mốc cập nhật tĩnh, KHÔNG sinh timestamp động khi đọc)."""
+    """Khởi tạo siêu dữ liệu nhánh `legal` gọn nhẹ trong `bot_config` (chỉ giữ phiên bản, mẫu thông báo Discord & mốc cập nhật tĩnh)."""
     return {
         "active_tos_version": DEFAULT_ACTIVE_TOS_VERSION,
         "tos_updated_at": DEFAULT_TOS_UPDATED_AT,
+        "discord_tos_welcome_template": DEFAULT_DISCORD_TOS_WELCOME_TEMPLATE,
+        "discord_tos_update_template": DEFAULT_DISCORD_TOS_UPDATE_TEMPLATE,
+        "discord_tos_button_label": DEFAULT_DISCORD_TOS_BUTTON_LABEL,
     }
 
 

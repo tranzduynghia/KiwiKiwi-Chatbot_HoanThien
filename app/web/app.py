@@ -210,6 +210,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
                 else str(container.config_repo.presence_cfg().get("status", "online"))
             ),
             legal_service=getattr(container, "legal_service", None),
+            blacklist_repo=getattr(container, "blacklist_repo", None),
         )
     )
     app.include_router(
@@ -229,6 +230,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             sync_coordinator=container.sync_coordinator,
             auth_deps=container.auth_deps,
             login_history_repo=getattr(container, "login_history_repo", None),
+            blacklist_repo=getattr(container, "blacklist_repo", None),
         )
     )
     if getattr(container, "legal_service", None) is not None:
@@ -291,6 +293,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             permission_service=container.permission_service,
             sync_coordinator=container.sync_coordinator,
             auth_deps=container.auth_deps,
+            blacklist_service=getattr(container, "blacklist_service", None),
         )
     )
     app.include_router(

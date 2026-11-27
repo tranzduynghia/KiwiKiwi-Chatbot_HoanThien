@@ -209,6 +209,46 @@ class TosAcceptanceRepository:
                 log.warning("Không lưu được tos_acceptances lên MongoDB (uid=%s): %s", uid, exc)
         return doc
 
+    async def revoke_acceptance(self, discord_user_id: str | int) -> dict[str, Any]:
+        """Thu hồi bản ghi chấp thuận ToS của 1 người dùng trên MongoDB và xóa ngay khỏi bộ đệm RAM."""
+        uid = str(discord_user_id or "").strip()[:64]
+        if not uid:
+            raise ValueError("Discord User ID không hợp lệ.")
+
+        previous_version: Optional[str] = self._version_cache.pop(uid, None)
+        mem_doc = self._memory_records.pop(uid, None)
+        previous_username: Optional[str] = (
+            str(mem_doc.get("discord_username") or "").strip() if isinstance(mem_doc, dict) else None
+        )
+        if not previous_version and isinstance(mem_doc, dict):
+            previous_version = str(mem_doc.get("tos_accepted_version") or "").strip() or None
+
+        deleted_db = False
+        if self.connected:
+            try:
+                existing = await self.collection.find_one(
+                    {"discord_user_id": uid},
+                    {"_id": 0, "tos_accepted_version": 1, "discord_username": 1},
+                )
+                if existing:
+                    if not previous_version:
+                        previous_version = str(existing.get("tos_accepted_version") or "").strip() or None
+                    if not previous_username:
+                        previous_username = str(existing.get("discord_username") or "").strip() or None
+                res = await self.collection.delete_one({"discord_user_id": uid})
+                deleted_db = bool(getattr(res, "deleted_count", 0))
+            except Exception as exc:
+                log.warning("Không xóa được tos_acceptances trên MongoDB (uid=%s): %s", uid, exc)
+                raise
+
+        revoked = bool(deleted_db or previous_version or mem_doc is not None)
+        return {
+            "discord_user_id": uid,
+            "revoked": revoked,
+            "previous_version": previous_version,
+            "discord_username": previous_username,
+        }
+
     async def list_acceptances(
         self,
         *,

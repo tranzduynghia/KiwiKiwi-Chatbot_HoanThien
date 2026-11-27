@@ -160,4 +160,81 @@
       </div>
     </div>
   </div>
+
+  {# Bảng Danh sách đen (Blacklist Discord ID) kèm lý do cấm & đồng bộ nóng bộ đệm RAM #}
+  <div class="card p-5 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="font-medium text-sm text-rose-400">🚫 Danh sách đen (Blacklist Discord ID)</h3>
+        <p class="text-[11px] text-[#8b95a7] mt-0.5">
+          Chặn ưu tiên cao nhất mọi lệnh <code>/ask</code>, nút bấm, phiên AI và <code>/me</code> kèm hiển thị lý do cấm. Không thể cấm tài khoản Admin toàn quyền.
+        </p>
+      </div>
+      <span
+        id="blacklist-timezone-badge"
+        class="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/30"
+      >
+        🕒 Múi giờ IP truy cập: Đang xác định...
+      </span>
+    </div>
+
+    {% if user.is_admin %}
+    <form id="form-add-blacklist" class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-end bg-slate-950/70 p-3.5 rounded-xl border border-slate-800">
+      <div class="sm:col-span-3">
+        <label for="bl-uid" class="block text-[11px] text-slate-400 mb-1">Discord User ID (17–20 số)</label>
+        <input id="bl-uid" type="text" required pattern="^\d{17,20}$" placeholder="123456789012345678" class="inp font-mono text-xs" />
+      </div>
+      <div class="sm:col-span-7">
+        <label for="bl-reason" class="block text-[11px] text-slate-400 mb-1">Lý do cấm sử dụng (bắt buộc, tối đa 300 ký tự)</label>
+        <input id="bl-reason" type="text" required maxlength="300" placeholder="VD: Spam lệnh liên tục / vi phạm chính sách cộng đồng" class="inp text-xs" />
+      </div>
+      <div class="sm:col-span-2">
+        <button type="submit" id="btn-submit-blacklist" class="btn-primary w-full whitespace-nowrap text-xs">🚫 Thêm / Cập nhật</button>
+      </div>
+    </form>
+    {% endif %}
+
+    <div class="flex flex-wrap items-center justify-between gap-2.5">
+      <div class="flex items-center gap-2 flex-1 min-w-[220px] max-w-md">
+        <input
+          id="blacklist-search"
+          type="text"
+          placeholder="Tìm theo Discord User ID, lý do cấm hoặc người thực hiện..."
+          class="inp text-xs"
+        />
+        <button type="button" id="btn-search-blacklist" class="btn-ghost text-xs shrink-0">🔍 Tìm</button>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="blacklist-count" class="text-xs text-[#8b95a7] font-mono">0 tài khoản bị chặn</span>
+        <button type="button" id="btn-refresh-blacklist" class="btn-ghost text-xs">↻ Làm mới</button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-slate-800 text-slate-400">
+            <th class="py-2.5 pr-3 whitespace-nowrap">Discord User ID</th>
+            <th class="py-2.5 pr-3">Lý do cấm</th>
+            <th class="py-2.5 pr-3 whitespace-nowrap">Người thực hiện</th>
+            <th class="py-2.5 pr-3 whitespace-nowrap">Thời gian (HH:mm:ss DD/MM/YYYY)</th>
+            <th class="py-2.5 text-right whitespace-nowrap">Thao tác</th>
+          </tr>
+        </thead>
+        <tbody id="blacklist-tbody" class="divide-y divide-slate-800/70">
+          <tr>
+            <td colspan="5" class="py-6 text-center text-slate-500">Đang tải danh sách đen...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+      <span id="blacklist-page-info" class="text-[#8b95a7] font-mono">Trang 1</span>
+      <div class="flex items-center gap-2">
+        <button type="button" id="btn-blacklist-prev" class="btn-ghost text-xs disabled:opacity-40" disabled>← Trang trước</button>
+        <button type="button" id="btn-blacklist-next" class="btn-ghost text-xs disabled:opacity-40" disabled>Trang sau →</button>
+      </div>
+    </div>
+  </div>
 </section>

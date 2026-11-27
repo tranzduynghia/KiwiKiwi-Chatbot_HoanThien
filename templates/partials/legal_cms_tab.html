@@ -209,11 +209,110 @@
     {% endif %}
   </div>
 
-  {# Phần 2: Danh sách chấp thuận ToS (phân trang cursor + tìm kiếm + múi giờ IP truy cập) #}
+  {# Phần 2: Tin nhắn yêu cầu đồng ý ToS trên Discord (Discord Consent Prompt) #}
+  <div class="card p-5 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-3">
+      <div>
+        <h3 class="font-semibold text-sm text-rose-400">2. Tin nhắn yêu cầu đồng ý ToS trên Discord (Discord Consent Prompt)</h3>
+        <p class="text-[11px] text-[#8b95a7] mt-0.5">
+          Tùy chỉnh thông báo <code>ephemeral</code> gửi trên Discord khi người dùng dùng <code>/ask</code> lần đầu hoặc khi nâng phiên bản ToS. Hỗ trợ biến:
+          <code>{version}</code>, <code>{previous_version}</code>, <code>{base_url}</code>.
+        </p>
+      </div>
+      <div class="inline-flex items-center p-0.5 rounded-lg bg-[var(--bg-input)] border border-[var(--border-subtle)]" role="group" aria-label="Chế độ xem trước tin nhắn Discord">
+        <button type="button" id="btn-discord-preview-welcome" class="ox-theme-btn" aria-pressed="true">Lần đầu</button>
+        <button type="button" id="btn-discord-preview-update" class="ox-theme-btn" aria-pressed="false">Cập nhật phiên bản</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
+      <div class="lg:col-span-7 space-y-3">
+        <div>
+          <label for="legal-discord-welcome-tpl" class="block text-xs text-[#8b95a7] mb-1">
+            Tin nhắn lần đầu (First-Time Consent Message)
+          </label>
+          <textarea
+            id="legal-discord-welcome-tpl"
+            rows="5"
+            maxlength="1500"
+            class="inp font-mono text-xs leading-relaxed"
+            placeholder="Nhập mẫu tin nhắn yêu cầu đồng ý lần đầu..."
+            {{ '' if user.is_admin else 'disabled' }}
+          ></textarea>
+        </div>
+
+        <div>
+          <label for="legal-discord-update-tpl" class="block text-xs text-[#8b95a7] mb-1">
+            Tin nhắn khi nâng phiên bản (Updated-Version Re-Consent Message)
+          </label>
+          <textarea
+            id="legal-discord-update-tpl"
+            rows="5"
+            maxlength="1500"
+            class="inp font-mono text-xs leading-relaxed"
+            placeholder="Nhập mẫu tin nhắn yêu cầu đồng ý lại khi đổi phiên bản ToS..."
+            {{ '' if user.is_admin else 'disabled' }}
+          ></textarea>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <label for="legal-discord-btn-label" class="block text-xs text-[#8b95a7]">
+              Nhãn nút đồng ý (Accept Button Label)
+            </label>
+            <span class="text-[10px] text-[#5e6778]">Tối đa 60 ký tự</span>
+          </div>
+          <input
+            id="legal-discord-btn-label"
+            type="text"
+            maxlength="60"
+            class="inp text-xs"
+            placeholder="Tôi đồng ý (Accept Terms)"
+            {{ '' if user.is_admin else 'disabled' }}
+          />
+        </div>
+
+        {% if user.is_admin %}
+        <div class="flex items-center justify-end pt-1">
+          <button type="button" id="btn-save-discord-prompt" class="btn-primary text-xs">
+            💾 Lưu mẫu thông báo Discord
+          </button>
+        </div>
+        {% endif %}
+      </div>
+
+      {# Khung xem trước trực tiếp tin nhắn Discord ephemeral #}
+      <div class="lg:col-span-5 ox-diff-before-box rounded-xl p-4 space-y-3">
+        <div class="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-2">
+          <span class="text-xs font-semibold ox-text-primary">👁️ Xem trước trên Discord</span>
+          <span id="legal-discord-preview-mode-badge" class="ox-badge-neutral text-[10px] font-mono px-2 py-0.5 rounded-full">
+            Lần đầu
+          </span>
+        </div>
+        <div
+          id="legal-discord-preview-text"
+          class="text-xs ox-text-primary whitespace-pre-wrap break-words leading-relaxed font-sans"
+        >—</div>
+        <div class="pt-1">
+          <span
+            id="legal-discord-preview-btn"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-emerald-600 text-white shadow-sm select-none"
+          >
+            ✅ Tôi đồng ý (Accept Terms)
+          </span>
+        </div>
+        <p class="text-[10px] ox-text-secondary">
+          Chỉ hiển thị riêng cho người dùng (<code>ephemeral=True</code>) · Đồng bộ nóng không cần khởi động lại bot.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  {# Phần 3: Danh sách chấp thuận ToS (phân trang cursor + tìm kiếm + múi giờ IP + nút Thu hồi) #}
   <div class="card p-5 space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h3 class="font-semibold text-sm text-rose-400">2. Danh sách chấp thuận ToS (Acceptance Directory)</h3>
+        <h3 class="font-semibold text-sm text-rose-400">3. Danh sách chấp thuận ToS (Acceptance Directory)</h3>
         <p class="text-[11px] text-[#8b95a7] mt-0.5">Toàn bộ người dùng đã bấm đồng ý Điều khoản qua Discord hoặc Web</p>
       </div>
       <span
@@ -248,12 +347,13 @@
             <th class="py-2.5 pr-3">Tên hiển thị / Username</th>
             <th class="py-2.5 pr-3">Phiên bản đã đồng ý</th>
             <th class="py-2.5 pr-3">Nguồn</th>
-            <th class="py-2.5 text-right">Thời gian đồng ý (HH:mm:ss DD/MM/YYYY)</th>
+            <th class="py-2.5 pr-3 text-right">Thời gian đồng ý (HH:mm:ss DD/MM/YYYY)</th>
+            <th class="py-2.5 text-right whitespace-nowrap">Thao tác</th>
           </tr>
         </thead>
         <tbody id="tos-accept-tbody" class="divide-y divide-[#1e232e]/80">
           <tr>
-            <td colspan="5" class="py-6 text-center text-[#8b95a7]">Đang tải danh sách chấp thuận...</td>
+            <td colspan="6" class="py-6 text-center text-[#8b95a7]">Đang tải danh sách chấp thuận...</td>
           </tr>
         </tbody>
       </table>

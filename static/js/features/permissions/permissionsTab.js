@@ -29,6 +29,74 @@ export function createPermissionsTabController({ isAdmin }) {
   let loginHistPrev = null;
   let loginHistStatus = "all";
 
+  let blacklistCursor = "0";
+  let blacklistNext = null;
+  let blacklistPrev = null;
+  let blacklistSearch = "";
+
+  async function loadBlacklist(cursor = "0") {
+    const tbody = document.getElementById("blacklist-tbody");
+    try {
+      const tz = detectBrowserTimezone();
+      const params = new URLSearchParams({
+        limit: "15",
+        cursor: String(cursor || "0"),
+      });
+      if (blacklistSearch) params.set("q", blacklistSearch);
+      if (tz) params.set("tz", tz);
+      const data = await apiRequest(`/api/permissions/blacklist?${params.toString()}`);
+
+      blacklistCursor = data.cursor || "0";
+      blacklistNext = data.next_cursor;
+      blacklistPrev = data.prev_cursor;
+
+      const tzBadge = document.getElementById("blacklist-timezone-badge");
+      if (tzBadge && data.timezone_label) {
+        tzBadge.textContent = `🕒 Múi giờ IP truy cập: ${data.timezone_label}`;
+      }
+      const countEl = document.getElementById("blacklist-count");
+      if (countEl) countEl.textContent = `${data.total || 0} tài khoản bị chặn`;
+
+      const pageNum = Math.floor(Number(blacklistCursor || 0) / (data.limit || 15)) + 1;
+      const pageInfo = document.getElementById("blacklist-page-info");
+      if (pageInfo) pageInfo.textContent = `Trang ${pageNum} · Hiển thị ${data.items.length}/${data.total || 0}`;
+
+      const prevBtn = document.getElementById("btn-blacklist-prev");
+      const nextBtn = document.getElementById("btn-blacklist-next");
+      if (prevBtn) prevBtn.disabled = blacklistPrev === null || blacklistPrev === undefined;
+      if (nextBtn) nextBtn.disabled = !data.has_more;
+
+      if (!tbody) return;
+      if (!data.items.length) {
+        tbody.innerHTML =
+          '<tr><td colspan="5" class="py-6 text-center ox-text-secondary">Danh sách đen hiện đang trống.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.items
+        .map((item) => {
+          const actions = isAdmin
+            ? `<button type="button" data-action="edit-blacklist" data-uid="${escapeHtml(item.discord_user_id)}" data-reason="${escapeHtml(item.reason)}" class="btn-ghost text-[11px] px-2 py-1">✏️ Sửa lý do</button> ` +
+              `<button type="button" data-action="unban-blacklist" data-uid="${escapeHtml(item.discord_user_id)}" data-reason="${escapeHtml(item.reason)}" class="btn-danger text-[11px] px-2 py-1">Gỡ cấm</button>`
+            : "—";
+          return `
+            <tr class="ox-table-row">
+              <td class="py-2.5 pr-3 font-mono ox-text-primary whitespace-nowrap">${escapeHtml(item.discord_user_id)}</td>
+              <td class="py-2.5 pr-3 ox-text-primary break-words max-w-md">${escapeHtml(item.reason)}</td>
+              <td class="py-2.5 pr-3 ox-text-secondary whitespace-nowrap">${escapeHtml(item.banned_by || "admin")}</td>
+              <td class="py-2.5 pr-3 font-mono ox-text-secondary whitespace-nowrap">${escapeHtml(item.created_at_formatted || "—")}</td>
+              <td class="py-2.5 text-right whitespace-nowrap space-x-1">${actions}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    } catch (err) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+  }
+
   async function loadLoginHistory(cursor = "0") {
     const tbody = document.getElementById("login-history-tbody");
     try {
@@ -168,7 +236,7 @@ export function createPermissionsTabController({ isAdmin }) {
             .join("")
         : '<tr><td colspan="4" class="py-3 text-slate-500 text-center">Chưa có tài khoản mật khẩu nào.</td></tr>';
 
-      await loadLoginHistory("0");
+      await Promise.all([loadLoginHistory("0"), loadBlacklist("0")]);
     } catch (err) {
       showToast(err.message, false);
     }
@@ -436,7 +504,149 @@ export function createPermissionsTabController({ isAdmin }) {
         if (loginHistNext !== null && loginHistNext !== undefined) loadLoginHistory(loginHistNext);
       });
     }
+
+    // Quản lý Danh sách đen (Blacklist Discord ID): thêm/sửa, gỡ cấm, tìm kiếm & phân trang cursor
+    const blForm = document.getElementById("form-add-blacklist");
+    if (blForm) {
+      blForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const uid = (document.getElementById("bl-uid")?.value || "").trim();
+        const reason = (document.getElementById("bl-reason")?.value || "").trim();
+        if (!/^\d{17,20}$/.test(uid)) {
+          showToast("Discord User ID không hợp lệ (phải gồm 17–20 chữ số).", false);
+          return;
+        }
+        if (!reason) {
+          showToast("Vui lòng nhập lý do cấm sử dụng.", false);
+          return;
+        }
+        await showConfirmModal({
+          title: `Xác nhận thêm Discord ID ${uid} vào danh sách đen`,
+          subtitle: "Người dùng sẽ bị chặn tức thì trên mọi lệnh /ask, nút bấm, phiên AI và /me",
+          warning: `Tài khoản ${uid} sẽ nhận thông báo bị hạn chế kèm lý do: "${reason}"`,
+          changes: [
+            {
+              key: `discord_blacklist.${uid}.reason`,
+              label: `Lý do cấm (${uid})`,
+              before: "(Chưa bị cấm)",
+              after: reason,
+              isHighImpact: true,
+            },
+          ],
+          confirmLabel: "Xác nhận cấm",
+          confirmTone: "danger",
+          onConfirm: async (changes) => {
+            await apiRequest("/api/permissions/blacklist", {
+              method: "POST",
+              body: JSON.stringify({ discord_user_id: uid, reason, changes }),
+            });
+            blForm.reset();
+            showToast(`🚫 Đã thêm Discord ID ${uid} vào danh sách đen.`);
+            await loadBlacklist("0");
+          },
+        });
+      });
+    }
+
+    const blTbody = document.getElementById("blacklist-tbody");
+    if (blTbody) {
+      blTbody.addEventListener("click", async (event) => {
+        const btn = event.target.closest("button[data-action]");
+        if (!btn) return;
+        const uid = btn.dataset.uid || "";
+        const prevReason = btn.dataset.reason || "";
+        if (!uid) return;
+
+        if (btn.dataset.action === "edit-blacklist") {
+          await showConfirmModal({
+            title: `Sửa lý do cấm cho Discord ID ${uid}`,
+            subtitle: "Lý do mới sẽ hiển thị ngay cho người dùng khi bị chặn và được ghi Audit Log",
+            inputField: {
+              label: "Lý do cấm mới (tối đa 300 ký tự)",
+              type: "text",
+              placeholder: "Nhập lý do cấm mới...",
+              initialValue: prevReason,
+              minLength: 1,
+              minLengthMessage: "Vui lòng nhập lý do cấm sử dụng.",
+              fieldKey: `discord_blacklist.${uid}.reason`,
+              beforeValue: prevReason,
+            },
+            changes: [
+              {
+                key: "discord_user_id",
+                label: "Discord User ID",
+                before: uid,
+                after: uid,
+              },
+            ],
+            confirmLabel: "Cập nhật lý do",
+            onConfirm: async (changes, _entries, newReason) => {
+              await apiRequest("/api/permissions/blacklist", {
+                method: "POST",
+                body: JSON.stringify({ discord_user_id: uid, reason: newReason, changes }),
+              });
+              showToast(`✏️ Đã cập nhật lý do cấm cho ${uid}.`);
+              await loadBlacklist(blacklistCursor);
+            },
+          });
+        } else if (btn.dataset.action === "unban-blacklist") {
+          await showConfirmModal({
+            title: `Xác nhận gỡ cấm Discord ID ${uid}`,
+            subtitle: "Tài khoản này sẽ được mở khóa tức thì và có thể sử dụng lại KiwiKiwi Bot",
+            warning: `Gỡ cấm ${uid} khỏi danh sách đen sẽ có hiệu lực ngay lập tức và được ghi vào Audit Log.`,
+            changes: [
+              {
+                key: `discord_blacklist.${uid}.reason`,
+                label: `Trạng thái cấm (${uid})`,
+                before: prevReason || "(Đang bị cấm)",
+                after: "(Đã gỡ cấm)",
+              },
+            ],
+            confirmLabel: "Xác nhận gỡ cấm",
+            confirmTone: "success",
+            onConfirm: async () => {
+              await apiRequest(`/api/permissions/blacklist/${encodeURIComponent(uid)}`, {
+                method: "DELETE",
+              });
+              showToast(`✅ Đã gỡ cấm Discord ID ${uid}.`);
+              await loadBlacklist(blacklistCursor);
+            },
+          });
+        }
+      });
+    }
+
+    const blSearchInput = document.getElementById("blacklist-search");
+    const blSearchBtn = document.getElementById("btn-search-blacklist");
+    const blRefreshBtn = document.getElementById("btn-refresh-blacklist");
+    const triggerBlSearch = () => {
+      blacklistSearch = blSearchInput ? blSearchInput.value.trim() : "";
+      loadBlacklist("0");
+    };
+    if (blSearchBtn) blSearchBtn.addEventListener("click", triggerBlSearch);
+    if (blSearchInput) {
+      blSearchInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          triggerBlSearch();
+        }
+      });
+    }
+    if (blRefreshBtn) blRefreshBtn.addEventListener("click", () => loadBlacklist(blacklistCursor));
+
+    const blPrevBtn = document.getElementById("btn-blacklist-prev");
+    const blNextBtn = document.getElementById("btn-blacklist-next");
+    if (blPrevBtn) {
+      blPrevBtn.addEventListener("click", () => {
+        if (blacklistPrev !== null && blacklistPrev !== undefined) loadBlacklist(blacklistPrev);
+      });
+    }
+    if (blNextBtn) {
+      blNextBtn.addEventListener("click", () => {
+        if (blacklistNext !== null && blacklistNext !== undefined) loadBlacklist(blacklistNext);
+      });
+    }
   }
 
-  return { loadPermissions, loadLoginHistory, bindEvents };
+  return { loadPermissions, loadLoginHistory, loadBlacklist, bindEvents };
 }

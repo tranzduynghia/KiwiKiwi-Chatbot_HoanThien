@@ -121,10 +121,10 @@ class FakeCollection:
     async def estimated_document_count(self) -> int:
         return len(self.docs)
 
-    async def find_one(self, flt: dict[str, Any]) -> Optional[dict[str, Any]]:
+    async def find_one(self, flt: dict[str, Any], projection: Optional[dict[str, int]] = None) -> Optional[dict[str, Any]]:
         for doc in self.docs:
             if self._matches(doc, flt):
-                return copy.deepcopy(doc)
+                return self._apply_projection(doc, projection)
         return None
 
     def find(self, flt: dict[str, Any], projection: Optional[dict[str, int]] = None) -> FakeCursor:

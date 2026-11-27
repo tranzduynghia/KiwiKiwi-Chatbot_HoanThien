@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+from typing import Any, Optional
 
 import discord
 
-from app.features.legal.defaults import PUBLIC_SITE_ORIGIN
+from app.features.legal.defaults import (
+    DEFAULT_DISCORD_TOS_BUTTON_LABEL,
+    DEFAULT_DISCORD_TOS_UPDATE_TEMPLATE,
+    DEFAULT_DISCORD_TOS_WELCOME_TEMPLATE,
+    PUBLIC_SITE_ORIGIN,
+)
 from app.features.legal.service import LegalService
 
 log = logging.getLogger("gemini-bot.tos")
@@ -14,6 +20,7 @@ log = logging.getLogger("gemini-bot.tos")
 TOS_ACCEPT_BUTTON_CUSTOM_ID = "kiwi_tos_accept_btn"
 TOS_CONSENT_VIEW_TIMEOUT_SECONDS = 60.0
 TOS_GATED_COMMANDS = frozenset({"ask", "refresh", "session"})
+_PLACEHOLDER_RE = re.compile(r"\{(version|previous_version|base_url)\}")
 
 
 class TosConsentView(discord.ui.View):
@@ -25,15 +32,18 @@ class TosConsentView(discord.ui.View):
         legal_service: LegalService,
         expected_user_id: int,
         active_version: str,
+        button_label: Optional[str] = None,
         timeout: float = TOS_CONSENT_VIEW_TIMEOUT_SECONDS,
     ) -> None:
         super().__init__(timeout=timeout)
         self._legal_service = legal_service
         self._expected_user_id = int(expected_user_id)
         self._active_version = active_version
+        clean_label = " ".join(str(button_label or "").split()).strip()[:60] or DEFAULT_DISCORD_TOS_BUTTON_LABEL
+        self.accept_button.label = clean_label
 
     @discord.ui.button(
-        label="Tôi đồng ý (Accept Terms)",
+        label=DEFAULT_DISCORD_TOS_BUTTON_LABEL,
         style=discord.ButtonStyle.success,
         emoji="✅",
         custom_id=TOS_ACCEPT_BUTTON_CUSTOM_ID,
@@ -83,30 +93,28 @@ class TosConsentView(discord.ui.View):
         self.stop()
 
 
-def build_tos_prompt_message(*, active_version: str, is_update: bool, accepted_version: str | None = None) -> str:
-    """Soạn nội dung thông báo yêu cầu chấp thuận Điều khoản (lần đầu hoặc khi nâng phiên bản ToS)."""
-    terms_url = f"{PUBLIC_SITE_ORIGIN}/terms"
-    policies_url = f"{PUBLIC_SITE_ORIGIN}/policies"
-    guidelines_url = f"{PUBLIC_SITE_ORIGIN}/guidelines"
-
-    if is_update:
-        header = (
-            f"📜 **Điều khoản Dịch vụ đã được cập nhật lên phiên bản `{active_version}`**"
-            + (f" *(phiên bản cũ của bạn: `{accepted_version}`)*" if accepted_version else "")
-            + "\nVui lòng xem lại và nhấn **Tôi đồng ý** trước khi tiếp tục sử dụng `/ask` hoặc phiên AI:"
-        )
-    else:
-        header = (
-            f"📜 **Chào mừng bạn đến với KiwiKiwi Bot!**\n"
-            f"Trước khi sử dụng lệnh `/ask` hoặc bắt đầu phiên AI, vui lòng đọc và đồng ý Điều khoản phiên bản `{active_version}`:"
-        )
-
-    return (
-        f"{header}\n"
-        f"• Điều khoản Dịch vụ: <{terms_url}>\n"
-        f"• Chính sách Quyền riêng tư: <{policies_url}>\n"
-        f"• Nguyên tắc Cộng đồng: <{guidelines_url}>"
+def build_tos_prompt_message(
+    *,
+    active_version: str,
+    is_update: bool,
+    accepted_version: str | None = None,
+    welcome_template: Optional[str] = None,
+    update_template: Optional[str] = None,
+    base_url: str = PUBLIC_SITE_ORIGIN,
+) -> str:
+    """Soạn nội dung thông báo yêu cầu chấp thuận Điều khoản từ mẫu cấu hình động (thay thế an toàn `{version}`, `{previous_version}`, `{base_url}`)."""
+    raw_template = (
+        str(update_template or "").strip() or DEFAULT_DISCORD_TOS_UPDATE_TEMPLATE
+        if is_update
+        else str(welcome_template or "").strip() or DEFAULT_DISCORD_TOS_WELCOME_TEMPLATE
     )
+    replacements = {
+        "version": str(active_version or "v1.0").strip(),
+        "previous_version": str(accepted_version or "cũ").strip(),
+        "base_url": str(base_url or PUBLIC_SITE_ORIGIN).rstrip("/"),
+    }
+    rendered = _PLACEHOLDER_RE.sub(lambda m: replacements[m.group(1)], raw_template)
+    return rendered[:1950]
 
 
 class TosConsentGate:
@@ -114,6 +122,31 @@ class TosConsentGate:
 
     def __init__(self, legal_service: LegalService) -> None:
         self._legal_service = legal_service
+
+    def _build_prompt_and_view(
+        self,
+        *,
+        user_id: int | str,
+        status: dict[str, Any],
+    ) -> tuple[str, TosConsentView]:
+        prompt_cfg = self._legal_service.get_discord_prompt_config()
+        active_ver = status["active_tos_version"]
+        prompt_text = build_tos_prompt_message(
+            active_version=active_ver,
+            is_update=bool(status["is_update"]),
+            accepted_version=status.get("accepted_version"),
+            welcome_template=prompt_cfg.get("discord_tos_welcome_template"),
+            update_template=prompt_cfg.get("discord_tos_update_template"),
+            base_url=prompt_cfg.get("base_url") or PUBLIC_SITE_ORIGIN,
+        )
+        view = TosConsentView(
+            legal_service=self._legal_service,
+            expected_user_id=int(user_id),
+            active_version=active_ver,
+            button_label=prompt_cfg.get("discord_tos_button_label"),
+            timeout=TOS_CONSENT_VIEW_TIMEOUT_SECONDS,
+        )
+        return prompt_text, view
 
     async def check_interaction(self, interaction: discord.Interaction) -> bool:
         """Chặn `/ask` và các lệnh phiên chat nếu người dùng chưa đồng ý `active_tos_version`, gửi prompt `ephemeral=True` kèm nút Tôi đồng ý."""
@@ -140,18 +173,7 @@ class TosConsentGate:
         if status["accepted"]:
             return True
 
-        active_ver = status["active_tos_version"]
-        prompt_text = build_tos_prompt_message(
-            active_version=active_ver,
-            is_update=bool(status["is_update"]),
-            accepted_version=status.get("accepted_version"),
-        )
-        view = TosConsentView(
-            legal_service=self._legal_service,
-            expected_user_id=int(user_id),
-            active_version=active_ver,
-            timeout=TOS_CONSENT_VIEW_TIMEOUT_SECONDS,
-        )
+        prompt_text, view = self._build_prompt_and_view(user_id=user_id, status=status)
         try:
             response = getattr(interaction, "response", None)
             if response is not None and not response.is_done():
@@ -180,18 +202,7 @@ class TosConsentGate:
         if status["accepted"]:
             return True
 
-        active_ver = status["active_tos_version"]
-        prompt_text = build_tos_prompt_message(
-            active_version=active_ver,
-            is_update=bool(status["is_update"]),
-            accepted_version=status.get("accepted_version"),
-        )
-        view = TosConsentView(
-            legal_service=self._legal_service,
-            expected_user_id=int(user_id),
-            active_version=active_ver,
-            timeout=TOS_CONSENT_VIEW_TIMEOUT_SECONDS,
-        )
+        prompt_text, view = self._build_prompt_and_view(user_id=user_id, status=status)
         try:
             reply_fn = getattr(message, "reply", None)
             if callable(reply_fn):

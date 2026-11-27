@@ -276,20 +276,23 @@ class AskBot(discord.Client):
             await self.container.tos_acceptance_repo.attach_db(db)
         if getattr(self.container, "login_history_repo", None) is not None:
             await self.container.login_history_repo.attach_db(db)
+        if getattr(self.container, "blacklist_repo", None) is not None:
+            await self.container.blacklist_repo.attach_db(db)
         if getattr(self.container, "maintenance_gate", None) is not None:
             self.container.maintenance_gate.sync_from_config()
         await self.container.session_repo.archive_expired()
 
     async def on_interaction(self, interaction: discord.Interaction) -> None:
-        """Chặn các tương tác nút bấm / thành phần (component) từ người dùng thường khi đang bật chế độ bảo trì DND."""
+        """Chặn các tương tác nút bấm / modal từ tài khoản bị blacklist (ưu tiên cao nhất) hoặc khi đang bật chế độ bảo trì DND."""
         gate = getattr(self.container, "maintenance_gate", None)
-        if gate is None or not gate.is_dnd:
+        if gate is None:
             return
-        if getattr(interaction, "type", None) == discord.InteractionType.component:
+        itype = getattr(interaction, "type", None)
+        if itype in (discord.InteractionType.component, discord.InteractionType.modal_submit):
             await gate.check_interaction(interaction)
 
     async def on_message(self, message: discord.Message) -> None:
-        """Chặn nhắc tên bot, trả lời tin nhắn bot hoặc nhắn tin trực tiếp khi bật DND hoặc chưa đồng ý phiên bản ToS hiện hành."""
+        """Chặn nhắc tên bot, trả lời tin nhắn bot hoặc nhắn tin trực tiếp theo thứ tự ưu tiên: Blacklist -> DND -> ToS."""
         author = getattr(message, "author", None)
         if author is None or getattr(author, "bot", False):
             return
@@ -310,9 +313,9 @@ class AskBot(discord.Client):
             return
 
         gate = getattr(self.container, "maintenance_gate", None)
-        if gate is not None and gate.is_dnd:
-            allowed_dnd = await gate.check_message(message)
-            if not allowed_dnd:
+        if gate is not None:
+            allowed_gate = await gate.check_message(message)
+            if not allowed_gate:
                 return
 
         tos_gate = getattr(self.container, "tos_gate", None)

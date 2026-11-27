@@ -108,7 +108,143 @@ class LegalService:
             "tos_updated_at_formatted": formatted_meta_updated,
             "pages": pages_meta,
             "doc": active_doc,
+            "discord_prompt": self.get_discord_prompt_config(),
         }
+
+    def get_discord_prompt_config(self) -> dict[str, str]:
+        """Đọc thuần túy (100% read-only) mẫu tin nhắn yêu cầu đồng ý ToS trên Discord và nhãn nút từ `bot_config` RAM."""
+        from app.features.legal.defaults import (
+            DEFAULT_DISCORD_TOS_BUTTON_LABEL,
+            DEFAULT_DISCORD_TOS_UPDATE_TEMPLATE,
+            DEFAULT_DISCORD_TOS_WELCOME_TEMPLATE,
+            PUBLIC_SITE_ORIGIN,
+        )
+
+        cfg = self._config_repo.current_config
+        raw_legal = cfg.get("legal") if isinstance(cfg.get("legal"), dict) else {}
+        welcome = str(raw_legal.get("discord_tos_welcome_template") or "").strip() or DEFAULT_DISCORD_TOS_WELCOME_TEMPLATE
+        update_tpl = str(raw_legal.get("discord_tos_update_template") or "").strip() or DEFAULT_DISCORD_TOS_UPDATE_TEMPLATE
+        btn_label = str(raw_legal.get("discord_tos_button_label") or "").strip()[:60] or DEFAULT_DISCORD_TOS_BUTTON_LABEL
+        return {
+            "discord_tos_welcome_template": welcome,
+            "discord_tos_update_template": update_tpl,
+            "discord_tos_button_label": btn_label,
+            "base_url": PUBLIC_SITE_ORIGIN,
+        }
+
+    async def update_discord_prompt_config(
+        self,
+        *,
+        welcome_template: str,
+        update_template: str,
+        button_label: str,
+        actor: str,
+        actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
+        client_changes: Optional[dict[str, Any]] = None,
+    ) -> dict[str, str]:
+        """Lưu mẫu tin nhắn yêu cầu đồng ý ToS trên Discord, đồng bộ snapshot watcher và ghi Audit Log (không sửa `tos_updated_at`)."""
+        clean_welcome = str(welcome_template or "").strip()[:1500]
+        clean_update = str(update_template or "").strip()[:1500]
+        clean_label = " ".join(str(button_label or "").split()).strip()[:60]
+        if len(clean_welcome) < 10:
+            raise ValueError("Mẫu tin nhắn lần đầu phải có ít nhất 10 ký tự.")
+        if len(clean_update) < 10:
+            raise ValueError("Mẫu tin nhắn cập nhật phiên bản phải có ít nhất 10 ký tự.")
+        if not clean_label:
+            raise ValueError("Nhãn nút đồng ý không được để trống.")
+
+        old_cfg = self.get_discord_prompt_config()
+        audit_changes: list[dict[str, Any]] = []
+        if old_cfg["discord_tos_welcome_template"] != clean_welcome:
+            audit_changes.append({
+                "field": "legal.discord_tos_welcome_template",
+                "before": old_cfg["discord_tos_welcome_template"],
+                "after": clean_welcome,
+            })
+        if old_cfg["discord_tos_update_template"] != clean_update:
+            audit_changes.append({
+                "field": "legal.discord_tos_update_template",
+                "before": old_cfg["discord_tos_update_template"],
+                "after": clean_update,
+            })
+        if old_cfg["discord_tos_button_label"] != clean_label:
+            audit_changes.append({
+                "field": "legal.discord_tos_button_label",
+                "before": old_cfg["discord_tos_button_label"],
+                "after": clean_label,
+            })
+
+        summary = "Cập nhật mẫu tin nhắn yêu cầu đồng ý ToS trên Discord"
+        await self._config_service.update_config(
+            {
+                "legal": {
+                    "discord_tos_welcome_template": clean_welcome,
+                    "discord_tos_update_template": clean_update,
+                    "discord_tos_button_label": clean_label,
+                }
+            },
+            updated_by=actor,
+            actor_type=actor_type,
+            actor_meta=actor_meta,
+            section="legal",
+            summary=summary,
+            client_changes=client_changes,
+            record_audit=False if self._audit is not None else True,
+        )
+        if self._atlas_watcher is not None:
+            self._atlas_watcher.sync_snapshot()
+
+        if self._audit is not None and audit_changes:
+            await self._audit.record(
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=actor_meta,
+                action="legal_discord_prompt_update",
+                section="legal",
+                summary=summary,
+                changes=audit_changes,
+                source="Dashboard Legal CMS",
+                flush=True,
+            )
+
+        return self.get_discord_prompt_config()
+
+    async def revoke_user_consent(
+        self,
+        *,
+        discord_user_id: str | int,
+        actor: str,
+        actor_type: str = "dashboard",
+        actor_meta: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Thu hồi chấp thuận ToS của 1 người dùng, xóa ngay khỏi cache RAM và ghi Audit Log `TOS_CONSENT_REVOKED`."""
+        result = await self._acceptances.revoke_acceptance(discord_user_id)
+        uid = result["discord_user_id"]
+        prev_ver = result.get("previous_version")
+        if self._audit is not None:
+            await self._audit.record(
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=actor_meta,
+                action="TOS_CONSENT_REVOKED",
+                section="legal",
+                summary=f"Thu hồi chấp thuận ToS của người dùng {uid} (phiên bản trước: {prev_ver or 'không rõ'})",
+                changes=[
+                    {
+                        "field": f"tos_acceptances.{uid}.tos_accepted_version",
+                        "before": prev_ver,
+                        "after": None,
+                    }
+                ],
+                source="Dashboard Legal CMS",
+                extra_fields={
+                    "target_discord_user_id": uid,
+                    "previous_accepted_version": prev_ver,
+                },
+                flush=True,
+            )
+        return result
 
     async def update_document(
         self,

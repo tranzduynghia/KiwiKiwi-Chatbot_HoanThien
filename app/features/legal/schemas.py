@@ -21,3 +21,13 @@ class AcceptTosPayload(BaseModel):
     """Payload ghi nhận chấp thuận Điều khoản từ giao diện Web Dashboard / Login."""
 
     source: Literal["web", "discord"] = "web"
+
+
+class UpdateDiscordPromptPayload(BaseModel):
+    """Payload cập nhật mẫu tin nhắn yêu cầu đồng ý ToS trên Discord và nhãn nút xác nhận."""
+
+    discord_tos_welcome_template: str = Field(..., min_length=10, max_length=1500)
+    discord_tos_update_template: str = Field(..., min_length=10, max_length=1500)
+    discord_tos_button_label: str = Field(..., min_length=1, max_length=60)
+    changes: Optional[dict[str, Any]] = None
+

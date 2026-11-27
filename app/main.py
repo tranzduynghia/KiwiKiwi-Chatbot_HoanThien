@@ -45,6 +45,7 @@ from app.features.models.cooldown import ModelCooldownTracker
 from app.features.models.registry import ModelRegistry
 from app.features.monitoring.service import MonitoringService
 from app.features.monitoring.stats import UsageStats
+from app.features.permissions.blacklist import BlacklistRepository, BlacklistService
 from app.features.permissions.repository import PermissionRepository
 from app.features.permissions.service import PermissionService
 from app.features.sessions.discord_lookup import DiscordUserLookupService
@@ -76,6 +77,8 @@ class AppContainer:
     login_history_repo: AdminLoginHistoryRepository
     permission_repo: PermissionRepository
     permission_service: PermissionService
+    blacklist_repo: BlacklistRepository
+    blacklist_service: BlacklistService
     user_repo: UserRepository
     auth_service: AuthService
     oauth_service: DiscordOAuthService
@@ -203,12 +206,22 @@ def build_container(
     gemini_semaphore = DynamicSemaphore(lambda: config_repo.ask_cfg().get("max_concurrent", 2))
     config_service.on_update(lambda _cfg: gemini_semaphore.notify_limit_changed())
 
-    # Cổng bảo trì chế độ Không làm phiền (DND) đồng bộ nóng RAM <-> MongoDB Atlas
+    # Danh sách đen Discord ID (`discord_blacklist`) kèm bộ đệm RAM O(1) ưu tiên chặn cao nhất
+    blacklist_repo = BlacklistRepository()
+
+    # Cổng bảo trì chế độ Không làm phiền (DND) & Danh sách đen đồng bộ nóng RAM <-> MongoDB Atlas
     maintenance_gate = MaintenanceGate(
         config_repo=config_repo,
         audit_service=audit_service,
         permission_service=permission_service,
+        blacklist_repo=blacklist_repo,
         admin_discord_id=settings.admin_discord_id,
+    )
+    blacklist_service = BlacklistService(
+        blacklist_repo=blacklist_repo,
+        permission_service=permission_service,
+        maintenance_gate=maintenance_gate,
+        audit_service=audit_service,
     )
     config_service.on_update(lambda cfg: maintenance_gate.sync_from_config(cfg.get("presence") if isinstance(cfg, dict) else None))
 
@@ -352,6 +365,7 @@ def build_container(
         cloudflare_tunnel=tunnel_service,
         warp_proxy=warp_service,
         maintenance_gate=maintenance_gate,
+        blacklist_repo=blacklist_repo,
     )
     config_service.set_external_sync_hook(atlas_config_watcher.poll_once)
     config_service.on_update(atlas_config_watcher.sync_snapshot)
@@ -393,6 +407,8 @@ def build_container(
         login_history_repo=login_history_repo,
         permission_repo=permission_repo,
         permission_service=permission_service,
+        blacklist_repo=blacklist_repo,
+        blacklist_service=blacklist_service,
         user_repo=user_repo,
         auth_service=auth_service,
         oauth_service=oauth_service,
