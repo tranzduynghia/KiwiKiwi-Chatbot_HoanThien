@@ -21,21 +21,21 @@
     id="dnd-maintenance-banner"
     role="status"
     aria-live="polite"
-    class="{{ 'flex' if dnd_maintenance else 'hidden' }} flex-wrap items-center justify-between gap-3 rounded-xl border border-rose-500/40 bg-rose-950/40 px-4 py-3 shadow-lg"
+    class="{{ 'flex' if dnd_maintenance else 'hidden' }} ox-alert-danger flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 shadow-lg"
   >
     <div class="flex items-start gap-3 min-w-0">
-      <div class="w-8 h-8 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center shrink-0 mt-0.5 text-rose-300" aria-hidden="true">
+      <div class="ox-alert-danger-icon w-8 h-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5" aria-hidden="true">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10" />
           <line x1="8" y1="12" x2="16" y2="12" />
         </svg>
       </div>
       <div class="min-w-0 space-y-0.5">
-        <p class="text-xs sm:text-sm font-semibold text-rose-100 leading-snug">
+        <p class="ox-alert-danger-title text-xs sm:text-sm font-semibold leading-snug">
           Chế độ bảo trì DND đang bật — Đã tạm khóa /ask &amp; session từ user thường
         </p>
-        <p class="text-[11px] text-rose-200/80 leading-relaxed">
-          Mọi lệnh Discord, nút bấm và phiên AI của người dùng thường đều bị chặn tức thì trước khi gọi Gemini API. Quản trị viên (<code class="px-1 py-0.5 rounded bg-rose-900/60 text-rose-100 font-mono text-[10px]">ADMIN_DISCORD_ID</code>) vẫn được vượt khóa để kiểm thử trực tiếp.
+        <p class="ox-alert-danger-body text-[11px] leading-relaxed">
+          Mọi lệnh Discord, nút bấm và phiên AI của người dùng thường đều bị chặn tức thì trước khi gọi Gemini API. Quản trị viên (<span class="ox-alert-danger-badge inline-block px-1.5 py-0.5 rounded font-semibold text-[10px] align-baseline">Admin toàn quyền</span> trong mục <strong>Phân quyền &amp; Admin</strong>) vẫn được vượt khóa để kiểm thử trực tiếp.
         </p>
       </div>
     </div>
@@ -359,15 +359,15 @@
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
       {# Cột cấu hình (7/12): Trạng thái Online + Custom Status (bong bóng chữ) + Hoạt động chính #}
       <div class="lg:col-span-7 space-y-4">
-        {# Bộ chọn Trạng thái hiển thị kèm chấm màu #}
+        {# Bộ chọn Trạng thái hiển thị kèm chấm màu (mỗi nút giữ trên 1 dòng) #}
         <div>
           <label class="block text-xs text-[#8b95a7] mb-2">Trạng thái hiển thị</label>
-          <div id="presence-status-group" class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <div id="presence-status-group" class="flex flex-wrap items-center gap-2">
             <button
               type="button"
               data-presence-status="online"
               data-selected="true"
-              class="presence-status-btn flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
+              class="presence-status-btn inline-flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
             >
               <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 shadow-[0_0_8px_rgba(34,197,94,0.65)]"></span>
               <span>Trực tuyến</span>
@@ -376,7 +376,7 @@
               type="button"
               data-presence-status="idle"
               data-selected="false"
-              class="presence-status-btn flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
+              class="presence-status-btn inline-flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
             >
               <span class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0 shadow-[0_0_8px_rgba(250,204,21,0.6)]"></span>
               <span>Chờ</span>
@@ -385,7 +385,7 @@
               type="button"
               data-presence-status="dnd"
               data-selected="false"
-              class="presence-status-btn flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
+              class="presence-status-btn inline-flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
             >
               <span class="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 shadow-[0_0_8px_rgba(244,63,94,0.65)]"></span>
               <span>Không làm phiền</span>
@@ -394,7 +394,7 @@
               type="button"
               data-presence-status="invisible"
               data-selected="false"
-              class="presence-status-btn flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
+              class="presence-status-btn inline-flex items-center gap-2 whitespace-nowrap px-3 py-2 rounded-lg text-xs font-medium bg-[#0a0d12] border border-[#1e232e] text-slate-200 transition-all duration-150 hover:brightness-110 active:scale-95 cursor-pointer"
             >
               <span class="w-2.5 h-2.5 rounded-full bg-slate-500 shrink-0"></span>
               <span>Ẩn</span>
@@ -402,9 +402,9 @@
           </div>
           <p
             id="presence-dnd-hint"
-            class="{{ '' if dnd_maintenance else 'hidden' }} mt-2 text-[11px] text-rose-300/90 bg-rose-950/35 border border-rose-500/30 rounded-lg px-3 py-2 leading-relaxed"
+            class="{{ '' if dnd_maintenance else 'hidden' }} ox-alert-danger mt-2 text-[11px] rounded-lg px-3 py-2 leading-relaxed"
           >
-            ⛔ Chọn <strong>Không làm phiền (DND)</strong> sẽ kích hoạt chế độ bảo trì: tạm khóa mọi lệnh <code class="font-mono text-rose-100">/ask</code>, nút bấm và phiên AI từ người dùng thường (Admin vẫn được vượt khóa).
+            ⛔ Chọn <strong>Không làm phiền (DND)</strong> sẽ kích hoạt chế độ bảo trì: tạm khóa mọi lệnh <code class="inline-block px-1.5 py-0.5 rounded font-mono text-[10px] align-baseline">/ask</code>, nút bấm và phiên AI từ người dùng thường (Admin vẫn được vượt khóa).
           </p>
         </div>
 

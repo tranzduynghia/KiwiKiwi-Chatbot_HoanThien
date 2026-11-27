@@ -22,6 +22,11 @@ html[data-theme="normal"] {
   --sidebar-bg: #0e1117;
   --tab-active-bg: #212631;
   --tab-active-border: #2b3240;
+  --alert-danger-bg: rgba(225, 29, 72, 0.14);
+  --alert-danger-border: rgba(244, 63, 94, 0.35);
+  --alert-danger-text: #fecdd3;
+  --alert-danger-strong: #ffffff;
+  --alert-danger-code-bg: rgba(255, 255, 255, 0.12);
 
   /* Bí danh tương thích với lớp --ox-* hiện có */
   --ox-bg: var(--bg-base);
@@ -60,6 +65,11 @@ html[data-theme="dark"] {
   --sidebar-bg: #08090c;
   --tab-active-bg: #181b24;
   --tab-active-border: #2b303c;
+  --alert-danger-bg: rgba(225, 29, 72, 0.14);
+  --alert-danger-border: rgba(244, 63, 94, 0.35);
+  --alert-danger-text: #fecdd3;
+  --alert-danger-strong: #ffffff;
+  --alert-danger-code-bg: rgba(255, 255, 255, 0.12);
 }
 
 html[data-theme="light"] {
@@ -79,6 +89,11 @@ html[data-theme="light"] {
   --sidebar-bg: #ffffff;
   --tab-active-bg: #ffe4e6;
   --tab-active-border: #fda4af;
+  --alert-danger-bg: #fff1f2;
+  --alert-danger-border: #fecdd3;
+  --alert-danger-text: #9f1239;
+  --alert-danger-strong: #881337;
+  --alert-danger-code-bg: #ffe4e6;
 }
 
 * {
@@ -920,14 +935,33 @@ html[data-theme="light"] .text-sky-300 {
   color: #0369a1;
 }
 
-html[data-theme="light"] #dnd-maintenance-banner {
-  background-color: #fff1f2;
-  border-color: #fda4af;
+/* Hộp cảnh báo nguy hiểm / bảo trì DND dùng chung cho cả 3 giao diện (Normal / Dark / Light) */
+.ox-alert-danger {
+  background-color: var(--alert-danger-bg);
+  border: 1px solid var(--alert-danger-border);
+  color: var(--alert-danger-text);
 }
 
-html[data-theme="light"] #dnd-maintenance-banner p,
-html[data-theme="light"] #dnd-maintenance-banner code {
-  color: #881337;
+.ox-alert-danger .ox-alert-danger-title,
+.ox-alert-danger strong {
+  color: var(--alert-danger-strong);
+}
+
+.ox-alert-danger .ox-alert-danger-body {
+  color: var(--alert-danger-text);
+}
+
+.ox-alert-danger .ox-alert-danger-icon {
+  background-color: var(--alert-danger-code-bg);
+  border: 1px solid var(--alert-danger-border);
+  color: var(--alert-danger-strong);
+}
+
+.ox-alert-danger code,
+.ox-alert-danger .ox-alert-danger-badge {
+  background-color: var(--alert-danger-code-bg);
+  border: 1px solid var(--alert-danger-border);
+  color: var(--alert-danger-strong);
 }
 
 html[data-theme="light"] .presence-status-btn[data-selected="true"] {
