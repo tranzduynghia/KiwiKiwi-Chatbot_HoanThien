@@ -367,24 +367,31 @@ body.sidebar-collapsed .ox-main-wrapper {
 /* Ô tìm kiếm trên Topbar */
 .ox-search-box {
   position: relative;
-  flex: 1;
-  max-width: 440px;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 28rem;
 }
 
 .ox-search-input {
   width: 100%;
   height: 36px;
-  padding: 0 14px 0 36px;
+  padding: 0 12px 0 36px;
   border-radius: 8px;
   background-color: var(--ox-input);
   border: 1px solid var(--ox-border);
   color: var(--ox-text);
   font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   transition: border-color 150ms ease, background-color 150ms ease;
 }
 
 .ox-search-input::placeholder {
   color: var(--ox-text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ox-search-input:focus {

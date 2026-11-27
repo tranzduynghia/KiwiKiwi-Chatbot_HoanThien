@@ -11,7 +11,7 @@
     </button>
 
     {# Ô tìm kiếm nhanh toàn cục #}
-    <div class="ox-search-box hidden sm:block">
+    <div class="ox-search-box hidden sm:block flex-1 min-w-[180px] lg:min-w-[260px] max-w-md">
       <svg class="w-4 h-4 text-[#5e6778] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8" />
         <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -20,7 +20,7 @@
         id="global-search"
         type="text"
         placeholder="Tìm kiếm nhanh model, tab hoặc cấu hình..."
-        class="ox-search-input"
+        class="ox-search-input truncate pr-3"
       />
     </div>
   </div>
@@ -29,13 +29,12 @@
   <div class="flex items-center gap-2.5 shrink-0">
     <span
       id="hdr-dnd-badge"
-      class="{{ 'inline-flex' if dnd_maintenance else 'hidden' }} items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/40 select-none"
+      class="{{ 'inline-flex' if dnd_maintenance else 'hidden' }} items-center gap-1 whitespace-nowrap text-[11px] font-semibold px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/40 select-none"
       title="Chế độ bảo trì DND đang bật — Đã tạm khóa /ask & session từ user thường"
     >
-      <span class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true"></span>
       <span>⛔ DND Bảo trì</span>
     </span>
-    <span id="hdr-status-badge" class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[#181d27] text-[#8b95a7] border border-[#252b38]">
+    <span id="hdr-status-badge" class="whitespace-nowrap text-[11px] font-medium px-2.5 py-1 rounded-full bg-[#181d27] text-[#8b95a7] border border-[#252b38]">
       Đang tải...
     </span>
 
