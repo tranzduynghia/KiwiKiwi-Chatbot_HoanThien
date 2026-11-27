@@ -8,12 +8,16 @@ from typing import Any, Awaitable, Callable, Optional
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from app.core.warp_proxy import is_proxy_transport_error
+from app.core.security import redact_secrets
+from app.core.warp_proxy import is_proxy_transport_error, is_transient_disconnect_error
 from app.features.config.repository import ConfigRepository
 from app.features.models.cooldown import ModelCooldownTracker
 from app.features.models.metadata import version_of
 
 log = logging.getLogger("gemini-bot.chat")
+
+# Độ trễ backoff (giây) cho tối đa 2 lần thử lại khi gặp lỗi ngắt kết nối tạm thời qua WARP NAT (ServerDisconnectedError / RemoteProtocolError)
+TRANSIENT_DISCONNECT_BACKOFFS: tuple[float, ...] = (0.4, 0.8)
 
 
 class GeminiChatService:
@@ -26,11 +30,13 @@ class GeminiChatService:
         model_cooldowns: ModelCooldownTracker,
         *,
         on_proxy_error: Optional[Callable[[Exception], Awaitable[bool]]] = None,
+        disconnect_backoffs: tuple[float, ...] = TRANSIENT_DISCONNECT_BACKOFFS,
     ):
         self._gemini = gemini_client
         self._config = config_repo
         self._cooldowns = model_cooldowns
         self._on_proxy_error = on_proxy_error
+        self._disconnect_backoffs = tuple(disconnect_backoffs)
 
     def set_client(self, gemini_client: Any) -> None:
         """Cập nhật nóng đối tượng `genai.Client` khi chuyển đổi định tuyến Outbound giữa Cloudflare WARP và Direct."""
@@ -76,7 +82,7 @@ class GeminiChatService:
         max_retries: Optional[int] = None,
         timeout_sec: Optional[float] = None,
     ) -> tuple[Any, Optional[str]]:
-        """Gọi trực tiếp một model Gemini với cơ chế hạ bậc thinking (nếu lỗi 400), tự fallback Direct nếu WARP proxy lỗi và thử lại (nếu 500/503)."""
+        """Gọi trực tiếp một model Gemini với hạ bậc thinking (400), thử lại ngắt kết nối tạm thời (ServerDisconnectedError/RemoteProtocolError), fallback Direct khi proxy lỗi và retry 500/503."""
         acfg = self._config.ask_cfg()
         retries = max_retries if max_retries is not None else int(acfg.get("max_retries", 3))
         timeout = timeout_sec if timeout_sec is not None else float(acfg.get("gemini_timeout_seconds", 170.0))
@@ -93,6 +99,7 @@ class GeminiChatService:
         proxy_fallback_used = False
         for idx, (cfg, thinking_used) in enumerate(attempts):
             retry = 0
+            disconnect_retry = 0
             while retry < retries:
                 try:
                     resp = await asyncio.wait_for(
@@ -110,6 +117,18 @@ class GeminiChatService:
                         break
                     raise
                 except Exception as exc:
+                    if is_transient_disconnect_error(exc) and disconnect_retry < len(self._disconnect_backoffs):
+                        delay = self._disconnect_backoffs[disconnect_retry]
+                        disconnect_retry += 1
+                        log.warning(
+                            "Gemini bị ngắt kết nối tạm thời (%s) — thử lại %d/%d sau %.1fs.",
+                            redact_secrets(f"{type(exc).__name__}: {exc}", max_len=140),
+                            disconnect_retry,
+                            len(self._disconnect_backoffs),
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
                     if (
                         not proxy_fallback_used
                         and self._on_proxy_error is not None

@@ -26,12 +26,20 @@ log = logging.getLogger("gemini-bot")
 
 
 def _build_discord_proxy_kwargs(proxy_url: Optional[str]) -> dict[str, Any]:
-    """Chuyển đổi URL proxy (`socks5h://`, `socks5://`, `http://`) thành tham số phù hợp cho `discord.Client`."""
+    """Chuyển đổi URL proxy (`socks5h://`, `socks5://`, `http://`) thành tham số phù hợp cho `discord.Client` kèm tắt keep-alive cũ."""
     raw = (proxy_url or "").strip()
     if not raw:
         return {}
+    has_running_loop = True
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        has_running_loop = False
     lowered = raw.lower()
     if lowered.startswith(("socks5h://", "socks5://", "socks4a://", "socks4://")):
+        if not has_running_loop:
+            # `AskBot.__init__` có thể được gọi trước `asyncio.run()`; connector sẽ được gắn ngay trong `setup_hook()`.
+            return {}
         try:
             from aiohttp_socks import ProxyConnector
 
@@ -41,12 +49,22 @@ def _build_discord_proxy_kwargs(proxy_url: Optional[str]) -> dict[str, Any]:
                 normalized = "socks5://" + raw[len("socks5h://"):]
             elif lowered.startswith("socks4a://"):
                 normalized = "socks4://" + raw[len("socks4a://"):]
-            connector = ProxyConnector.from_url(normalized, rdns=rdns)
+            connector = ProxyConnector.from_url(
+                normalized,
+                rdns=rdns,
+                force_close=True,
+                enable_cleanup_closed=True,
+            )
             return {"connector": connector, "proxy": None}
         except Exception as exc:
             log.warning("Không tạo được SOCKS5h ProxyConnector cho Discord (%s) — tạm dùng Direct.", exc)
             return {}
-    return {"proxy": raw}
+    result: dict[str, Any] = {"proxy": raw}
+    if has_running_loop:
+        import aiohttp
+
+        result["connector"] = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True)
+    return result
 
 
 class AskBot(discord.Client):
@@ -73,22 +91,24 @@ class AskBot(discord.Client):
             lambda presence_cfg: apply_bot_presence(self, presence_cfg)
         )
         if warp_proxy is not None:
-            async def _update_discord_proxy(new_proxy: Optional[str]) -> None:
-                self._active_outbound_proxy = new_proxy or None
-                http_client = getattr(self, "http", None)
-                if http_client is None:
-                    return
-                kwargs = _build_discord_proxy_kwargs(new_proxy)
-                http_client.proxy = kwargs.get("proxy")
-                new_connector = kwargs.get("connector")
-                if new_connector is not None:
-                    http_client.connector = new_connector
-                elif not new_proxy:
-                    import aiohttp
-
-                    http_client.connector = aiohttp.TCPConnector(limit=0)
-            warp_proxy.register_route_hook(_update_discord_proxy)
+            warp_proxy.register_route_hook(self._apply_discord_proxy)
         self._register_commands()
+
+    async def _apply_discord_proxy(self, new_proxy: Optional[str]) -> None:
+        """Cập nhật nóng connector/proxy cho `discord.Client.http` với `force_close=True` chống socket keep-alive chết qua WARP NAT."""
+        self._active_outbound_proxy = new_proxy or None
+        http_client = getattr(self, "http", None)
+        if http_client is None:
+            return
+        kwargs = _build_discord_proxy_kwargs(new_proxy)
+        http_client.proxy = kwargs.get("proxy")
+        new_connector = kwargs.get("connector")
+        if new_connector is not None:
+            http_client.connector = new_connector
+        elif not new_proxy:
+            import aiohttp
+
+            http_client.connector = aiohttp.TCPConnector(limit=0, force_close=True, enable_cleanup_closed=True)
 
     def _register_commands(self) -> None:
         """Đăng ký toàn bộ slash commands từ các lát cắt tính năng và trình bắt lỗi chung."""
@@ -127,6 +147,8 @@ class AskBot(discord.Client):
     async def setup_hook(self) -> None:
         """Khởi động Web Dashboard sớm, kết nối MongoDB Atlas, áp dụng Cloudflare WARP/Tunnel, tải model và đồng bộ slash commands."""
         settings = self.container.settings
+        if self._active_outbound_proxy and getattr(self.http, "connector", None) is None:
+            await self._apply_discord_proxy(self._active_outbound_proxy)
         await self.start_web()  # Mở cổng sớm để nền tảng host (Northflank/Render) nhận diện service
         await self.init_database()  # Kết nối MongoDB + nạp cấu hình động trước khi sync & chạy
 

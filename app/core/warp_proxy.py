@@ -25,6 +25,7 @@ DEFAULT_WARP_PROXY_HOST = "127.0.0.1"
 DEFAULT_WARP_PROXY_PORT = 40000
 DEFAULT_WARP_PROXY_URL = f"socks5h://{DEFAULT_WARP_PROXY_HOST}:{DEFAULT_WARP_PROXY_PORT}"
 DEFAULT_WARP_STATE_DIR = "/var/lib/warp-proxy"
+DEFAULT_WIREGUARD_MTU = 1280
 WARP_TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
 WARP_PROCESS_NAMES = frozenset({"wireproxy", "wireproxy.exe"})
 WARP_REQUIRED_BINARIES = ("wgcf", "wireproxy")
@@ -226,6 +227,42 @@ def is_proxy_transport_error(exc: BaseException) -> bool:
     return False
 
 
+def is_transient_disconnect_error(exc: BaseException) -> bool:
+    """Nhận diện lỗi ngắt kết nối tạm thời (`ServerDisconnectedError` / `RemoteProtocolError` / reset kết nối) để tự động thử lại."""
+    seen: set[int] = set()
+    cur: Optional[BaseException] = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        cls_name = type(cur).__name__.lower()
+        if any(
+            tok in cls_name
+            for tok in (
+                "serverdisconnectederror",
+                "remoteprotocolerror",
+                "readerror",
+                "writeerror",
+                "clientoserror",
+            )
+        ):
+            return True
+        if isinstance(cur, (ConnectionResetError, BrokenPipeError)):
+            return True
+        msg = str(cur).lower()
+        if any(
+            phrase in msg
+            for phrase in (
+                "server disconnected",
+                "remote protocol",
+                "connection reset by peer",
+                "peer closed connection",
+                "unexpected eof",
+            )
+        ):
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
+
+
 def parse_wgcf_profile(profile_text: str) -> tuple[dict[str, str], dict[str, str]]:
     """Phân tích `wgcf-profile.conf` thành hai từ điển `[Interface]` và `[Peer]` (giữ nguyên chữ hoa/thường của khóa)."""
     parser = configparser.ConfigParser(interpolation=None, strict=False)
@@ -247,10 +284,15 @@ def render_wireproxy_config(
     *,
     socks_port: int,
     http_port: Optional[int] = None,
+    mtu: int = DEFAULT_WIREGUARD_MTU,
 ) -> str:
-    """Sinh nội dung `wireproxy.conf` với `[Socks5]` (và `[http]` tùy chọn) khóa chặt vào loopback `127.0.0.1`."""
+    """Sinh nội dung `wireproxy.conf` ép `MTU = 1280` chống Path MTU Blackhole và khóa `[Socks5]`/`[http]` vào loopback `127.0.0.1`."""
     lines = ["[Interface]"]
-    lines += [f"{k} = {interface[k]}" for k in _INTERFACE_KEYS if interface.get(k)]
+    for key in _INTERFACE_KEYS:
+        if key == "MTU":
+            lines.append(f"MTU = {int(mtu)}")
+        elif interface.get(key):
+            lines.append(f"{key} = {interface[key]}")
     lines += ["", "[Peer]"]
     lines += [f"{k} = {peer[k]}" for k in _PEER_KEYS if peer.get(k)]
     lines += ["", "[Socks5]", f"BindAddress = {DEFAULT_WARP_PROXY_HOST}:{int(socks_port)}"]
@@ -277,10 +319,11 @@ def parse_trace_payload(text: str) -> dict[str, Any]:
 
 
 async def fetch_trace_via_proxy(proxy_url: str, timeout: float = 6.0) -> str:
-    """Gọi `https://www.cloudflare.com/cdn-cgi/trace` qua `socks5h://127.0.0.1:<port>` (DNS phân giải phía WARP, chống rò rỉ)."""
+    """Gọi `https://www.cloudflare.com/cdn-cgi/trace` qua `socks5h://127.0.0.1:<port>` (tắt keep-alive, DNS phân giải phía WARP)."""
     import httpx
 
-    async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout, trust_env=False) as client:
+    limits = httpx.Limits(max_keepalive_connections=0, keepalive_expiry=0.0)
+    async with httpx.AsyncClient(proxy=proxy_url, limits=limits, timeout=timeout, trust_env=False) as client:
         resp = await client.get(WARP_TRACE_URL)
         resp.raise_for_status()
         return resp.text

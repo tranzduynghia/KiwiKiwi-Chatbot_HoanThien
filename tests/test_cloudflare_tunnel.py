@@ -181,8 +181,11 @@ def test_outbound_proxy_url_propagates_to_gemini_and_discord_bot(fake_gemini):
     )
     http_opts = build_gemini_http_options(settings)
     assert http_opts is not None
-    assert http_opts.client_args == {"proxy": "http://127.0.0.1:40000"}
-    assert http_opts.async_client_args == {"proxy": "http://127.0.0.1:40000"}
+    assert http_opts.client_args["proxy"] == "http://127.0.0.1:40000"
+    assert http_opts.client_args["limits"].max_keepalive_connections == 0
+    assert http_opts.async_client_args["proxy"] == "http://127.0.0.1:40000"
+    assert http_opts.async_client_args["limits"].max_keepalive_connections == 0
+    assert http_opts.async_client_args["transport"] is not None
 
     container = build_container(settings, gemini_client=fake_gemini, reserve_buffer_bytes=16 * 1024)
     bot = AskBot(container)

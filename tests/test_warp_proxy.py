@@ -67,15 +67,25 @@ def test_dockerfile_and_entrypoint_install_static_wgcf_wireproxy():
 
 
 def test_wireproxy_config_rendering_binds_loopback_only():
-    """`wireproxy.conf` sinh từ `wgcf-profile.conf` phải giữ khóa WireGuard và chỉ bind `127.0.0.1:<port>`."""
-    interface, peer = parse_wgcf_profile(_FAKE_PROFILE)
+    """`wireproxy.conf` sinh từ `wgcf-profile.conf` phải ép `MTU = 1280`, giữ khóa WireGuard và chỉ bind `127.0.0.1:<port>`."""
+    # Dù wgcf-profile.conf ghi MTU lớn hơn (1420) hoặc thiếu MTU, render_wireproxy_config vẫn phải ép MTU = 1280
+    interface, peer = parse_wgcf_profile(_FAKE_PROFILE.replace("MTU = 1280", "MTU = 1420"))
     conf = render_wireproxy_config(interface, peer, socks_port=40000, http_port=40001)
     assert "[Interface]" in conf and "[Peer]" in conf
     assert "PrivateKey = " + _FAKE_PRIVATE_KEY in conf
+    assert "MTU = 1280" in conf
+    assert "MTU = 1420" not in conf
     assert "Endpoint = engage.cloudflareclient.com:2408" in conf
     assert "[Socks5]\nBindAddress = 127.0.0.1:40000" in conf
     assert "[http]\nBindAddress = 127.0.0.1:40001" in conf
     assert "0.0.0.0:" not in conf
+
+    interface_no_mtu, peer_no_mtu = parse_wgcf_profile(_FAKE_PROFILE.replace("MTU = 1280\n", ""))
+    conf_no_mtu = render_wireproxy_config(interface_no_mtu, peer_no_mtu, socks_port=40000)
+    assert "MTU = 1280" in conf_no_mtu
+
+    entrypoint = (Path(__file__).resolve().parents[1] / "docker-entrypoint.sh").read_text(encoding="utf-8")
+    assert 'lines.append("MTU = 1280")' in entrypoint
 
     with pytest.raises(ValueError):
         parse_wgcf_profile("[Interface]\nAddress = 172.16.0.2/32\n")
@@ -127,14 +137,25 @@ async def test_warp_proxy_routes_gemini_and_discord_with_graceful_fallback():
         assert warp_service.is_active is True
         assert created_clients[-1][0] == expected_proxy
         assert bot._active_outbound_proxy == expected_proxy
+        assert getattr(bot.http.connector, "_force_close", False) is True
         # MongoDB Atlas vẫn giữ URI TLS trực tiếp, không bị sửa sang proxy
         assert container.db_manager.uri == settings.mongodb_uri
 
-        # Kiểm tra build_gemini_http_options với proxy động socks5h:// và Direct
+        # Kiểm tra build_gemini_http_options: dùng httpx AsyncHTTPTransport + tắt keep-alive (max_keepalive_connections=0)
+        import httpx
+        from google import genai
+
         opts_warp = build_gemini_http_options(settings, proxy_url=expected_proxy)
         assert opts_warp is not None
-        assert opts_warp.client_args == {"proxy": expected_proxy}
-        assert opts_warp.async_client_args == {"proxy": expected_proxy}
+        assert opts_warp.client_args["proxy"] == expected_proxy
+        assert opts_warp.client_args["limits"].max_keepalive_connections == 0
+        assert opts_warp.async_client_args["proxy"] == expected_proxy
+        assert opts_warp.async_client_args["limits"].max_keepalive_connections == 0
+        assert isinstance(opts_warp.async_client_args["transport"], httpx.AsyncHTTPTransport)
+        real_client = genai.Client(api_key="test-key", http_options=opts_warp)
+        assert real_client._api_client._use_aiohttp() is False
+        await real_client.aio.aclose()
+        real_client.close()
         assert build_gemini_http_options(settings, proxy_url="") is None
 
         # Tắt nóng WARP Outbound -> Gemini client & Discord lập tức chuyển về Direct (None)
@@ -621,3 +642,96 @@ async def test_warp_clear_sanitized_diagnostics_on_missing_binary_and_wireproxy_
         assert leaked not in diag
 
     assert sanitize_warp_diagnostic("peer 2606:4700:d0::a29f:c001 timeout at 15:00:31") == "peer [ip] timeout at 15:00:31"
+
+
+@pytest.mark.asyncio
+async def test_gemini_transient_server_disconnect_retries_over_warp(fake_db, monkeypatch):
+    """ServerDisconnectedError / RemoteProtocolError tự động thử lại tối đa 2 lần (backoff 0.4s, 0.8s) mà vẫn giữ nguyên đường hầm WARP."""
+    import aiohttp
+    import httpx
+    from app.features.chat.gemini_service import TRANSIENT_DISCONNECT_BACKOFFS
+
+    assert TRANSIENT_DISCONNECT_BACKOFFS == (0.4, 0.8)
+
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float, result: Any = None):
+        sleeps.append(delay)
+        return result
+
+    monkeypatch.setattr("app.features.chat.gemini_service.asyncio.sleep", fake_sleep)
+
+    attempts = {"count": 0}
+
+    class FlakyWarpGemini:
+        def __init__(self, proxy_url: str | None):
+            self.proxy_url = proxy_url
+            self.aio = SimpleNamespace(models=SimpleNamespace(generate_content=self._generate_content))
+
+        async def _generate_content(self, **_kwargs):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise aiohttp.ServerDisconnectedError("Server disconnected")
+            if attempts["count"] == 2:
+                raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+            return SimpleNamespace(text="Thành công sau 2 lần retry WARP")
+
+    warp_service = WarpProxyService(
+        warp_port=40000,
+        enabled=True,
+        probe_sync_fn=lambda _h, _p, _t: True,
+        probe_async_fn=lambda _h, _p, _t: asyncio.sleep(0, result=True),
+        metrics_fn=lambda: (9002, 11.1),
+    )
+    warp_service.probe_initial_sync()
+
+    settings = AppSettings(
+        discord_token="test-token",
+        gemini_api_key="test-key",
+        session_secret="test-secret-transient-disconnect-retry-0123456",
+    )
+    container = build_container(
+        settings,
+        gemini_client_factory=lambda proxy_url: FlakyWarpGemini(proxy_url),
+        reserve_buffer_bytes=16 * 1024,
+        warp_proxy=warp_service,
+    )
+    await container.sync_coordinator.attach_db(fake_db)
+
+    resp, _thinking = await container.gemini_service.call_model(
+        "gemini-2.5-flash",
+        ["Phân tích sâu"],
+        system="Bạn là trợ lý.",
+        thinking_level=None,
+        web_search=False,
+    )
+    assert resp.text == "Thành công sau 2 lần retry WARP"
+    assert attempts["count"] == 3
+    assert sleeps == [0.4, 0.8]
+    # WARP vẫn giữ nguyên trạng thái hoạt động, không bị tụt xuống Direct do ngắt kết nối tạm thời
+    assert warp_service.is_active is True
+
+    # Nếu thất bại liên tiếp 3 lần (vượt quá 2 lần retry) -> phải ném lỗi thay vì lặp vô hạn
+    class AlwaysDisconnectedGemini:
+        def __init__(self):
+            self.calls = 0
+            self.aio = SimpleNamespace(models=SimpleNamespace(generate_content=self._generate_content))
+
+        async def _generate_content(self, **_kwargs):
+            self.calls += 1
+            raise httpx.RemoteProtocolError("Server disconnected")
+
+    broken = AlwaysDisconnectedGemini()
+    container.gemini_service.set_client(broken)
+    sleeps.clear()
+    with pytest.raises(httpx.RemoteProtocolError):
+        await container.gemini_service.call_model(
+            "gemini-2.5-flash",
+            ["Thử lỗi kéo dài"],
+            system="Bạn là trợ lý.",
+            thinking_level=None,
+            web_search=False,
+        )
+    assert broken.calls == 3
+    assert sleeps == [0.4, 0.8]
+

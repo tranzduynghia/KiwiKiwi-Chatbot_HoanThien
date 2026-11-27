@@ -85,7 +85,8 @@ for key, sec in (("PrivateKey", iface), ("Address", iface), ("PublicKey", peer),
     if not sec.get(key):
         raise SystemExit(f"profile missing {key}")
 lines = ["[Interface]"]
-lines += [f"{k} = {iface[k]}" for k in ("PrivateKey", "Address", "DNS", "MTU") if iface.get(k)]
+lines += [f"{k} = {iface[k]}" for k in ("PrivateKey", "Address", "DNS") if iface.get(k)]
+lines.append("MTU = 1280")
 lines += ["", "[Peer]"]
 lines += [f"{k} = {peer[k]}" for k in ("PublicKey", "AllowedIPs", "Endpoint", "PersistentKeepalive") if peer.get(k)]
 lines += ["", "[Socks5]", f"BindAddress = 127.0.0.1:{socks_port}"]

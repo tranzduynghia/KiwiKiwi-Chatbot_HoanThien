@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import httpx
 import psutil
 from google import genai
 from google.genai import types
@@ -84,7 +85,7 @@ def build_gemini_http_options(
     *,
     proxy_url: Optional[str] = None,
 ) -> Optional[types.HttpOptions]:
-    """Tạo `types.HttpOptions` cho Google GenAI SDK hỗ trợ cả `GEMINI_API_VERSION` và `OUTBOUND_PROXY_URL` / Cloudflare WARP."""
+    """Tạo `types.HttpOptions` cho Google GenAI SDK hỗ trợ `GEMINI_API_VERSION` và proxy WARP (tắt keep-alive cũ, giữ phân giải DNS phía WARP)."""
     kwargs: dict[str, Any] = {}
     if settings.gemini_api_version:
         kwargs["api_version"] = settings.gemini_api_version
@@ -94,8 +95,19 @@ def build_gemini_http_options(
         else (proxy_url or "").strip()
     )
     if effective_proxy:
-        kwargs["client_args"] = {"proxy": effective_proxy}
-        kwargs["async_client_args"] = {"proxy": effective_proxy}
+        # Tắt keep-alive pooling để không tái sử dụng socket hết hạn qua WARP NAT;
+        # truyền `transport` buộc google-genai dùng httpx AsyncClient (hỗ trợ socks5h:// + remote DNS) thay vì aiohttp mặc định.
+        no_keepalive_limits = httpx.Limits(max_keepalive_connections=0, keepalive_expiry=0.0)
+        async_transport = httpx.AsyncHTTPTransport(proxy=effective_proxy, limits=no_keepalive_limits)
+        kwargs["client_args"] = {
+            "proxy": effective_proxy,
+            "limits": no_keepalive_limits,
+        }
+        kwargs["async_client_args"] = {
+            "proxy": effective_proxy,
+            "limits": no_keepalive_limits,
+            "transport": async_transport,
+        }
     return types.HttpOptions(**kwargs) if kwargs else None
 
 
