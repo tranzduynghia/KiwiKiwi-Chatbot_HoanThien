@@ -180,12 +180,27 @@ class AuditRepository:
         end_idx = start_idx + safe_limit
         page_items = pending_items[start_idx:end_idx]
 
+        audit_list_projection = {
+            "_id": 1,
+            "at": 1,
+            "timestamp": 1,
+            "actor": 1,
+            "actor_type": 1,
+            "actor_display_name": 1,
+            "actor_discord_id": 1,
+            "actor_avatar_url": 1,
+            "action": 1,
+            "section": 1,
+            "summary": 1,
+            "source": 1,
+            "changes": 1,
+        }
         remaining = safe_limit - len(page_items)
         if remaining > 0 and self.connected and db_total > 0:
             db_skip = max(0, start_idx - len(pending_items))
             try:
                 cursor = (
-                    self.collection.find(query)
+                    self.collection.find(query, audit_list_projection)
                     .sort("at", -1)
                     .skip(db_skip)
                     .limit(remaining)
@@ -219,7 +234,22 @@ class AuditRepository:
         if self.connected:
             try:
                 query: dict[str, Any] = {"section": sec} if sec else {}
-                raw_docs = await self.collection.find(query).sort("at", -1).limit(capped_limit).to_list(capped_limit)
+                audit_list_projection = {
+                    "_id": 1,
+                    "at": 1,
+                    "timestamp": 1,
+                    "actor": 1,
+                    "actor_type": 1,
+                    "actor_display_name": 1,
+                    "actor_discord_id": 1,
+                    "actor_avatar_url": 1,
+                    "action": 1,
+                    "section": 1,
+                    "summary": 1,
+                    "source": 1,
+                    "changes": 1,
+                }
+                raw_docs = await self.collection.find(query, audit_list_projection).sort("at", -1).limit(capped_limit).to_list(capped_limit)
                 db_items = [_serialize_audit_doc(doc) for doc in raw_docs]
             except Exception as exc:
                 log.warning("Không đọc được audit_logs từ MongoDB: %s", exc)

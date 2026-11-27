@@ -1,7 +1,9 @@
 """Router render các trang HTML giao diện (/, /login, /dashboard) của Web Dashboard."""
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 import time
 from typing import Any, Callable, Optional
 
@@ -18,8 +20,33 @@ from app.features.auth.oauth import DiscordOAuthService
 from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS
 from app.features.monitoring.stats import UsageStats
 
-# Mã phiên bản tài nguyên tĩnh giúp trình duyệt luôn nạp bản JS/CSS mới nhất sau mỗi lần deploy
-ASSET_VERSION = str(int(time.time()))
+
+def _resolve_build_sha() -> str:
+    """Đọc mã commit-hash ngắn (`BUILD_SHA`) từ biến môi trường CI/Northflank hoặc git để gắn `?v={{ build_sha }}` bất biến."""
+    for env_key in ("BUILD_SHA", "NORTHFLANK_GIT_COMMIT_SHA", "GIT_COMMIT_SHA", "RENDER_GIT_COMMIT", "COMMIT_SHA"):
+        raw = (os.getenv(env_key) or "").strip()
+        cleaned = re.sub(r"[^A-Za-z0-9_-]", "", raw)[:12]
+        if cleaned:
+            return cleaned
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short=10", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            timeout=1.5,
+            text=True,
+        ).strip()
+        cleaned = re.sub(r"[^A-Za-z0-9_-]", "", out)[:12]
+        if cleaned:
+            return cleaned
+    except Exception:
+        pass
+    return str(int(time.time()))
+
+
+# Mã phiên bản bất biến theo commit-hash giúp Cloudflare Edge cache CSS/JS 1 năm và tự bust khi deploy bản mới
+BUILD_SHA = _resolve_build_sha()
+ASSET_VERSION = BUILD_SHA
+PUBLIC_LEGAL_CACHE_CONTROL = "public, s-maxage=86400, stale-while-revalidate=60"
 
 # Loại bỏ mọi comment HTML (<!-- ... -->) ngoài khối script/style/textarea để DevTools hoàn toàn sạch
 _HTML_PROTECTED_BLOCK_RE = re.compile(
@@ -132,6 +159,7 @@ def create_pages_router(
                 "bot_display_name": bot_display_name,
                 "active_tos_version": active_tos_version,
                 "asset_version": ASSET_VERSION,
+                "build_sha": BUILD_SHA,
             },
         )
 
@@ -165,6 +193,7 @@ def create_pages_router(
                 "dnd_maintenance": bot_status == "dnd",
                 "active_tos_version": active_tos_version,
                 "asset_version": ASSET_VERSION,
+                "build_sha": BUILD_SHA,
             },
         )
 
@@ -190,7 +219,7 @@ def create_pages_router(
             usage_stats,
         )
         nav_items = [{"key": k, "path": f"/{k}", "label": LEGAL_DOC_LABELS[k]} for k in LEGAL_DOC_KEYS]
-        return _render_template(
+        response = _render_template(
             templates,
             request,
             "legal_page.html",
@@ -203,8 +232,13 @@ def create_pages_router(
                 "bot_avatar_url": bot_avatar_url,
                 "bot_display_name": bot_display_name,
                 "asset_version": ASSET_VERSION,
+                "build_sha": BUILD_SHA,
             },
         )
+        # Bật Cloudflare CDN Edge caching cho 5 trang pháp lý công khai (tự purge khi Admin lưu CMS)
+        response.headers["Cache-Control"] = PUBLIC_LEGAL_CACHE_CONTROL
+        response.headers["Vary"] = "CF-Timezone"
+        return response
 
     @router.get("/toslinks", response_class=HTMLResponse)
     async def public_toslinks_page(request: Request):

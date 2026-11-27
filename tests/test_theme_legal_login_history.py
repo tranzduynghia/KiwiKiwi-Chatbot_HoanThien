@@ -387,3 +387,60 @@ async def test_admin_login_history_records_success_and_failed_without_password_l
     assert failed_body["items"][0]["status"] == "failed"
     assert failed_body["items"][0]["failure_reason"] == "invalid_credentials"
     assert bad_password not in hist_failed.text
+
+
+@pytest.mark.asyncio
+async def test_cloudflare_cdn_edge_headers_and_legal_auto_purge(app_container, fake_db, fake_bot):
+    """Tài nguyên /static/* trả Cache-Control immutable qua FileResponse, 5 trang pháp lý trả s-maxage=86400 và hỗ trợ auto-purge Cloudflare Edge."""
+    from app.features.legal.cloudflare_purge import purge_legal_pages_edge_cache
+
+    await app_container.sync_coordinator.attach_db(fake_db)
+    await app_container.legal_doc_repo.attach_db(fake_db)
+    web_app = create_dashboard_app(app_container, get_bot=lambda: fake_bot)
+    client = TestClient(web_app)
+
+    # 1) /static/* có Cache-Control: public, max-age=31536000, immutable
+    css_res = client.get("/static/css/dashboard.css")
+    assert css_res.status_code == 200
+    assert css_res.headers.get("cache-control") == "public, max-age=31536000, immutable"
+
+    js_res = client.get("/static/js/dashboard.js")
+    assert js_res.status_code == 200
+    assert js_res.headers.get("cache-control") == "public, max-age=31536000, immutable"
+
+    # 2) Cả 5 trang pháp lý công khai có Cache-Control Edge + Vary: CF-Timezone
+    for route in ("/toslinks", "/legal", "/terms", "/policies", "/guidelines"):
+        res = client.get(route)
+        assert res.status_code == 200
+        assert res.headers.get("cache-control") == "public, s-maxage=86400, stale-while-revalidate=60"
+        assert "CF-Timezone" in (res.headers.get("vary") or "")
+
+    # 3) Cloudflare Auto-Purge bỏ qua an toàn khi chưa đặt CF_ZONE_ID/CF_API_TOKEN và gọi đúng 5 URL khi đã cấu hình
+    skipped = await purge_legal_pages_edge_cache(zone_id="", api_token="")
+    assert skipped["skipped"] is True and skipped["purged"] is False
+
+    captured: list[tuple[str, dict[str, Any], dict[str, str]]] = []
+
+    class FakeHttpClient:
+        async def post(self, url: str, *, json: dict[str, Any], headers: dict[str, str]):
+            captured.append((url, json, headers))
+            return SimpleNamespace(status_code=200)
+
+    purged = await purge_legal_pages_edge_cache(
+        origin="https://kiwikiwi.dpdns.org",
+        zone_id="zone123",
+        api_token="tok_secret",
+        http_client=FakeHttpClient(),
+    )
+    assert purged["purged"] is True
+    assert len(captured) == 1
+    req_url, req_json, req_headers = captured[0]
+    assert req_url == "https://api.cloudflare.com/client/v4/zones/zone123/purge_cache"
+    assert req_headers["Authorization"] == "Bearer tok_secret"
+    assert req_json["files"] == [
+        "https://kiwikiwi.dpdns.org/toslinks",
+        "https://kiwikiwi.dpdns.org/legal",
+        "https://kiwikiwi.dpdns.org/terms",
+        "https://kiwikiwi.dpdns.org/policies",
+        "https://kiwikiwi.dpdns.org/guidelines",
+    ]

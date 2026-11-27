@@ -234,10 +234,18 @@ class TosAcceptanceRepository:
                     {"tos_accepted_version": {"$regex": escaped, "$options": "i"}},
                     {"consent_source": {"$regex": escaped, "$options": "i"}},
                 ]
+            acceptance_projection = {
+                "_id": 0,
+                "discord_user_id": 1,
+                "discord_username": 1,
+                "tos_accepted_version": 1,
+                "tos_accepted_at": 1,
+                "consent_source": 1,
+            }
             try:
                 total = await self.collection.count_documents(flt)
                 raw_docs = (
-                    await self.collection.find(flt)
+                    await self.collection.find(flt, acceptance_projection)
                     .sort("tos_accepted_at", -1)
                     .skip(cursor_offset)
                     .limit(safe_limit + 1)

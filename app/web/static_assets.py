@@ -320,11 +320,21 @@ def rewrite_js_relative_imports(source: str, asset_version: str) -> str:
 
 
 def create_sanitized_static_router(static_dir: Path, *, asset_version: str = "") -> APIRouter:
-    """Tạo router phục vụ `/static/{asset_path:path}`: tự động lọc comment JS/CSS & gắn version ES module tại runtime kèm cache theo `mtime_ns`."""
+    """Tạo router phục vụ `/static/{asset_path:path}` qua streaming `FileResponse` (không giữ buffer tệp tĩnh trong RAM Python) kèm `Cache-Control: public, max-age=31536000, immutable`."""
+    import atexit
+    import shutil
+    import tempfile
+
     router = APIRouter(tags=["static"])
     resolved_root = static_dir.resolve()
-    # Bộ nhớ đệm nhẹ: path -> (mtime_ns, size, content_bytes, etag, media_type)
-    asset_cache: dict[str, tuple[int, int, bytes, str, str]] = {}
+    immutable_cache_control = "public, max-age=31536000, immutable"
+
+    # Ghi tệp JS/CSS đã lọc comment ra thư mục tạm của hệ điều hành và chỉ giữ siêu dữ liệu cực nhỏ trong RAM
+    # giúp FileResponse stream trực tiếp từ đĩa (zero full-file buffer trên Python heap cho container 512MB)
+    sanitized_tmp_dir = Path(tempfile.mkdtemp(prefix="kiwi-static-"))
+    atexit.register(shutil.rmtree, sanitized_tmp_dir, True)
+    # Metadata cache: path -> (mtime_ns, size, tmp_file_path, etag, media_type)
+    asset_meta_cache: dict[str, tuple[int, int, Path, str, str]] = {}
 
     @router.api_route("/static/{asset_path:path}", methods=["GET", "HEAD"])
     async def serve_sanitized_static(asset_path: str, request: Request) -> Response:
@@ -337,13 +347,16 @@ def create_sanitized_static_router(static_dir: Path, *, asset_version: str = "")
 
         suffix = target.suffix.lower()
         if suffix not in _MEDIA_TYPES:
-            return FileResponse(target)
+            return FileResponse(
+                target,
+                headers={"Cache-Control": immutable_cache_control},
+            )
 
         stat = target.stat()
         cache_key = str(target)
-        cached = asset_cache.get(cache_key)
-        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size:
-            _, _, body_bytes, etag, media_type = cached
+        cached = asset_meta_cache.get(cache_key)
+        if cached is not None and cached[0] == stat.st_mtime_ns and cached[1] == stat.st_size and cached[2].is_file():
+            _, _, tmp_path, etag, media_type = cached
         else:
             raw_text = target.read_text(encoding="utf-8")
             if suffix == ".css":
@@ -351,20 +364,30 @@ def create_sanitized_static_router(static_dir: Path, *, asset_version: str = "")
             else:
                 stripped_text = rewrite_js_relative_imports(strip_js_comments(raw_text), asset_version)
             body_bytes = stripped_text.encode("utf-8")
-            etag = f'"{hashlib.sha256(body_bytes).hexdigest()[:16]}"'
+            digest = hashlib.sha256(body_bytes).hexdigest()[:16]
+            etag = f'"{digest}"'
             media_type = _MEDIA_TYPES[suffix]
-            asset_cache[cache_key] = (stat.st_mtime_ns, stat.st_size, body_bytes, etag, media_type)
+            rel_safe = hashlib.sha256(cache_key.encode("utf-8")).hexdigest()[:12]
+            tmp_path = sanitized_tmp_dir / f"{rel_safe}_{digest}{suffix}"
+            tmp_path.write_bytes(body_bytes)
+            asset_meta_cache[cache_key] = (stat.st_mtime_ns, stat.st_size, tmp_path, etag, media_type)
 
         if_none_match = (request.headers.get("if-none-match") or "").strip()
         if if_none_match and if_none_match == etag:
-            return Response(status_code=304, headers={"ETag": etag})
+            return Response(
+                status_code=304,
+                headers={
+                    "ETag": etag,
+                    "Cache-Control": immutable_cache_control,
+                },
+            )
 
-        return Response(
-            content=b"" if request.method == "HEAD" else body_bytes,
+        return FileResponse(
+            path=tmp_path,
             media_type=media_type,
             headers={
                 "ETag": etag,
-                "Content-Length": str(len(body_bytes)),
+                "Cache-Control": immutable_cache_control,
             },
         )
 

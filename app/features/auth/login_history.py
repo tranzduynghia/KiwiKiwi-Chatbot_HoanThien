@@ -114,10 +114,22 @@ class AdminLoginHistoryRepository:
             flt: dict[str, Any] = {}
             if norm_status != "all":
                 flt["status"] = norm_status
+            login_history_projection = {
+                "_id": 0,
+                "username": 1,
+                "status": 1,
+                "failure_reason": 1,
+                "auth_method": 1,
+                "ip_address": 1,
+                "country_code": 1,
+                "client_timezone": 1,
+                "device_summary": 1,
+                "created_at": 1,
+            }
             try:
                 total = await self.collection.count_documents(flt)
                 raw_docs = (
-                    await self.collection.find(flt)
+                    await self.collection.find(flt, login_history_projection)
                     .sort("created_at", -1)
                     .skip(cursor_offset)
                     .limit(safe_limit + 1)

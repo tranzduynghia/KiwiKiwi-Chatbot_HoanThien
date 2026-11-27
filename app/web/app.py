@@ -187,8 +187,8 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         if request.url.path.startswith(("/api/", "/auth/")):
             response.headers["Cache-Control"] = "no-store, max-age=0"
             response.headers["Pragma"] = "no-cache"
-        elif request.url.path.startswith(("/static/js/", "/static/css/")):
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        elif request.url.path.startswith("/static/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
         return response
 
     if STATIC_DIR.exists():

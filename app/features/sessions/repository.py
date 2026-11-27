@@ -429,8 +429,23 @@ class SessionRepository:
                 {"display_name": {"$regex": escaped, "$options": "i"}},
             ]
 
+        # Projection tối giản cho danh sách phiên: loại bỏ trường phụ nặng, chỉ tải full chi tiết khi mở 1 phiên
+        session_list_projection = {
+            "_id": 1,
+            "user_id": 1,
+            "user_id_str": 1,
+            "username": 1,
+            "display_name": 1,
+            "avatar_url": 1,
+            "server_roles": 1,
+            "turns": 1,
+            "created_at": 1,
+            "last_active": 1,
+            "ended_at": 1,
+            "messages": 1,
+        }
         docs = await self._run(
-            lambda: self.archives_col.find(mongo_filter).sort("last_active", -1).to_list(200),
+            lambda: self.archives_col.find(mongo_filter, session_list_projection).sort("last_active", -1).to_list(200),
             [],
         )
 

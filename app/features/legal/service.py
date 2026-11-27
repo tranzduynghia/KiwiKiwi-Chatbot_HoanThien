@@ -206,6 +206,11 @@ class LegalService:
                 flush=True,
             )
 
+        # Xóa bộ đệm Cloudflare Edge bất đồng bộ (non-blocking) cho cả 5 URL pháp lý
+        from app.features.legal.cloudflare_purge import schedule_legal_cache_purge
+
+        schedule_legal_cache_purge()
+
         return await self.get_cms_overview(doc_key=key)
 
     async def get_user_consent_status(self, user_id: str | int) -> dict[str, Any]:
