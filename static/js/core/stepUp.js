@@ -41,6 +41,9 @@ export function createStepUpController({
   let activityListenersAttached = false;
   let pendingTargetTab = "perms";
   let pendingAfterUnlock = null;
+  let modalTransitionToken = 0;
+  let modalCloseTimer = null;
+  let modalCloseCleanup = null;
 
   function isSensitiveTab(tab) {
     return tab === "perms" || tab === "sessions" || tab === "temp" || tab === "temp-page";
@@ -166,14 +169,65 @@ export function createStepUpController({
     errEl.classList.remove("hidden");
   }
 
-  function closeModal() {
-    const modal = document.getElementById("stepup-modal");
-    if (!modal) return;
+  function clearPendingModalClose() {
+    if (modalCloseTimer !== null) {
+      clearTimeout(modalCloseTimer);
+      modalCloseTimer = null;
+    }
+    if (modalCloseCleanup) {
+      modalCloseCleanup();
+      modalCloseCleanup = null;
+    }
+  }
+
+  function finalizeCloseModal(modal) {
+    clearPendingModalClose();
     modal.classList.add("hidden");
-    modal.classList.remove("flex");
+    modal.classList.remove("flex", "is-open", "is-closing");
     const pwdInput = document.getElementById("stepup-password-input");
     if (pwdInput) pwdInput.value = "";
     showModalError("");
+  }
+
+  function closeModal() {
+    const modal = document.getElementById("stepup-modal");
+    if (!modal || modal.classList.contains("hidden") || modal.classList.contains("is-closing")) return;
+
+    const prefersReducedMotion =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (prefersReducedMotion) {
+      modalTransitionToken += 1;
+      finalizeCloseModal(modal);
+      return;
+    }
+
+    clearPendingModalClose();
+    const myToken = ++modalTransitionToken;
+    const panel = document.getElementById("stepup-modal-panel");
+    const target = panel || modal;
+
+    modal.classList.remove("is-open");
+    modal.classList.add("is-closing");
+
+    let finished = false;
+    const onDone = () => {
+      if (finished) return;
+      finished = true;
+      if (modalTransitionToken !== myToken) return;
+      finalizeCloseModal(modal);
+    };
+
+    const onTransitionEnd = (event) => {
+      if (event.target !== target) return;
+      onDone();
+    };
+
+    target.addEventListener("transitionend", onTransitionEnd);
+    modalCloseCleanup = () => target.removeEventListener("transitionend", onTransitionEnd);
+    modalCloseTimer = setTimeout(onDone, 180);
   }
 
   function openModal(targetTab, { errorMessage = "", afterUnlock = null } = {}) {
@@ -210,14 +264,22 @@ export function createStepUpController({
     showModalError(errorMessage);
 
     if (modal) {
+      clearPendingModalClose();
+      modalTransitionToken += 1;
+      const myToken = modalTransitionToken;
       const panel = document.getElementById("stepup-modal-panel");
+      modal.classList.remove("hidden", "is-closing", "is-open");
+      modal.classList.add("flex");
       if (panel) {
         panel.classList.remove("ox-modal-enter");
         void panel.offsetWidth;
         panel.classList.add("ox-modal-enter");
       }
-      modal.classList.remove("hidden");
-      modal.classList.add("flex");
+      void modal.offsetWidth;
+      requestAnimationFrame(() => {
+        if (modalTransitionToken !== myToken) return;
+        modal.classList.add("is-open");
+      });
     }
 
     if (authType !== "discord" && pwdInput) {
@@ -391,7 +453,7 @@ export function createStepUpController({
       });
     }
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && modal && !modal.classList.contains("hidden")) {
+      if (event.key === "Escape" && modal && !modal.classList.contains("hidden") && !modal.classList.contains("is-closing")) {
         closeModal();
       }
     });

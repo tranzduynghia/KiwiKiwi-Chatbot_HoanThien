@@ -1386,6 +1386,27 @@ html[data-theme="light"] .presence-status-btn[data-selected="true"] {
 .stepup-modal-backdrop {
   background: var(--modal-backdrop);
   backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+
+.stepup-modal-backdrop.is-open {
+  opacity: 1;
+}
+
+.stepup-modal-backdrop.is-closing {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stepup-modal-panel {
+  transition: transform 160ms ease-out, opacity 160ms ease-out;
+}
+
+.stepup-modal-backdrop.is-closing .stepup-modal-panel {
+  animation: none;
+  opacity: 0;
+  transform: translate3d(0, 8px, 0) scale(0.97);
 }
 
 .stepup-modal-panel,
@@ -1651,6 +1672,8 @@ html[data-theme="light"] .presence-status-btn[data-selected="true"] {
   .ox-tab-enter,
   .ox-enter,
   .ox-modal-enter,
+  .stepup-modal-backdrop,
+  .stepup-modal-panel,
   .rt-popover,
   .rt-modal-panel,
   .rt-font-trigger,
