@@ -218,7 +218,17 @@ def create_pages_router(
             get_bot() if callable(get_bot) else None,
             usage_stats,
         )
-        nav_items = [{"key": k, "path": f"/{k}", "label": LEGAL_DOC_LABELS[k]} for k in LEGAL_DOC_KEYS]
+        public_nav_labels = {
+            "toslinks": "Danh mục ToS",
+            "legal": "Pháp lý",
+            "terms": "Điều khoản sử dụng",
+            "policies": "Chính sách bảo mật",
+            "guidelines": "Chính sách cộng đồng",
+        }
+        nav_items = [
+            {"key": k, "path": f"/{k}", "label": public_nav_labels.get(k, LEGAL_DOC_LABELS[k])}
+            for k in LEGAL_DOC_KEYS
+        ]
         response = _render_template(
             templates,
             request,

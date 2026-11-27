@@ -46,12 +46,12 @@
 
   {# Nội dung chính trang pháp lý công khai #}
   <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
-    {# Thanh điều hướng giữa 4 tài liệu pháp lý #}
-    <nav class="flex flex-wrap gap-2" aria-label="Tài liệu pháp lý">
+    {# Thanh điều hướng 1 hàng giữa 5 tài liệu pháp lý (cuộn ngang mượt trên màn hình hẹp) #}
+    <nav class="flex items-center gap-2 flex-nowrap overflow-x-auto pb-1" aria-label="Tài liệu pháp lý">
       {% for item in nav_items %}
       <a
         href="{{ item.path }}"
-        class="px-3.5 py-2 rounded-lg text-xs font-medium border transition-colors duration-150 {{ 'bg-rose-600 text-white border-rose-500 shadow-sm' if item.key == active_key else 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]' }}"
+        class="whitespace-nowrap shrink-0 px-3.5 py-2 rounded-lg text-sm font-medium border transition-colors duration-150 {{ 'bg-rose-600 text-white border-rose-500 shadow-sm' if item.key == active_key else 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]' }}"
       >
         {{ item.label }}
       </a>
