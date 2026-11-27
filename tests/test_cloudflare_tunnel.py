@@ -385,3 +385,138 @@ async def test_tunnel_boot_preconfiguration_from_env_vars(fake_db, fake_gemini, 
     assert repo2.tunnel_cfg()["cf_tunnel_token"] == "eyJ-db-saved-token-wins"
     assert repo2.tunnel_cfg()["cf_tunnel_enabled"] is False
 
+
+@pytest.mark.asyncio
+async def test_tunnel_deferred_update_202_real_verification_and_error_state(fake_db, fake_gemini, fake_bot):
+    """POST /api/tunnel/update trả HTTP 202 (restarting), trì hoãn khởi chạy cloudflared, và GET /api/tunnel/status phản ánh đúng connected/error."""
+    import time
+
+    spawned_calls: list[tuple[tuple[str, ...], dict[str, str]]] = []
+    scenario = {"mode": "ok"}
+
+    async def fake_spawn(*cmd, **kwargs):
+        env = dict(kwargs.get("env") or {})
+        spawned_calls.append((cmd, env))
+        if scenario["mode"] == "ok":
+            return FakeSubprocess(
+                pid=7200 + len(spawned_calls),
+                stderr_lines=[b"INF Registered tunnel connection connIndex=0 location=SIN\n"],
+            )
+        proc = FakeSubprocess(
+            pid=7300 + len(spawned_calls),
+            stderr_lines=[b"ERR Unauthorized tunnel token eyJ-SECRET-SHOULD-NOT-LEAK-999\n"],
+        )
+        proc.returncode = 1
+        proc.stderr.close()
+        proc._wait_event.set()
+        return proc
+
+    settings = AppSettings(
+        discord_token="test-token",
+        gemini_api_key="test-key",
+        session_secret="test-secret-deferred-tunnel-202-0123456789",
+    )
+    tunnel_service = CloudflareTunnelService(
+        local_port=10000,
+        spawn_subprocess=fake_spawn,
+        restart_delay_seconds=0.15,
+        edge_connect_wait_seconds=1.5,
+    )
+    container = build_container(
+        settings,
+        gemini_client=fake_gemini,
+        reserve_buffer_bytes=16 * 1024,
+        cloudflare_tunnel=tunnel_service,
+    )
+    await container.sync_coordinator.attach_db(fake_db)
+    await container.session_repo.attach_db(fake_db)
+    await container.auth_service.create_user("admin", "AdminPass123!", role="admin")
+    await container.auth_service.create_user("operator1", "OperPass123!", role="operator")
+
+    web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
+    with TestClient(web_app) as client:
+        # 1) RBAC: chưa đăng nhập -> 401; operator -> 403 trên POST /api/tunnel/update
+        assert client.post("/api/tunnel/update", json={"cf_tunnel_enabled": True, "cf_tunnel_mode": "quick"}).status_code == 401
+        assert client.get("/api/tunnel/status").status_code == 401
+
+        client.post("/auth/login", json={"username": "operator1", "password": "OperPass123!"})
+        assert client.post("/api/tunnel/update", json={"cf_tunnel_enabled": True, "cf_tunnel_mode": "quick"}).status_code == 403
+        assert client.get("/api/tunnel/status").status_code == 200
+
+        # 2) Admin: POST /api/tunnel/update -> HTTP 202 Accepted ngay lập tức với status="restarting", chưa spawn cloudflared ngay
+        client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
+        secret_token = "eyJhIjoiZGVmZXJyZWQtdGVzdCIsInQiOiJ0dW5uZWwiLCJzIjoic2VjcmV0In0="
+        res_202 = client.post(
+            "/api/tunnel/update",
+            json={
+                "cf_tunnel_enabled": True,
+                "cf_tunnel_mode": "named",
+                "cf_tunnel_token": secret_token,
+                "tunnel_only_inbound": False,
+                "proxy_headers": True,
+            },
+        )
+        assert res_202.status_code == 202
+        body_202 = res_202.json()
+        assert body_202["ok"] is True
+        assert body_202["status"] == "restarting"
+        assert body_202["cloudflare_tunnel"]["status"] == "restarting"
+        assert secret_token not in res_202.text
+        assert body_202["config"]["tunnel"]["has_cf_tunnel_token"] is True
+
+        # 3) Poll GET /api/tunnel/status cho tới khi chuyển thật sang connected
+        final_ok = None
+        for _ in range(25):
+            st = client.get("/api/tunnel/status").json()
+            if st["status"] != "restarting":
+                final_ok = st
+                break
+            time.sleep(0.05)
+        assert final_ok is not None
+        assert final_ok["status"] == "connected"
+        assert final_ok["running"] is True
+        assert final_ok["edge_connected"] is True
+        assert secret_token not in str(final_ok)
+
+        # Kiểm tra TUNNEL_TOKEN chỉ truyền qua env, tuyệt đối không xuất hiện trong CLI argv
+        assert len(spawned_calls) == 1
+        cmd_ok, env_ok = spawned_calls[0]
+        assert secret_token not in " ".join(cmd_ok)
+        assert env_ok.get("TUNNEL_TOKEN") == secret_token
+
+        # Kiểm tra Audit Log đã ghi lại thao tác cập nhật
+        audit_items = client.get("/api/audit-logs?section=tunnel").json()["items"]
+        assert len(audit_items) >= 1
+
+        # 4) Khi cloudflared thoát lỗi sớm -> GET /api/tunnel/status trả status="error" kèm thông điệp đã che bí mật
+        scenario["mode"] = "fail"
+        res_fail = client.post(
+            "/api/tunnel/update",
+            json={
+                "cf_tunnel_enabled": True,
+                "cf_tunnel_mode": "named",
+                "tunnel_only_inbound": False,
+                "proxy_headers": True,
+            },
+        )
+        assert res_fail.status_code == 202
+
+        final_err = None
+        for _ in range(25):
+            st = client.get("/api/tunnel/status").json()
+            if st["status"] != "restarting":
+                final_err = st
+                break
+            time.sleep(0.05)
+        assert final_err is not None
+        assert final_err["status"] == "error"
+        assert final_err["last_error"] is not None
+        assert "eyJ-SECRET-SHOULD-NOT-LEAK-999" not in final_err["last_error"]
+
+        # 5) Dashboard HTML có nút spinner xác minh và 0 HTML comments
+        dash_html = client.get("/dashboard").text
+        assert 'id="btn-save-tunnel-spinner"' in dash_html
+        assert 'id="btn-save-tunnel-label"' in dash_html
+        assert "<!--" not in dash_html
+
+

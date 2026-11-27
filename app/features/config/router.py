@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
 
 from app.core.security import sanitize_config_for_response
 from app.core.sync import WriteBehindSyncCoordinator
@@ -35,6 +36,7 @@ def create_config_router(
     auth_deps: Any,
     apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
     apply_tunnel_fn: Optional[Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]] = None,
+    schedule_tunnel_fn: Optional[Callable[[dict[str, Any]], dict[str, Any]]] = None,
     apply_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     start_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     update_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
@@ -42,7 +44,7 @@ def create_config_router(
     trace_warp_fn: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None,
     get_tunnel_status_fn: Optional[Callable[[], dict[str, Any]]] = None,
 ) -> APIRouter:
-    """Tạo router cho `/api/config*` và các endpoint điều khiển WARP `/api/warp/start`, `/api/warp/update`, `/api/warp/stop`, `/api/warp/trace`."""
+    """Tạo router cho `/api/config*`, `/api/tunnel/update`, `/api/tunnel/status` và `/api/warp/*`."""
     router = APIRouter(tags=["config"])
 
     @router.get("/api/config")
@@ -132,12 +134,11 @@ def create_config_router(
             "sync": sync_coordinator.sync_status(),
         }
 
-    @router.put("/api/config/tunnel")
-    async def api_update_tunnel_config(
+    async def _persist_tunnel_payload(
         payload: TunnelConfigPayload,
-        user: dict[str, Any] = Depends(auth_deps.require_admin),
-    ):
-        """Lưu cấu hình Cloudflare Tunnel vào MongoDB, ghi Audit Log và khởi động/tắt nóng tiến trình `cloudflared`."""
+        user: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Xác thực payload Tunnel, lưu cấu hình vào MongoDB, ghi Audit Log và đồng bộ WARP nếu có."""
         current_cfg = await config_service.get_config(force=True)
         existing_tunnel = current_cfg.get("tunnel") if isinstance(current_cfg.get("tunnel"), dict) else {}
         existing_token = str(existing_tunnel.get("cf_tunnel_token") or "")
@@ -177,6 +178,15 @@ def create_config_router(
         if apply_warp_fn is not None and payload.warp_outbound_enabled is not None:
             await apply_warp_fn(clean_tunnel["warp_outbound_enabled"])
 
+        return clean_tunnel, updated
+
+    @router.put("/api/config/tunnel")
+    async def api_update_tunnel_config(
+        payload: TunnelConfigPayload,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Lưu cấu hình Cloudflare Tunnel vào MongoDB, ghi Audit Log và khởi động/tắt nóng tiến trình `cloudflared`."""
+        clean_tunnel, updated = await _persist_tunnel_payload(payload, user)
         tunnel_status: Optional[dict[str, Any]] = None
         if apply_tunnel_fn is not None:
             tunnel_status = await apply_tunnel_fn(clean_tunnel)
@@ -187,6 +197,40 @@ def create_config_router(
             "cloudflare_tunnel": tunnel_status,
             "sync": sync_coordinator.sync_status(),
         }
+
+    @router.post("/api/tunnel/update", status_code=202)
+    async def api_tunnel_deferred_update(
+        payload: TunnelConfigPayload,
+        user: dict[str, Any] = Depends(auth_deps.require_admin),
+    ):
+        """Lưu cấu hình Tunnel, ghi Audit Log và trì hoãn restart `cloudflared` 0.8s trong nền (trả 202 Accepted tránh 502 qua Tunnel cũ)."""
+        clean_tunnel, updated = await _persist_tunnel_payload(payload, user)
+        tunnel_status: Optional[dict[str, Any]] = None
+        if schedule_tunnel_fn is not None:
+            tunnel_status = schedule_tunnel_fn(clean_tunnel)
+        elif apply_tunnel_fn is not None:
+            tunnel_status = await apply_tunnel_fn(clean_tunnel)
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                "ok": True,
+                "status": "restarting",
+                "config": _mask_config_secrets(updated),
+                "cloudflare_tunnel": tunnel_status,
+                "sync": sync_coordinator.sync_status(),
+            },
+        )
+
+    @router.get("/api/tunnel/status")
+    async def api_get_tunnel_status(
+        _user: dict[str, Any] = Depends(auth_deps.require_user),
+    ):
+        """Trả về trạng thái thực tế của `cloudflared` (`restarting` / `connected` / `error` / `stopped`) để Dashboard xác minh sau khi cập nhật."""
+        snap = get_tunnel_status_fn() if callable(get_tunnel_status_fn) else None
+        if snap is None:
+            return {"status": "stopped", "running": False, "edge_connected": False, "last_error": None}
+        return snap
 
     async def _execute_warp_change(
         *,

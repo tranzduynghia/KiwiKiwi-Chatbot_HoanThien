@@ -52,6 +52,7 @@ _REDACT_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"scrypt\$\d+\$\d+\$\d+\$[0-9a-fA-F]+\$[0-9a-fA-F]+"), "[REDACTED_HASH]"),
     (re.compile(r"AIza[0-9A-Za-z_-]{20,}"), "[REDACTED_KEY]"),
     (re.compile(r"eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9._-]{8,}"), "[REDACTED_TOKEN]"),
+    (re.compile(r"\beyJ[A-Za-z0-9+/=_-]{16,}"), "[REDACTED_TOKEN]"),
     (re.compile(r"[MN][A-Za-z\d]{23,28}\.[A-Za-z\d_-]{6}\.[A-Za-z\d_-]{27,}"), "[REDACTED_TOKEN]"),
     (
         re.compile(

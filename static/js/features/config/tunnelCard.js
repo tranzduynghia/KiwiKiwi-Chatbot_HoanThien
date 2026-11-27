@@ -7,7 +7,7 @@
  * - Mọi thao tác (Bật, Tắt, Cập nhật) đều bắt buộc đi qua Hộp thoại Xác nhận trong ứng dụng (`showConfirmModal`)
  */
 
-import { apiRequest, sanitizeHttpUrl, showToast } from "../../core/api.js";
+import { apiRequest, formatErrorMessage, sanitizeHttpUrl, showToast } from "../../core/api.js";
 import { computeFormDiff, confirmSaveChanges, showConfirmModal } from "../../core/confirmSave.js";
 
 const TOGGLE_BTN_BASE_CLASS =
@@ -15,6 +15,8 @@ const TOGGLE_BTN_BASE_CLASS =
 
 const TOGGLE_BTN_START_CLASS = `${TOGGLE_BTN_BASE_CLASS} bg-emerald-600 hover:bg-emerald-500 border-emerald-500/40`;
 const TOGGLE_BTN_STOP_CLASS = `${TOGGLE_BTN_BASE_CLASS} bg-rose-600 hover:bg-rose-500 border-rose-500/40`;
+const TUNNEL_VERIFY_POLL_MS = 1500;
+const TUNNEL_VERIFY_TIMEOUT_MS = 12000;
 
 function formatModeLabel(mode) {
   return mode === "quick" ? "Quick Tunnel (trycloudflare.com)" : "Named Tunnel (Token)";
@@ -31,6 +33,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
   let hasTelemetry = false;
   let isTunnelActive = false;
   let isTogglingWarp = false;
+  let isRestartingTunnel = false;
   let initialState = null;
 
   function syncModeInputs() {
@@ -126,15 +129,19 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const errEl = document.getElementById("cf-last-error");
 
     if (badgeEl) {
+      const tunnelStatus = String(telemetry.status || "").toLowerCase();
       let label = "⚫ Đã tắt";
       let cls = "bg-[#181d27] text-[#8b95a7] border-[#2a3140]";
-      if (telemetry.running) {
+      if (tunnelStatus === "restarting" || isRestartingTunnel) {
+        label = "🟡 Đang khởi động lại...";
+        cls = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+      } else if (tunnelStatus === "error" || (telemetry.last_error && !telemetry.running)) {
+        label = "🔴 Lỗi Tunnel";
+        cls = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+      } else if (telemetry.running) {
         const modeLabel = telemetry.mode === "quick" ? "Quick" : "Named";
         label = `🟢 Đang chạy (${modeLabel} · PID ${telemetry.pid ?? "?"})`;
         cls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
-      } else if (telemetry.last_error) {
-        label = "🔴 Lỗi Tunnel";
-        cls = "bg-rose-500/15 text-rose-300 border-rose-500/30";
       } else if (telemetry.enabled) {
         label = "🟡 Đang khởi động...";
         cls = "bg-amber-500/15 text-amber-300 border-amber-500/30";
@@ -410,10 +417,106 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     }
   }
 
+  function setTunnelUpdateLoading(loading) {
+    isRestartingTunnel = Boolean(loading);
+    const saveBtn = document.getElementById("btn-save-tunnel");
+    const toggleBtn = document.getElementById("btn-toggle-tunnel");
+    const iconEl = document.getElementById("btn-save-tunnel-icon");
+    const spinnerEl = document.getElementById("btn-save-tunnel-spinner");
+    const labelEl = document.getElementById("btn-save-tunnel-label");
+    if (saveBtn) saveBtn.disabled = isRestartingTunnel || !isAdmin;
+    if (toggleBtn) toggleBtn.disabled = isRestartingTunnel || !isAdmin;
+    if (iconEl) iconEl.classList.toggle("hidden", isRestartingTunnel);
+    if (spinnerEl) spinnerEl.classList.toggle("hidden", !isRestartingTunnel);
+    if (labelEl) {
+      labelEl.textContent = isRestartingTunnel ? "Đang khởi động lại Tunnel..." : "Cập nhật Tunnel";
+    }
+  }
+
+  async function pollTunnelVerification({ expectedEnabled, mode }) {
+    const deadline = Date.now() + TUNNEL_VERIFY_TIMEOUT_MS;
+    let lastErrorText = "";
+
+    try {
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, TUNNEL_VERIFY_POLL_MS));
+        let snap = null;
+        try {
+          const resp = await fetch("/api/tunnel/status", {
+            method: "GET",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+          });
+          if (resp.status === 401) {
+            window.location.href = "/login";
+            return;
+          }
+          // Hấp thụ lỗi 502/503/504 tạm thời trong lúc cloudflared đang chuyển mạch sang tiến trình mới
+          if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
+            continue;
+          }
+          if (!resp.ok) {
+            lastErrorText = `Lỗi HTTP ${resp.status}`;
+            continue;
+          }
+          snap = await resp.json().catch(() => null);
+        } catch {
+          // Mạng bị ngắt thoáng qua đúng thời điểm cutover Tunnel -> tiếp tục poll tới khi ổn định hoặc hết hạn
+          continue;
+        }
+
+        if (!snap || typeof snap !== "object") continue;
+        const st = String(snap.status || "").toLowerCase();
+        if (st === "restarting") {
+          renderTelemetry(snap);
+          continue;
+        }
+
+        setTunnelUpdateLoading(false);
+        renderTelemetry(snap);
+
+        if (expectedEnabled && st === "connected") {
+          if (snap.public_url) {
+            showToast(`✅ Cloudflare Quick Tunnel đã kết nối: ${snap.public_url}`);
+          } else {
+            showToast(`✅ Cloudflare Tunnel (${formatModeLabel(mode)}) đã khởi động lại và kết nối thành công!`);
+          }
+          if (onConfigSaved) await onConfigSaved();
+          return;
+        }
+        if (!expectedEnabled && st === "stopped") {
+          showToast("✅ Đã tắt Cloudflare Tunnel thành công.");
+          if (onConfigSaved) await onConfigSaved();
+          return;
+        }
+
+        showToast(
+          `❌ Khởi động lại Tunnel thất bại: ${snap.last_error || "cloudflared không thể kết nối Cloudflare Edge."}`,
+          false
+        );
+        if (onConfigSaved) await onConfigSaved();
+        return;
+      }
+
+      setTunnelUpdateLoading(false);
+      showToast(
+        `❌ Quá thời gian xác minh Cloudflare Tunnel (${lastErrorText || "chưa nhận được xác nhận kết nối Edge"}).`,
+        false
+      );
+      if (onConfigSaved) await onConfigSaved();
+    } finally {
+      if (isRestartingTunnel) {
+        setTunnelUpdateLoading(false);
+      }
+    }
+  }
+
   /**
    * Mở Hộp thoại Xác nhận trong ứng dụng bắt buộc cho cả 3 thao tác: `start` (Bật), `stop` (Tắt), `update` (Cập nhật).
    */
   async function submitTunnelAction(action) {
+    if (isRestartingTunnel) return;
+
     const modeEl = document.getElementById("cf-tunnel-mode");
     const tokenEl = document.getElementById("cf-tunnel-token");
     const inboundLockEl = document.getElementById("cf-tunnel-only-inbound");
@@ -529,28 +632,75 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
             }
           : {
               title: "Xác nhận cập nhật Cloudflare Tunnel",
-              subtitle: "Lưu cấu hình Chế độ / Token mới và khởi động lại nóng tiến trình cloudflared",
+              subtitle: "Lưu cấu hình Chế độ / Token mới, trì hoãn khởi động lại cloudflared và xác minh kết nối thực tế",
               confirmLabel: "Cập nhật Tunnel",
               confirmTone: "primary",
             };
 
+    let shouldVerifyRestart = false;
     await showConfirmModal({
       ...modalMeta,
       warnings,
       entries: modalEntries,
       changes: changesMap,
       onConfirm: async (changes) => {
+        const payloadBody = JSON.stringify({
+          cf_tunnel_enabled: enabled,
+          cf_tunnel_mode: mode,
+          cf_tunnel_token: tokenVal || null,
+          tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
+          proxy_headers: proxyHeaders,
+          warp_outbound_enabled: warpOutboundEnabled,
+          changes,
+        });
+
+        if (action === "update") {
+          let res = null;
+          let transientCutover = false;
+          try {
+            const resp = await fetch("/api/tunnel/update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: payloadBody,
+            });
+            if (resp.status === 401) {
+              window.location.href = "/login";
+              throw new Error("Phiên đăng nhập đã hết hạn.");
+            }
+            if (resp.status === 502 || resp.status === 503 || resp.status === 504) {
+              // Hấp thụ 502 thoáng qua trong lúc cutover và chuyển sang vòng lặp xác minh thực tế
+              transientCutover = true;
+            } else {
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok) {
+                throw new Error(formatErrorMessage(data.detail ?? data.message, `Lỗi HTTP ${resp.status}`));
+              }
+              res = data;
+            }
+          } catch (err) {
+            if (err instanceof TypeError) {
+              transientCutover = true;
+            } else {
+              throw err;
+            }
+          }
+
+          if (res?.config) {
+            fill(res.config);
+          }
+          setTunnelUpdateLoading(true);
+          if (res?.cloudflare_tunnel) {
+            renderTelemetry(res.cloudflare_tunnel);
+          } else if (transientCutover) {
+            renderTelemetry({ status: "restarting", enabled, mode, running: false });
+          }
+          shouldVerifyRestart = true;
+          return;
+        }
+
         const res = await apiRequest("/api/config/tunnel", {
           method: "PUT",
-          body: JSON.stringify({
-            cf_tunnel_enabled: enabled,
-            cf_tunnel_mode: mode,
-            cf_tunnel_token: tokenVal || null,
-            tunnel_only_inbound: enabled ? tunnelOnlyInbound : false,
-            proxy_headers: proxyHeaders,
-            warp_outbound_enabled: warpOutboundEnabled,
-            changes,
-          }),
+          body: payloadBody,
         });
         if (res.config) {
           fill(res.config);
@@ -567,14 +717,16 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
           showToast(`Đã lưu cấu hình nhưng cloudflared báo lỗi: ${res.cloudflare_tunnel.last_error}`, false);
         } else if (res.cloudflare_tunnel?.public_url) {
           showToast(`✅ Cloudflare Quick Tunnel đã chạy: ${res.cloudflare_tunnel.public_url}`);
-        } else if (action === "start") {
-          showToast(`✅ Đã bật Cloudflare Tunnel (${formatModeLabel(mode)}) và lưu MongoDB Atlas!`);
         } else {
-          showToast("✅ Đã cập nhật cấu hình và khởi động lại nóng Cloudflare Tunnel!");
+          showToast(`✅ Đã bật Cloudflare Tunnel (${formatModeLabel(mode)}) và lưu MongoDB Atlas!`);
         }
         if (onConfigSaved) await onConfigSaved();
       },
     });
+
+    if (shouldVerifyRestart) {
+      await pollTunnelVerification({ expectedEnabled: enabled, mode });
+    }
   }
 
   async function copyOriginToClipboard() {

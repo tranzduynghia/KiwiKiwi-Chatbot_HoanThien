@@ -510,6 +510,7 @@
         >
           {# Biểu tượng làm mới / áp dụng lại cấu hình nội tuyến #}
           <svg
+            id="btn-save-tunnel-icon"
             class="w-3.5 h-3.5 shrink-0 text-slate-300"
             viewBox="0 0 24 24"
             fill="none"
@@ -524,7 +525,18 @@
             <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
             <path d="M16 16h5v5" />
           </svg>
-          <span>Cập nhật Tunnel</span>
+          {# Biểu tượng xoay khi đang chờ cloudflared khởi động lại và xác minh kết nối #}
+          <svg
+            id="btn-save-tunnel-spinner"
+            class="hidden w-3.5 h-3.5 shrink-0 text-amber-300 animate-spin"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+            <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z"></path>
+          </svg>
+          <span id="btn-save-tunnel-label">Cập nhật Tunnel</span>
         </button>
       </div>
       {% else %}
