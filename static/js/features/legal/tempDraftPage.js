@@ -5,6 +5,7 @@
  */
 
 import { setStepUpRequiredHandler } from "../../core/api.js";
+import { initCustomSelects } from "../../core/customSelect.js";
 import { createStepUpController } from "../../core/stepUp.js";
 import { initThemeSwitcher } from "../../core/themeSwitcher.js";
 import { createLegalCmsTabController } from "./legalCmsTab.js";
@@ -136,7 +137,7 @@ function mountTempEditorDom() {
             </div>
           </div>
 
-          <select id="rte-block-format" class="ox-rte-select" title="Kiểu đoạn / Tiêu đề" aria-label="Kiểu đoạn">
+          <select id="rte-block-format" class="ox-rte-select min-w-[152px]" title="Kiểu đoạn / Tiêu đề" aria-label="Kiểu đoạn">
             <option value="p">Đoạn văn (&lt;p&gt;)</option>
             <option value="h1">Tiêu đề H1</option>
             <option value="h2">Tiêu đề H2</option>
@@ -259,6 +260,7 @@ setStepUpRequiredHandler(() => {
 
 async function initTempDraftPage() {
   initThemeSwitcher();
+  initCustomSelects();
   stepUp.bindEvents();
   renderLockedState(() => stepUp.openModal("temp-page"));
 

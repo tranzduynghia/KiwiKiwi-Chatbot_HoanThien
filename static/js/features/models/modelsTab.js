@@ -137,7 +137,7 @@ export function createModelsTabController({ onRefreshAll }) {
             </td>
             <td class="py-2.5 pr-3">
               <div class="flex gap-1">
-                <select data-field="tag_preset" class="inp py-1.5 text-xs w-28">
+                <select data-field="tag_preset" class="inp py-1.5 text-xs min-w-[155px] w-auto">
                   <option value="" ${!tag ? "selected" : ""}>Tự động (${escapeHtml(item.default_badge)})</option>
                   <option value="🆓" ${tag === "🆓" ? "selected" : ""}>🆓 Free</option>
                   <option value="🧪" ${tag === "🧪" ? "selected" : ""}>🧪 Preview</option>
@@ -228,7 +228,8 @@ export function createModelsTabController({ onRefreshAll }) {
       } else if (field === "hidden") {
         setOverride(modelId, "hidden", event.target.checked);
       } else if (field === "tag_preset") {
-        const tagInput = event.target.nextElementSibling;
+        const tagInput = event.target.closest("td")?.querySelector('input[data-field="tag"]');
+        if (!tagInput) return;
         if (event.target.value === "__custom") {
           tagInput.focus();
           return;

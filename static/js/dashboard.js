@@ -5,6 +5,7 @@
  */
 
 import { apiRequest, setStepUpRequiredHandler, showToast } from "./core/api.js";
+import { initCustomSelects } from "./core/customSelect.js";
 import { createStepUpController } from "./core/stepUp.js";
 import { initThemeSwitcher } from "./core/themeSwitcher.js";
 import { createAuditTabController } from "./features/audit/auditTab.js";
@@ -372,6 +373,7 @@ function bindShellControls() {
 
 async function initDashboard() {
   initThemeSwitcher();
+  initCustomSelects();
   bindShellControls();
   stepUp.bindEvents();
   statusTab.bindEvents();

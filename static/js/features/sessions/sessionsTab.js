@@ -151,7 +151,7 @@ export function createSessionsTabController({ isStepUpUnlocked, onRequestUnlock 
 
     root.innerHTML = `
       <form id="form-search-sessions" class="stepup-card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-        <div class="lg:col-span-3">
+        <div class="lg:col-span-2">
           <label class="block text-[11px] stepup-text-muted mb-1" for="sessions-search-q">Từ khóa nội dung / Mã chat</label>
           <input id="sessions-search-q" type="text" placeholder="Bỏ trống để xem tất cả..." class="stepup-input" />
         </div>
@@ -169,7 +169,7 @@ export function createSessionsTabController({ isStepUpUnlocked, onRequestUnlock 
             <option value="">Tất cả vai trò server</option>
           </select>
         </div>
-        <div class="lg:col-span-1">
+        <div class="lg:col-span-2">
           <label class="block text-[11px] stepup-text-muted mb-1" for="sessions-search-role">Loại tin</label>
           <select id="sessions-search-role" class="stepup-select">
             <option value="">Tất cả</option>
