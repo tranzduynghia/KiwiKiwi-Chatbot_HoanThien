@@ -534,9 +534,9 @@
 
   {# Thẻ điều khiển Cloudflare Tunnel (cloudflared) hỗ trợ hot-reload không cần restart bot #}
   <div id="cf-tunnel-card" class="card p-5 space-y-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <div>
-        <div class="flex flex-wrap items-center gap-2">
+    <div class="space-y-1.5">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
           <h3 class="font-semibold text-sm text-white inline-flex items-center gap-2">
             {# Biểu tượng đám mây Cloudflare chính thức (SVG inline, không tải tài nguyên ngoài) #}
             <svg
@@ -571,18 +571,14 @@
             <span id="cf-outbound-text">Outbound: Direct</span>
           </span>
         </div>
-        <p class="text-[11px] text-[#8b95a7] mt-1">
-          Quản lý đường hầm Zero Trust / Quick Tunnel và định tuyến Outbound Cloudflare WARP trực tiếp trong container — áp dụng nóng không cần khởi động lại bot
-        </p>
-      </div>
-      {% if user.is_admin %}
-      {# Cụm 2 nút xếp dọc: nút trên bật/tắt động theo tunnel_running (đỏ Tắt Tunnel khi chạy, xanh Bật Tunnel khi tắt) #}
-      <div class="flex flex-col gap-2 min-w-[172px]">
+
+        {% if user.is_admin %}
+        {# Nút bật/tắt nguồn Tunnel chính đặt gọn ở góc phải tiêu đề thẻ #}
         <button
           type="button"
           id="btn-toggle-tunnel"
           data-tunnel-active="{{ 'true' if tunnel_running else 'false' }}"
-          class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-white border shadow-sm transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed {{ 'bg-rose-600 hover:bg-rose-500 border-rose-500/40' if tunnel_running else 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/40' }}"
+          class="shrink-0 whitespace-nowrap inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold text-white border shadow-sm transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed {{ 'bg-rose-600 hover:bg-rose-500 border-rose-500/40' if tunnel_running else 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500/40' }}"
         >
           {# Biểu tượng nguồn IEC (⏻) nội tuyến #}
           <svg
@@ -600,60 +596,28 @@
           </svg>
           <span id="btn-toggle-tunnel-label">{{ 'Tắt Tunnel' if tunnel_running else 'Bật Tunnel' }}</span>
         </button>
-        <button
-          type="button"
-          id="btn-save-tunnel"
-          class="w-full inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {# Biểu tượng làm mới / áp dụng lại cấu hình nội tuyến #}
-          <svg
-            id="btn-save-tunnel-icon"
-            class="w-3.5 h-3.5 shrink-0 text-slate-300"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-            <path d="M3 3v5h5" />
-            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
-            <path d="M16 16h5v5" />
-          </svg>
-          {# Biểu tượng xoay khi đang chờ cloudflared khởi động lại và xác minh kết nối #}
-          <svg
-            id="btn-save-tunnel-spinner"
-            class="hidden w-3.5 h-3.5 shrink-0 text-amber-300 animate-spin"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
-            <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z"></path>
-          </svg>
-          <span id="btn-save-tunnel-label">Cập nhật Tunnel</span>
-        </button>
+        {% else %}
+        <span class="text-[11px] text-[#5e6778] italic">Chỉ Admin mới được chỉnh Cloudflare Tunnel</span>
+        {% endif %}
       </div>
-      {% else %}
-      <span class="text-[11px] text-[#5e6778] italic">Chỉ Admin mới được chỉnh Cloudflare Tunnel</span>
-      {% endif %}
+      <p class="text-[11px] text-[#8b95a7]">
+        Quản lý đường hầm Zero Trust / Quick Tunnel và định tuyến Outbound Cloudflare WARP trực tiếp trong container — áp dụng nóng không cần khởi động lại bot
+      </p>
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-      {# Chọn chế độ Tunnel & nhập Token bảo mật #}
+      {# Chọn chế độ Tunnel, nhập Token toàn chiều rộng & nút Cập nhật Tunnel ở chân form cấu hình #}
       <div class="lg:col-span-7 space-y-3">
-        <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
-          <div class="sm:col-span-5">
+        <div class="space-y-3">
+          <div>
             <label class="block text-xs text-[#8b95a7] mb-1.5" for="cf-tunnel-mode">Chế độ Tunnel</label>
             <select id="cf-tunnel-mode" class="inp" {{ '' if user.is_admin else 'disabled' }}>
               <option value="named">Named Tunnel (Token)</option>
               <option value="quick">Quick Tunnel (trycloudflare.com)</option>
             </select>
           </div>
-          <div id="cf-tunnel-token-wrap" class="sm:col-span-7">
-            <div class="flex items-center justify-between gap-2 mb-1.5">
+          <div id="cf-tunnel-token-wrap">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-1.5">
               <label class="block text-xs text-[#8b95a7]" for="cf-tunnel-token">Cloudflare Tunnel Token</label>
               <span id="cf-token-hint" class="text-[10px] text-[#5e6778]">Chưa lưu Token</span>
             </div>
@@ -662,10 +626,50 @@
               type="password"
               autocomplete="new-password"
               placeholder="Dán Cloudflare Tunnel Token (eyJhIjoi...)"
-              class="inp font-mono text-xs"
+              class="inp w-full font-mono text-xs"
               {{ '' if user.is_admin else 'disabled' }}
             />
           </div>
+
+          {% if user.is_admin %}
+          <div class="flex items-center justify-end pt-0.5">
+            <button
+              type="button"
+              id="btn-save-tunnel"
+              class="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+            >
+              {# Biểu tượng làm mới / áp dụng lại cấu hình nội tuyến #}
+              <svg
+                id="btn-save-tunnel-icon"
+                class="w-3.5 h-3.5 shrink-0 text-slate-300"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                <path d="M16 16h5v5" />
+              </svg>
+              {# Biểu tượng xoay khi đang chờ cloudflared khởi động lại và xác minh kết nối #}
+              <svg
+                id="btn-save-tunnel-spinner"
+                class="hidden w-3.5 h-3.5 shrink-0 text-amber-300 animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+                <path class="opacity-90" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v3a5 5 0 0 0-5 5H4z"></path>
+              </svg>
+              <span id="btn-save-tunnel-label">Cập nhật Tunnel</span>
+            </button>
+          </div>
+          {% endif %}
         </div>
 
         {# Công tắc Chỉ nhận truy cập qua Cloudflare Tunnel #}
@@ -719,7 +723,7 @@
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">
               <label for="cf-warp-outbound-toggle" class="text-xs font-medium text-slate-200 cursor-pointer">
-                ⚡ Outbound qua Cloudflare WARP (<code>127.0.0.1:40000</code>)
+                ⚡ Outbound qua Cloudflare WARP (<code class="whitespace-nowrap">127.0.0.1:40000</code>)
               </label>
               <span
                 id="cf-warp-state-pill"
@@ -749,7 +753,7 @@
           <h4 class="text-sm font-semibold text-slate-100 select-none">Thông tin kết nối trực tiếp</h4>
           <div class="inline-flex items-center gap-1.5 rounded-full bg-slate-800/80 border border-slate-700/70 pl-2.5 pr-1 py-0.5 max-w-full min-w-0">
             <span class="text-[10px] text-slate-400 font-medium shrink-0 select-none">Origin:</span>
-            <code id="cf-origin-url" class="font-mono text-[11px] text-slate-200 truncate select-all cursor-pointer">{{ tunnel_origin_url }}</code>
+            <code id="cf-origin-url" class="font-mono text-[11px] text-slate-200 whitespace-nowrap overflow-x-auto max-w-full select-all cursor-pointer">{{ tunnel_origin_url }}</code>
             <button
               type="button"
               id="btn-copy-cf-origin"
@@ -798,7 +802,7 @@
             href="#"
             target="_blank"
             rel="noopener noreferrer"
-            class="font-mono text-xs text-emerald-300 hover:text-emerald-200 underline break-all"
+            class="block font-mono text-xs text-emerald-300 hover:text-emerald-200 underline whitespace-nowrap overflow-x-auto max-w-full"
           >—</a>
         </div>
 
@@ -806,14 +810,14 @@
         <div class="rounded-lg bg-slate-900/60 border border-slate-800/80 p-2.5 space-y-1.5">
           <div class="flex flex-wrap items-center justify-between gap-2 text-[10px]">
             <span class="text-slate-300 font-medium select-none">Outbound Proxy (WARP)</span>
-            <div class="inline-flex items-center gap-1.5">
-              <code id="cf-warp-endpoint" class="font-mono text-slate-400 select-all">socks5h://127.0.0.1:40000</code>
+            <div class="inline-flex flex-wrap items-center gap-1.5 max-w-full min-w-0">
+              <code id="cf-warp-endpoint" class="font-mono text-slate-400 whitespace-nowrap overflow-x-auto max-w-full select-all">socks5h://127.0.0.1:40000</code>
               {% if user.is_admin %}
               <button
                 type="button"
                 id="btn-warp-trace"
                 title="Kiểm tra cdn-cgi/trace qua WARP proxy (warp=on / warp=plus)"
-                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors"
+                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors whitespace-nowrap"
               >
                 🔍 Trace
               </button>
@@ -821,7 +825,7 @@
                 type="button"
                 id="btn-warp-reconnect"
                 title="Khởi động / kết nối lại WARP (wgcf + wireproxy)"
-                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors"
+                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors whitespace-nowrap"
               >
                 ↻ Kết nối lại
               </button>
@@ -838,7 +842,7 @@
           ></div>
         </div>
 
-        {# Bố cục 2 cột phân tách rõ ràng chế độ Named Tunnel và Quick Tunnel (có min-w-0 chống tràn ngang) #}
+        {# Bố cục 2 cột phân tách rõ ràng chế độ Named Tunnel và Quick Tunnel (chống ngắt dòng giữa tên miền URL) #}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
           {# Thẻ 1: Named Tunnel (Cố định) #}
           <div class="min-w-0 bg-slate-900/60 border border-slate-800/80 rounded-lg p-3 space-y-2">
@@ -851,11 +855,11 @@
                 Khuyên dùng
               </span>
             </div>
-            <p class="text-xs text-slate-300 leading-relaxed break-words select-none">
+            <p class="text-xs text-slate-300 leading-relaxed select-none">
               Trỏ Public Hostname trên Cloudflare Zero Trust về đúng địa chỉ
               <code
                 id="cf-named-origin-code"
-                class="inline-block max-w-full break-all px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 align-baseline select-all cursor-pointer"
+                class="inline-block max-w-full whitespace-nowrap overflow-x-auto align-bottom px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 select-all cursor-pointer"
               >{{ tunnel_origin_url }}</code>
               <span class="text-slate-400">(yêu cầu Tunnel Token).</span>
             </p>
@@ -872,10 +876,10 @@
                 Không cần Token
               </span>
             </div>
-            <p class="text-xs text-slate-300 leading-relaxed break-words select-none">
+            <p class="text-xs text-slate-300 leading-relaxed select-none">
               Tự cấp tên miền tạm
               <code
-                class="inline-block max-w-full break-all px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 align-baseline select-all cursor-pointer"
+                class="inline-block max-w-full whitespace-nowrap overflow-x-auto align-bottom px-1.5 py-0.5 rounded bg-slate-800/80 border border-slate-700/70 font-mono text-[11px] text-slate-200 select-all cursor-pointer"
               >https://*.trycloudflare.com</code>
               <span class="text-slate-400">(URL thay đổi mỗi lần khởi động lại).</span>
             </p>
