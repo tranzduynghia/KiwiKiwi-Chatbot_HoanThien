@@ -283,7 +283,7 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
             ? ` <span class="text-amber-300">⏳${Math.ceil(item.cooldown_left)}s</span>`
             : "";
           const arrow = idx < data.gemini.auto_chain.length - 1 ? '<span class="text-[#5e6778]">→</span>' : "";
-          return `<span class="px-2 py-1 rounded-md bg-[#0a0d12] border border-[#1e232e] font-mono text-[11px]">${escapeHtml(item.id)}${cd}</span>${arrow}`;
+          return `<span class="ox-surface-chip px-2 py-1 rounded-md font-mono text-[11px]">${escapeHtml(item.id)}${cd}</span>${arrow}`;
         })
         .join("");
       if (chainHtml !== lastChainHtml) {
@@ -304,10 +304,10 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
         if (dbBadge.textContent !== dbBadgeText) dbBadge.textContent = dbBadgeText;
         dbBadge.className = `text-[11px] px-2 py-0.5 rounded-full ${
           !db.enabled
-            ? "bg-[#181d27] text-[#8b95a7]"
+            ? "ox-badge-neutral"
             : db.ok
-              ? "bg-emerald-500/15 text-emerald-300"
-              : "bg-rose-500/15 text-rose-300"
+              ? "ox-badge-emerald"
+              : "ox-alert-danger"
         }`;
       }
       setTextIfChanged("st-db-ms", db.ok ? `${db.latency_ms} ms` : "—");

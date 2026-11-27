@@ -1112,6 +1112,65 @@ html[data-theme="light"] .text-violet-300 {
   color: var(--text-secondary);
 }
 
+.ox-badge-emerald {
+  background-color: var(--diff-after-bg);
+  border: 1px solid var(--diff-after-border);
+  color: var(--diff-after-text);
+}
+
+.ox-badge-amber {
+  background-color: var(--alert-warning-bg);
+  border: 1px solid var(--alert-warning-border);
+  color: var(--alert-warning-strong);
+}
+
+.ox-modal-meta {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.ox-modal-body {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.ox-table-row {
+  background-color: var(--bg-surface);
+  border-color: var(--border-subtle);
+  transition: background-color 140ms ease;
+}
+
+.ox-table-row:hover {
+  background-color: var(--bg-elevated);
+}
+
+.ox-text-primary {
+  color: var(--text-primary);
+}
+
+.ox-text-secondary {
+  color: var(--text-secondary);
+}
+
+.ox-surface-chip {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.ox-chat-bubble-bot {
+  background-color: var(--bg-surface);
+  border-color: var(--alert-danger-border);
+  color: var(--text-primary);
+}
+
+.ox-chat-bubble-user {
+  background-color: var(--bg-elevated);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
 /* Thông báo Toast nổi thích ứng 3 giao diện */
 .ox-toast-success {
   background-color: var(--bg-surface);

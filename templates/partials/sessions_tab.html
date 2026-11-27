@@ -98,11 +98,11 @@
     aria-modal="true"
     aria-labelledby="session-detail-title"
   >
-    <div class="ox-modal-panel card w-full max-w-3xl max-h-[86vh] flex flex-col shadow-2xl overflow-hidden border border-slate-700/80 transition-all duration-200 ease-out opacity-0 scale-95 translate-y-2">
+    <div class="ox-modal-panel ox-modal-surface card w-full max-w-3xl max-h-[86vh] flex flex-col shadow-2xl overflow-hidden border transition-all duration-200 ease-out opacity-0 scale-95 translate-y-2">
       {# Tiêu đề Modal #}
-      <div class="p-4 border-b border-[#1e232e] flex items-start justify-between gap-3 bg-[#0e1117]">
+      <div class="ox-modal-header p-4 border-b flex items-start justify-between gap-3">
         <div id="session-detail-header" class="flex items-center gap-3 min-w-0">
-          <h3 id="session-detail-title" class="text-sm font-semibold text-white">Chi tiết phiên chat</h3>
+          <h3 id="session-detail-title" class="text-sm font-semibold ox-text-primary">Chi tiết phiên chat</h3>
         </div>
         <button
           type="button"
@@ -114,10 +114,10 @@
       </div>
 
       {# Siêu dữ liệu phiên chat #}
-      <div id="session-detail-meta" class="px-4 py-2.5 bg-[#0a0d12] border-b border-[#1e232e] flex flex-wrap items-center gap-3 text-[11px] text-[#8b95a7]"></div>
+      <div id="session-detail-meta" class="ox-modal-meta px-4 py-2.5 border-b flex flex-wrap items-center gap-3 text-[11px]"></div>
 
       {# Danh sách toàn bộ tin nhắn theo thứ tự thời gian #}
-      <div id="session-detail-messages" class="p-4 space-y-3 overflow-y-auto flex-1 bg-[#0c0f14]"></div>
+      <div id="session-detail-messages" class="ox-modal-body p-4 space-y-3 overflow-y-auto flex-1"></div>
     </div>
   </div>
 </section>

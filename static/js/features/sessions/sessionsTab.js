@@ -40,7 +40,7 @@ function renderAvatar(item, sizeClass = "w-10 h-10") {
         src="${escapeHtml(safeAvatarUrl)}"
         alt="${escapeHtml(display)}"
         loading="lazy"
-        class="${sizeClass} rounded-full object-cover border border-[#2a3140] shrink-0 bg-[#0a0d12]"
+        class="${sizeClass} ox-surface-chip rounded-full object-cover shrink-0"
       />
     `;
   }
@@ -60,7 +60,7 @@ function renderServerRoleBadges(roles, maxCount = 3) {
         .slice(0, maxCount)
         .map((role) => {
           const color = /^#[0-9a-f]{3,6}$/i.test(role.color || "") ? role.color : "#64748b";
-          return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#0a0d12] border border-[#252b38] text-[10px] text-slate-300">
+          return `<span class="ox-surface-chip inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px]">
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background-color:${color}"></span>
             ${escapeHtml(role.name)}
           </span>`;
@@ -114,9 +114,9 @@ export function createSessionsTabController() {
     if (!modal || !headerEl || !metaEl || !msgsEl) return;
 
     openModalAnimated(modal);
-    headerEl.innerHTML = '<h3 id="session-detail-title" class="text-sm font-semibold text-white">Đang tải chi tiết phiên chat...</h3>';
+    headerEl.innerHTML = '<h3 id="session-detail-title" class="text-sm font-semibold ox-text-primary">Đang tải chi tiết phiên chat...</h3>';
     metaEl.innerHTML = "";
-    msgsEl.innerHTML = '<div class="py-8 text-center text-xs text-[#8b95a7]">Đang nạp toàn bộ hội thoại từ MongoDB Atlas...</div>';
+    msgsEl.innerHTML = '<div class="py-8 text-center text-xs ox-text-secondary">Đang nạp toàn bộ hội thoại từ MongoDB Atlas...</div>';
 
     try {
       const data = await apiRequest(`/api/sessions/${encodeURIComponent(chatId)}`);
@@ -128,8 +128,8 @@ export function createSessionsTabController() {
         ${renderAvatar(sess, "w-10 h-10")}
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
-            <h3 id="session-detail-title" class="text-sm font-semibold text-white truncate">${escapeHtml(displayName)}</h3>
-            ${usernameLine ? `<span class="text-xs text-[#8b95a7]">${escapeHtml(usernameLine)}</span>` : ""}
+            <h3 id="session-detail-title" class="text-sm font-semibold ox-text-primary truncate">${escapeHtml(displayName)}</h3>
+            ${usernameLine ? `<span class="text-xs ox-text-secondary">${escapeHtml(usernameLine)}</span>` : ""}
           </div>
           ${renderServerRoleBadges(sess.server_roles, 6)}
         </div>
@@ -139,13 +139,13 @@ export function createSessionsTabController() {
       const lastStr = sess.last_active ? new Date(sess.last_active).toLocaleString("vi-VN") : "—";
       const statusBadge = sess.session_status === "active"
         ? '<span class="text-emerald-400 font-medium">● Đang chạy</span>'
-        : `<span class="text-[#8b95a7]">Lưu trữ${sess.end_reason ? ` (${escapeHtml(sess.end_reason)})` : ""}</span>`;
+        : `<span class="ox-text-secondary">Lưu trữ${sess.end_reason ? ` (${escapeHtml(sess.end_reason)})` : ""}</span>`;
 
       metaEl.innerHTML = `
         <button
           type="button"
           data-copy-chat-id="${escapeHtml(sess.chat_id)}"
-          class="font-mono text-rose-300 hover:text-rose-200 bg-[#131720] border border-[#252b38] px-2 py-0.5 rounded cursor-pointer"
+          class="ox-surface-chip font-mono text-rose-300 px-2 py-0.5 rounded cursor-pointer"
           title="Bấm để sao chép Chat ID"
         >Chat ID: ${escapeHtml(sess.chat_id)} 📋</button>
         <span class="font-mono">UID: ${escapeHtml(sess.user_id || "—")}</span>
@@ -165,9 +165,7 @@ export function createSessionsTabController() {
               return `
                 <div class="flex ${isModel ? "justify-start" : "justify-end"}">
                   <div class="w-full max-w-[92%] rounded-xl border p-3.5 ${
-                    isModel
-                      ? "bg-[#131720] border-rose-500/25"
-                      : "bg-[#101828] border-sky-500/30"
+                    isModel ? "ox-chat-bubble-bot" : "ox-chat-bubble-user"
                   }">
                     <div class="flex items-center justify-between gap-2 mb-1.5 text-[11px]">
                       <div class="flex items-center gap-2">
@@ -285,39 +283,39 @@ export function createSessionsTabController() {
           return `
             <tr
               data-view-chat-id="${escapeHtml(item.chat_id)}"
-              class="hover:bg-[#181d28]/80 align-top cursor-pointer transition-colors ${rowAnimClass}"
+              class="ox-table-row align-top cursor-pointer ${rowAnimClass}"
               title="Bấm để xem toàn bộ hội thoại phiên #${escapeHtml(item.chat_id_short)}"
             >
               <td class="py-3 pr-4">
                 <div class="flex items-start gap-3">
                   ${renderAvatar(item)}
                   <div class="min-w-0 flex-1">
-                    <div class="font-medium text-slate-100 truncate">${escapeHtml(displayName)}</div>
-                    ${usernameLine ? `<div class="text-[11px] text-[#8b95a7] truncate">${escapeHtml(usernameLine)}</div>` : ""}
+                    <div class="font-medium ox-text-primary truncate">${escapeHtml(displayName)}</div>
+                    ${usernameLine ? `<div class="text-[11px] ox-text-secondary truncate">${escapeHtml(usernameLine)}</div>` : ""}
                     <div class="flex items-center gap-1.5 mt-1 flex-wrap">
-                      <span class="font-mono text-[11px] text-rose-300 bg-[#0a0d12] border border-[#1e232e] px-1.5 py-0.5 rounded">#${escapeHtml(item.chat_id_short)}</span>
+                      <span class="ox-surface-chip font-mono text-[11px] text-rose-300 px-1.5 py-0.5 rounded">#${escapeHtml(item.chat_id_short)}</span>
                       <button
                         type="button"
                         data-copy-chat-id="${escapeHtml(item.chat_id)}"
                         title="Sao chép mã Chat ID đầy đủ"
-                        class="text-[10px] text-[#8b95a7] hover:text-white px-1 py-0.5 rounded bg-[#181d27] border border-[#252b38] cursor-pointer"
+                        class="ox-surface-chip text-[10px] ox-text-secondary px-1 py-0.5 rounded cursor-pointer"
                       >📋</button>
                       ${statusLabel}
                     </div>
-                    <div class="text-[10px] text-[#5e6778] font-mono mt-0.5 truncate" title="Discord User ID: ${escapeHtml(item.user_id)}">UID: ${escapeHtml(item.user_id || "—")}</div>
+                    <div class="text-[10px] ox-text-secondary font-mono mt-0.5 truncate" title="Discord User ID: ${escapeHtml(item.user_id)}">UID: ${escapeHtml(item.user_id || "—")}</div>
                     ${renderServerRoleBadges(item.server_roles)}
                   </div>
                 </div>
               </td>
               <td class="py-3 pr-4">
-                <div class="text-slate-200 leading-relaxed line-clamp-2 break-words">${highlightMatch(previewText, q)}</div>
-                <div class="mt-1.5 flex items-center gap-2 text-[10px] text-[#8b95a7] font-mono">
-                  <span class="px-1.5 py-0.5 rounded bg-[#0a0d12] border border-[#1e232e]">${turnsCount} lượt</span>
-                  <span class="px-1.5 py-0.5 rounded bg-[#0a0d12] border border-[#1e232e]">${msgCount} tin nhắn</span>
+                <div class="ox-text-primary leading-relaxed line-clamp-2 break-words">${highlightMatch(previewText, q)}</div>
+                <div class="mt-1.5 flex items-center gap-2 text-[10px] ox-text-secondary font-mono">
+                  <span class="ox-surface-chip px-1.5 py-0.5 rounded">${turnsCount} lượt</span>
+                  <span class="ox-surface-chip px-1.5 py-0.5 rounded">${msgCount} tin nhắn</span>
                 </div>
               </td>
               <td class="py-3 text-right whitespace-nowrap">
-                <div class="font-mono text-[#8b95a7]">${escapeHtml(timeStr)}</div>
+                <div class="font-mono ox-text-secondary">${escapeHtml(timeStr)}</div>
                 <button
                   type="button"
                   data-view-chat-id="${escapeHtml(item.chat_id)}"

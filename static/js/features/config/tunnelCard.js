@@ -131,20 +131,20 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     if (badgeEl) {
       const tunnelStatus = String(telemetry.status || "").toLowerCase();
       let label = "⚫ Đã tắt";
-      let cls = "bg-[#181d27] text-[#8b95a7] border-[#2a3140]";
+      let cls = "ox-badge-neutral";
       if (tunnelStatus === "restarting" || isRestartingTunnel) {
         label = "🟡 Đang khởi động lại...";
-        cls = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+        cls = "ox-badge-amber";
       } else if (tunnelStatus === "error" || (telemetry.last_error && !telemetry.running)) {
         label = "🔴 Lỗi Tunnel";
-        cls = "bg-rose-500/15 text-rose-300 border-rose-500/30";
+        cls = "ox-alert-danger";
       } else if (telemetry.running) {
         const modeLabel = telemetry.mode === "quick" ? "Quick" : "Named";
         label = `🟢 Đang chạy (${modeLabel} · PID ${telemetry.pid ?? "?"})`;
-        cls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+        cls = "ox-badge-emerald";
       } else if (telemetry.enabled) {
         label = "🟡 Đang khởi động...";
-        cls = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+        cls = "ox-badge-amber";
       }
       if (badgeEl.textContent !== label) badgeEl.textContent = label;
       badgeEl.className = `text-[11px] font-medium px-2.5 py-0.5 rounded-full border transition-colors duration-200 ${cls}`;
@@ -180,21 +180,19 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         outboundDotEl.classList.toggle("hidden", !warpActive);
       }
       outboundEl.className = `inline-flex items-center gap-1.5 text-[10px] font-mono px-2.5 py-0.5 rounded-full border transition-colors duration-200 ${
-        warpActive
-          ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-          : "bg-[#181d27] text-[#8b95a7] border-[#2a3140]"
+        warpActive ? "ox-badge-emerald" : "ox-badge-neutral"
       }`;
     }
 
     if (warpStatePillEl) {
       let pillText = "Đã tắt (Direct)";
-      let pillCls = "bg-[#181d27] text-[#8b95a7] border-[#2a3140]";
+      let pillCls = "ox-badge-neutral";
       if (warpActive) {
         pillText = "WARP Kết nối";
-        pillCls = "bg-emerald-500/15 text-emerald-300 border-emerald-500/30";
+        pillCls = "ox-badge-emerald";
       } else if (warpFallback) {
         pillText = "Fallback Direct";
-        pillCls = "bg-amber-500/15 text-amber-300 border-amber-500/30";
+        pillCls = "ox-badge-amber";
       }
       if (warpStatePillEl.textContent !== pillText) warpStatePillEl.textContent = pillText;
       warpStatePillEl.className = `text-[10px] font-mono px-1.5 py-0.5 rounded border transition-colors duration-200 ${pillCls}`;

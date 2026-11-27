@@ -85,14 +85,14 @@ function renderActorAvatar(item, sizeClass = "w-8 h-8") {
         src="${escapeHtml(safeAvatarUrl)}"
         alt="${escapeHtml(displayName)}"
         loading="lazy"
-        class="${sizeClass} rounded-full object-cover border border-[#2a3140] shrink-0 bg-[#0a0d12]"
+        class="${sizeClass} ox-surface-chip rounded-full object-cover shrink-0"
       />
     `;
   }
   // Icon người dùng mặc định cho tài khoản đăng nhập truyền thống hoặc hệ thống
   return `
     <div
-      class="${sizeClass} rounded-full bg-[#181d27] border border-[#2a3140] text-[#8b95a7] flex items-center justify-center shrink-0"
+      class="${sizeClass} ox-surface-chip ox-text-secondary rounded-full flex items-center justify-center shrink-0"
       aria-hidden="true"
     >
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -200,38 +200,38 @@ export function createAuditTabController() {
       ${renderActorAvatar(item, "w-10 h-10")}
       <div class="min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
-          <h3 id="audit-detail-title" class="text-sm font-semibold text-white truncate">${escapeHtml(displayName)}</h3>
+          <h3 id="audit-detail-title" class="text-sm font-semibold ox-text-primary truncate">${escapeHtml(displayName)}</h3>
           ${discordId ? `<span class="text-[11px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/25 px-2 py-0.5 rounded-full">Discord: ${escapeHtml(discordId)}</span>` : ""}
         </div>
-        <div class="text-[11px] text-[#8b95a7] mt-0.5">${escapeHtml(item.summary || item.action || "Thay đổi cấu hình")}</div>
+        <div class="text-[11px] ox-text-secondary mt-0.5">${escapeHtml(item.summary || item.action || "Thay đổi cấu hình")}</div>
       </div>
     `;
 
     metaEl.innerHTML = `
-      <div class="flex flex-wrap items-center gap-3 text-[11px] text-[#8b95a7]">
-        <span>🕒 Thời gian: <strong class="font-mono text-slate-200">${escapeHtml(exactTime)}</strong></span>
+      <div class="flex flex-wrap items-center gap-3 text-[11px] ox-text-secondary">
+        <span>🕒 Thời gian: <strong class="font-mono ox-text-primary">${escapeHtml(exactTime)}</strong></span>
         <span>📂 Chuyên mục: <strong class="text-rose-300">${escapeHtml(sectionName)}</strong></span>
-        <span>📝 Hành động: <code class="font-mono text-slate-300">${escapeHtml(item.action || "—")}</code></span>
-        <span>🔄 Số trường thay đổi: <strong class="font-mono text-white">${changes.length}</strong></span>
+        <span>📝 Hành động: <code class="font-mono ox-text-primary">${escapeHtml(item.action || "—")}</code></span>
+        <span>🔄 Số trường thay đổi: <strong class="font-mono ox-text-primary">${changes.length}</strong></span>
       </div>
     `;
 
     if (!changes.length) {
       diffEl.innerHTML =
-        '<div class="py-8 text-center text-xs text-[#5e6778]">Bản ghi này không có chi tiết thay đổi trường dữ liệu.</div>';
+        '<div class="py-8 text-center text-xs ox-text-secondary">Bản ghi này không có chi tiết thay đổi trường dữ liệu.</div>';
     } else {
       diffEl.innerHTML = `
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs border-collapse">
             <thead>
-              <tr class="border-b border-[#1e232e] text-[#8b95a7]">
-                <th class="py-2 pr-3 w-52">Trường cấu hình</th>
-                <th class="py-2 pr-2">Giá trị gốc</th>
+              <tr class="ox-diff-thead">
+                <th class="py-2 px-3 w-52">Trường cấu hình</th>
+                <th class="py-2 px-2">Giá trị gốc</th>
                 <th class="py-2 px-1 text-center w-6"></th>
-                <th class="py-2 pl-2">Giá trị mới</th>
+                <th class="py-2 px-2">Giá trị mới</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-[#1e232e]/80">
+            <tbody class="ox-diff-tbody divide-y">
               ${changes
                 .map((ch) => {
                   const field = ch.field || "—";
@@ -239,12 +239,12 @@ export function createAuditTabController() {
                   const afterStr = formatDiffValue(ch.after, field);
                   return `
                     <tr class="align-top ox-diff-row">
-                      <td class="py-3 pr-3 font-mono text-slate-200 break-all">${escapeHtml(field)}</td>
-                      <td class="py-3 pr-2">
+                      <td class="py-3 px-3 font-mono ox-text-primary break-all">${escapeHtml(field)}</td>
+                      <td class="py-3 px-2">
                         <div class="ox-alert-danger rounded-md px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${escapeHtml(beforeStr)}</div>
                       </td>
-                      <td class="py-3 px-1 text-center text-[#5e6778] font-bold">→</td>
-                      <td class="py-3 pl-2">
+                      <td class="py-3 px-1 text-center ox-text-secondary font-bold">→</td>
+                      <td class="py-3 px-2">
                         <div class="ox-diff-after-box rounded-md px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${escapeHtml(afterStr)}</div>
                       </td>
                     </tr>
@@ -326,14 +326,14 @@ export function createAuditTabController() {
               const sectionName = SECTION_LABELS[item.section] || item.section || "—";
               const changeCount = Array.isArray(item.changes) ? item.changes.length : 0;
               const statusBadge = item.pending
-                ? '<span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30">Chờ sync</span>'
-                : '<span class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Atlas</span>';
+                ? '<span class="ox-badge-amber px-2 py-0.5 rounded-full text-[10px] font-medium">Chờ sync</span>'
+                : '<span class="ox-badge-emerald px-2 py-0.5 rounded-full text-[10px] font-medium">Atlas</span>';
               return `
-                <tr class="hover:bg-[#181d28]/70 ${rowAnimClass}" style="--row-idx:${idx}">
-                  <td class="py-2.5 pr-3 font-mono text-[#8b95a7] whitespace-nowrap">${escapeHtml(timeStr)}</td>
+                <tr class="ox-table-row ${rowAnimClass}" style="--row-idx:${idx}">
+                  <td class="py-2.5 pr-3 font-mono ox-text-secondary whitespace-nowrap">${escapeHtml(timeStr)}</td>
                   <td class="py-2.5 pr-3">${renderActorCell(item)}</td>
-                  <td class="py-2.5 pr-3"><span class="px-2 py-0.5 rounded bg-[#181d27] border border-[#252b38] text-[10px] text-slate-300 whitespace-nowrap">${escapeHtml(sectionName)}</span></td>
-                  <td class="py-2.5 pr-3 text-slate-300">${escapeHtml(item.summary || item.action || "—")}</td>
+                  <td class="py-2.5 pr-3"><span class="ox-badge-neutral px-2 py-0.5 rounded text-[10px] whitespace-nowrap">${escapeHtml(sectionName)}</span></td>
+                  <td class="py-2.5 pr-3 ox-text-secondary">${escapeHtml(item.summary || item.action || "—")}</td>
                   <td class="py-2.5 pr-3 text-center">${statusBadge}</td>
                   <td class="py-2.5 text-right whitespace-nowrap">
                     <button
@@ -346,7 +346,7 @@ export function createAuditTabController() {
               `;
             })
             .join("")
-        : '<tr><td colspan="6" class="py-12 text-center text-[#5e6778]">Chưa có bản ghi nhật ký chỉnh sửa nào.</td></tr>';
+        : '<tr><td colspan="6" class="py-12 text-center ox-text-secondary">Chưa có bản ghi nhật ký chỉnh sửa nào.</td></tr>';
     } catch (err) {
       if (seq === requestSeq && !silent) {
         const msg = err?.message || "Không thể tải danh sách nhật ký.";
