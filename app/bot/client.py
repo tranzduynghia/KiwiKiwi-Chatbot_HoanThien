@@ -223,14 +223,25 @@ class AskBot(discord.Client):
             self.container.memory_watchdog.run_forever(self.is_closed)
         )
 
-        if settings.guild_id:
-            guild = discord.Object(id=int(settings.guild_id))
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            scope = f"CHỈ server có ID {settings.guild_id} (đang đặt GUILD_ID)"
-        else:
-            synced = await self.tree.sync()
-            scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
+        synced: list[app_commands.AppCommand] = []
+        try:
+            if settings.guild_id:
+                guild = discord.Object(id=int(settings.guild_id))
+                self.tree.copy_global_to(guild=guild)
+                synced = await self.tree.sync(guild=guild)
+                scope = f"CHỈ server có ID {settings.guild_id} (đang đặt GUILD_ID)"
+            else:
+                synced = await self.tree.sync()
+                scope = "TOÀN CỤC (mọi server, có thể mất vài phút để Discord cập nhật)"
+        except discord.HTTPException as exc:
+            if getattr(exc, "code", None) == 50240:
+                scope = "BỎ QUA (Discord Entry Point command 50240)"
+                log.warning(
+                    "Bỏ qua đồng bộ slash commands toàn cục do Discord Entry Point command (50240): %s",
+                    exc,
+                )
+            else:
+                raise
 
         warp_proxy = getattr(self.container, "warp_proxy", None)
         outbound_label = (
