@@ -251,6 +251,11 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
                 if has_warp
                 else None
             ),
+            trace_warp_fn=(
+                container.warp_proxy.verify_warp_trace
+                if has_warp
+                else None
+            ),
             get_tunnel_status_fn=container.cloudflare_tunnel.status_snapshot,
         )
     )

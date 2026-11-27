@@ -623,7 +623,7 @@
               </span>
             </div>
             <p class="text-[11px] text-[#8b95a7] mt-0.5 leading-snug">
-              Định tuyến Gemini API &amp; Discord qua WARP user-space proxy; tự động chuyển Direct nếu proxy ngừng phản hồi (MongoDB Atlas luôn giữ TLS trực tiếp).
+              Định tuyến Gemini API &amp; Discord qua WARP user-space proxy (wgcf + wireproxy, ~10 MB RAM); tự động chuyển Direct nếu proxy ngừng phản hồi (MongoDB Atlas luôn giữ TLS trực tiếp).
             </p>
           </div>
           <label class="relative inline-flex items-center cursor-pointer shrink-0">
@@ -702,8 +702,16 @@
               {% if user.is_admin %}
               <button
                 type="button"
+                id="btn-warp-trace"
+                title="Kiểm tra cdn-cgi/trace qua WARP proxy (warp=on / warp=plus)"
+                class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors"
+              >
+                🔍 Trace
+              </button>
+              <button
+                type="button"
                 id="btn-warp-reconnect"
-                title="Khởi động / kết nối lại Cloudflare WARP (mode proxy)"
+                title="Khởi động / kết nối lại WARP (wgcf + wireproxy)"
                 class="px-2 py-0.5 rounded bg-[#181d27] hover:bg-[#222938] text-slate-200 border border-[#2a3140] text-[10px] font-medium transition-colors"
               >
                 ↻ Kết nối lại
@@ -714,6 +722,7 @@
           <div id="cf-warp-detail" class="text-[11px] text-slate-400 leading-snug select-none">
             Direct (chưa kết nối WARP proxy) · MongoDB Atlas: Direct TLS
           </div>
+          <div id="cf-warp-trace" class="hidden text-[10px] font-mono text-slate-400 select-none"></div>
           <div
             id="cf-warp-diagnostic"
             class="hidden text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-md px-2 py-1 break-words"

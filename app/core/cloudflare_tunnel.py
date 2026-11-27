@@ -293,6 +293,7 @@ class CloudflareTunnelService:
                 "warp_proxy_url": warp_snap["proxy_url"],
                 "warp_proxy_port": warp_snap.get("proxy_port", 40000),
                 "warp_diagnostic": warp_snap.get("diagnostic"),
+                "warp_trace": warp_snap.get("trace"),
                 "warp_diagnostic_code": warp_snap.get("diagnostic_code"),
             })
         return snapshot

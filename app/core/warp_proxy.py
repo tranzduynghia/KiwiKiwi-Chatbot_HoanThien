@@ -1,7 +1,9 @@
-"""Dịch vụ quản lý tiến trình `warp-svc`/`warp-cli` và định tuyến Outbound qua Cloudflare WARP User-Space Proxy (`127.0.0.1:40000`) kèm tự động fallback Direct."""
+"""Dịch vụ quản lý Cloudflare WARP User-Space Proxy bằng binary tĩnh `wgcf` + `wireproxy` (SOCKS5 `127.0.0.1:40000`, ~10 MB RAM) kèm tự động fallback Direct."""
 from __future__ import annotations
 
 import asyncio
+import configparser
+import hashlib
 import inspect
 import logging
 import os
@@ -22,10 +24,20 @@ log = logging.getLogger("gemini-bot.warp")
 DEFAULT_WARP_PROXY_HOST = "127.0.0.1"
 DEFAULT_WARP_PROXY_PORT = 40000
 DEFAULT_WARP_PROXY_URL = f"socks5h://{DEFAULT_WARP_PROXY_HOST}:{DEFAULT_WARP_PROXY_PORT}"
-WARP_PROCESS_NAMES = frozenset({"warp-svc", "warp-svc.exe"})
-_WARP_FALLBACK_BIN_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin", "/usr/local/bin", "/usr/local/sbin")
+DEFAULT_WARP_STATE_DIR = "/var/lib/warp-proxy"
+WARP_TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
+WARP_PROCESS_NAMES = frozenset({"wireproxy", "wireproxy.exe"})
+WARP_REQUIRED_BINARIES = ("wgcf", "wireproxy")
+NOT_INSTALLED_MESSAGE = "Chưa cài wgcf/wireproxy"
+_WARP_FALLBACK_BIN_DIRS = ("/usr/local/bin", "/usr/bin", "/bin", "/usr/local/sbin", "/usr/sbin", "/sbin")
 
-# Các biến môi trường an toàn được phép truyền cho tiến trình con `warp-svc`/`warp-cli` (tuyệt đối không lộ bí mật bot)
+ACCOUNT_FILE = "wgcf-account.toml"
+PROFILE_FILE = "wgcf-profile.conf"
+WIREPROXY_CONFIG_FILE = "wireproxy.conf"
+WIREPROXY_LOG_FILE = "wireproxy.log"
+LICENSE_MARKER_FILE = ".license-applied"
+
+# Các biến môi trường an toàn được phép truyền cho tiến trình con `wgcf`/`wireproxy` (tuyệt đối không lộ bí mật bot)
 _ALLOWED_WARP_ENV_KEYS = (
     "PATH",
     "HOME",
@@ -35,16 +47,20 @@ _ALLOWED_WARP_ENV_KEYS = (
     "LC_ALL",
     "TZ",
     "TMPDIR",
-    "XDG_DATA_HOME",
-    "XDG_CONFIG_HOME",
-    "XDG_RUNTIME_DIR",
     "SSL_CERT_FILE",
     "SSL_CERT_DIR",
-    "DBUS_SYSTEM_BUS_ADDRESS",
 )
 
-# Gỡ đường dẫn hệ thống nội bộ khỏi thông điệp chẩn đoán trả về giao diện
+# Các trường được phép sao chép từ `wgcf-profile.conf` sang `wireproxy.conf`
+_INTERFACE_KEYS = ("PrivateKey", "Address", "DNS", "MTU")
+_PEER_KEYS = ("PublicKey", "AllowedIPs", "Endpoint", "PersistentKeepalive")
+
+# Gỡ đường dẫn hệ thống nội bộ, khóa WireGuard và IP máy chủ thô khỏi thông điệp chẩn đoán trả về giao diện
 _INTERNAL_PATH_RE = re.compile(r"(?:/[A-Za-z0-9._+-]+){2,}")
+_WG_KEY_LINE_RE = re.compile(r"(?i)\b(private_?key|license_?key|access_?token|device_?id)\b\s*[=:]\s*\S+")
+_WG_B64_KEY_RE = re.compile(r"\b[A-Za-z0-9+/]{42,43}=")
+_IPV4_RE = re.compile(r"\b(?!127\.0\.0\.1\b)(?:\d{1,3}\.){3}\d{1,3}\b")
+_IPV6_RE = re.compile(r"(?<![\w:])[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{0,4}){3,7}(?![\w:])")
 
 
 def parse_proxy_host_port(proxy_url: str) -> tuple[str, int]:
@@ -79,27 +95,37 @@ def sanitize_proxy_url_display(proxy_url: str) -> str:
         return DEFAULT_WARP_PROXY_URL
 
 
+def _license_key_from_env() -> str:
+    """Đọc WARP+ license key tùy chọn từ `WARP_LICENSE_KEY` (hoặc `WGCF_LICENSE_KEY`) — chỉ dùng cho tiến trình `wgcf update`."""
+    return ((os.getenv("WARP_LICENSE_KEY") or os.getenv("WGCF_LICENSE_KEY") or "")).strip()
+
+
 def sanitize_warp_diagnostic(raw_text: str, *, max_len: int = 180) -> str:
-    """Làm sạch thông điệp stderr/status từ `warp-svc`/`warp-cli`: che toàn bộ bí mật và gỡ đường dẫn hệ thống nội bộ."""
-    cleaned = redact_secrets(raw_text or "", max_len=max_len * 2)
-    # Che cả chuỗi WARP_LICENSE_KEY hoặc WARP_CONNECTOR_TOKEN thực tế nếu vô tình xuất hiện trong stderr
-    for env_name in ("WARP_LICENSE_KEY", "WARP_CONNECTOR_TOKEN"):
+    """Làm sạch stderr/log của `wgcf`/`wireproxy`: che bí mật, khóa WireGuard, IP máy chủ thô và đường dẫn nội bộ."""
+    cleaned = redact_secrets(raw_text or "", max_len=max_len * 3)
+    for env_name in ("WARP_LICENSE_KEY", "WGCF_LICENSE_KEY", "WARP_CONNECTOR_TOKEN"):
         secret_val = (os.getenv(env_name) or "").strip()
         if secret_val and len(secret_val) >= 4:
             cleaned = cleaned.replace(secret_val, "[REDACTED]")
+    cleaned = _WG_KEY_LINE_RE.sub(lambda m: f"{m.group(1)}=[REDACTED]", cleaned)
+    cleaned = _WG_B64_KEY_RE.sub("[REDACTED]", cleaned)
+    cleaned = _IPV4_RE.sub("[ip]", cleaned)
+    cleaned = _IPV6_RE.sub("[ip]", cleaned)
     cleaned = _INTERNAL_PATH_RE.sub("", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip(" :;-")
     return cleaned[:max_len]
 
 
-def build_warp_subprocess_env() -> dict[str, str]:
-    """Tạo môi trường tối giản cho `warp-svc`/`warp-cli`, loại bỏ toàn bộ bí mật ứng dụng (DISCORD_TOKEN, GEMINI_API_KEY, WARP_LICENSE_KEY...)."""
+def build_warp_subprocess_env(*, license_key: str = "") -> dict[str, str]:
+    """Tạo môi trường tối giản cho `wgcf`/`wireproxy`; chỉ đưa `WGCF_LICENSE_KEY` vào khi gọi `wgcf update`."""
     env = {
         key: os.environ[key]
         for key in _ALLOWED_WARP_ENV_KEYS
         if key in os.environ and os.environ[key]
     }
     env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    if license_key:
+        env["WGCF_LICENSE_KEY"] = license_key
     return env
 
 
@@ -133,7 +159,7 @@ async def probe_tcp_proxy_async(host: str, port: int, timeout: float = 0.25) -> 
 
 
 def read_warp_process_metrics() -> tuple[Optional[int], Optional[float]]:
-    """Đọc PID và dung lượng RAM (RSS, tính bằng MB) của tiến trình `warp-svc` nếu đang chạy trong container."""
+    """Đọc PID và dung lượng RAM (RSS, MB) của tiến trình `wireproxy` nếu đang chạy trong container."""
     total_rss = 0
     primary_pid: Optional[int] = None
     try:
@@ -157,6 +183,31 @@ def read_warp_process_metrics() -> tuple[Optional[int], Optional[float]]:
     return primary_pid, round(total_rss / (1024 * 1024), 1)
 
 
+def terminate_external_wireproxy(exclude_pids: Optional[set[int]] = None) -> int:
+    """Dừng các tiến trình `wireproxy` không do Python quản lý (vd: do entrypoint khởi chạy) để áp dụng lại cấu hình."""
+    exclude = exclude_pids or set()
+    stopped = 0
+    try:
+        procs = []
+        for proc in psutil.process_iter(["pid", "name"]):
+            try:
+                if str(proc.info.get("name") or "").lower() in WARP_PROCESS_NAMES and proc.pid not in exclude:
+                    proc.terminate()
+                    procs.append(proc)
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        _gone, alive = psutil.wait_procs(procs, timeout=2.0)
+        for proc in alive:
+            try:
+                proc.kill()
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+        stopped = len(procs)
+    except Exception:
+        return stopped
+    return stopped
+
+
 def is_proxy_transport_error(exc: BaseException) -> bool:
     """Nhận diện lỗi kết nối proxy cục bộ (ProxyError / ConnectError / ConnectionRefused) để kích hoạt fallback Direct."""
     seen: set[int] = set()
@@ -175,20 +226,68 @@ def is_proxy_transport_error(exc: BaseException) -> bool:
     return False
 
 
-def _resolve_writable_log_path() -> str:
-    """Chọn đường dẫn ghi log cho `warp-svc` đảm bảo luôn ghi được dưới user không có quyền root."""
-    for directory in ("/var/log/cloudflare-warp", "/tmp"):
-        try:
-            os.makedirs(directory, exist_ok=True)
-            if os.access(directory, os.W_OK):
-                return os.path.join(directory, "warp-svc.log")
-        except OSError:
-            continue
-    return "/tmp/warp-svc.log"
+def parse_wgcf_profile(profile_text: str) -> tuple[dict[str, str], dict[str, str]]:
+    """Phân tích `wgcf-profile.conf` thành hai từ điển `[Interface]` và `[Peer]` (giữ nguyên chữ hoa/thường của khóa)."""
+    parser = configparser.ConfigParser(interpolation=None, strict=False)
+    parser.optionxform = str  # type: ignore[assignment]
+    parser.read_string(profile_text or "")
+    if not parser.has_section("Interface") or not parser.has_section("Peer"):
+        raise ValueError("wgcf-profile.conf thiếu mục [Interface] hoặc [Peer]")
+    interface = {k: parser.get("Interface", k).strip() for k in _INTERFACE_KEYS if parser.has_option("Interface", k)}
+    peer = {k: parser.get("Peer", k).strip() for k in _PEER_KEYS if parser.has_option("Peer", k)}
+    for required, section in (("PrivateKey", interface), ("Address", interface), ("PublicKey", peer), ("Endpoint", peer)):
+        if not section.get(required):
+            raise ValueError(f"wgcf-profile.conf thiếu trường {required}")
+    return interface, peer
 
 
-def _read_sanitized_log_tail(log_path: str, *, max_bytes: int = 2048) -> str:
-    """Đọc dòng cuối cùng có nội dung của log `warp-svc` đã được làm sạch bí mật và đường dẫn."""
+def render_wireproxy_config(
+    interface: dict[str, str],
+    peer: dict[str, str],
+    *,
+    socks_port: int,
+    http_port: Optional[int] = None,
+) -> str:
+    """Sinh nội dung `wireproxy.conf` với `[Socks5]` (và `[http]` tùy chọn) khóa chặt vào loopback `127.0.0.1`."""
+    lines = ["[Interface]"]
+    lines += [f"{k} = {interface[k]}" for k in _INTERFACE_KEYS if interface.get(k)]
+    lines += ["", "[Peer]"]
+    lines += [f"{k} = {peer[k]}" for k in _PEER_KEYS if peer.get(k)]
+    lines += ["", "[Socks5]", f"BindAddress = {DEFAULT_WARP_PROXY_HOST}:{int(socks_port)}"]
+    if http_port:
+        lines += ["", "[http]", f"BindAddress = {DEFAULT_WARP_PROXY_HOST}:{int(http_port)}"]
+    return "\n".join(lines) + "\n"
+
+
+def parse_trace_payload(text: str) -> dict[str, Any]:
+    """Rút gọn phản hồi `cdn-cgi/trace` thành `warp`/`colo`/`loc`/`http` — tuyệt đối không giữ IP thô (`ip=`)."""
+    fields: dict[str, str] = {}
+    for line in (text or "").splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            fields[key.strip().lower()] = value.strip()
+    warp_state = fields.get("warp", "").lower() or "unknown"
+    return {
+        "warp": warp_state,
+        "warp_ok": warp_state in ("on", "plus"),
+        "colo": re.sub(r"[^A-Za-z0-9]", "", fields.get("colo", ""))[:8] or None,
+        "loc": re.sub(r"[^A-Za-z]", "", fields.get("loc", ""))[:4] or None,
+        "http": re.sub(r"[^A-Za-z0-9/.]", "", fields.get("http", ""))[:12] or None,
+    }
+
+
+async def fetch_trace_via_proxy(proxy_url: str, timeout: float = 6.0) -> str:
+    """Gọi `https://www.cloudflare.com/cdn-cgi/trace` qua `socks5h://127.0.0.1:<port>` (DNS phân giải phía WARP, chống rò rỉ)."""
+    import httpx
+
+    async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout, trust_env=False) as client:
+        resp = await client.get(WARP_TRACE_URL)
+        resp.raise_for_status()
+        return resp.text
+
+
+def _read_sanitized_log_tail(log_path: str, *, max_bytes: int = 4096) -> str:
+    """Đọc dòng lỗi gần nhất trong log `wireproxy` đã được làm sạch bí mật, khóa, IP và đường dẫn."""
     try:
         if not log_path or not os.path.isfile(log_path):
             return ""
@@ -200,18 +299,19 @@ def _read_sanitized_log_tail(log_path: str, *, max_bytes: int = 2048) -> str:
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         if not lines:
             return ""
-        # Ưu tiên dòng chứa ERROR / WARN / failed / denied gần nhất
-        for line in reversed(lines[-10:]):
+        for line in reversed(lines[-15:]):
             lowered = line.lower()
-            if any(tok in lowered for tok in ("error", "fail", "denied", "cannot", "unable", "panic", "refused")):
+            if lowered.startswith("debug:"):
+                continue
+            if any(tok in lowered for tok in ("error", "fail", "denied", "cannot", "unable", "panic", "refused", "in use")):
                 return sanitize_warp_diagnostic(line)
-        return sanitize_warp_diagnostic(lines[-1])
+        return ""
     except OSError:
         return ""
 
 
 class WarpProxyService:
-    """Quản lý vòng đời `warp-svc`/`warp-cli`, kiểm tra socket `127.0.0.1:<port>`, tự fallback Direct và đồng bộ nóng sang Gemini + Discord."""
+    """Quản lý vòng đời `wgcf` + `wireproxy`, kiểm tra socket `127.0.0.1:<port>`, xác minh `cdn-cgi/trace`, tự fallback Direct và đồng bộ nóng sang Gemini + Discord."""
 
     def __init__(
         self,
@@ -225,14 +325,18 @@ class WarpProxyService:
         metrics_fn: Optional[Callable[[], tuple[Optional[int], Optional[float]]]] = None,
         which_fn: Optional[Callable[[str], Optional[str]]] = None,
         spawn_subprocess: Optional[Callable[..., Awaitable[Any]]] = None,
+        trace_fn: Optional[Callable[[str], Awaitable[str]]] = None,
+        terminate_external_fn: Optional[Callable[[set[int]], int]] = None,
+        state_dir: Optional[str] = None,
+        http_port: Optional[int] = None,
         cache_ttl: float = 2.0,
         probe_timeout: float = 0.25,
-        ipc_wait_timeout: float = 5.0,
-        ipc_poll_interval: float = 0.25,
         connect_poll_timeout: float = 7.0,
         connect_poll_interval: float = 0.5,
-        cli_timeout: float = 8.0,
+        cli_timeout: float = 25.0,
+        verify_trace_on_start: bool = True,
         log_path: Optional[str] = None,
+        **_legacy_kwargs: Any,
     ):
         clean_port = int(warp_port)
         if not (1 <= clean_port <= 65535):
@@ -250,13 +354,19 @@ class WarpProxyService:
         self._custom_which = which_fn is not None
         self._which = which_fn or shutil.which
         self._spawn = spawn_subprocess or asyncio.create_subprocess_exec
+        self._trace_fn = trace_fn or fetch_trace_via_proxy
+        self._terminate_external = terminate_external_fn or terminate_external_wireproxy
+        self.state_dir = state_dir or (os.getenv("WARP_STATE_DIR") or "").strip() or DEFAULT_WARP_STATE_DIR
+        env_http_port = (os.getenv("WARP_HTTP_PROXY_PORT") or "").strip()
+        if http_port is None and env_http_port.isdigit():
+            http_port = int(env_http_port)
+        self.http_port = http_port if (http_port and 1 <= int(http_port) <= 65535 and int(http_port) != self.port) else None
         self._cache_ttl = max(0.01, float(cache_ttl))
         self._probe_timeout = max(0.05, float(probe_timeout))
-        self._ipc_wait_timeout = max(0.2, float(ipc_wait_timeout))
-        self._ipc_poll_interval = max(0.02, float(ipc_poll_interval))
         self._connect_poll_timeout = max(0.2, float(connect_poll_timeout))
         self._connect_poll_interval = max(0.02, float(connect_poll_interval))
         self._cli_timeout = max(0.5, float(cli_timeout))
+        self._verify_trace_on_start = bool(verify_trace_on_start)
         self._log_path = log_path or ""
 
         self._lock = asyncio.Lock()
@@ -275,6 +385,7 @@ class WarpProxyService:
         self._last_error: Optional[str] = None
         self._diagnostic: Optional[str] = None
         self._diagnostic_code: str = "idle"
+        self._trace: Optional[dict[str, Any]] = None
 
     @property
     def enabled(self) -> bool:
@@ -293,11 +404,14 @@ class WarpProxyService:
             return False
         if self._probed_once:
             return self._connected
-        # Trước khi chạy kiểm tra mạng đầu tiên, tôn trọng OUTBOUND_PROXY_URL cấu hình tường minh
         return self.explicit_proxy_url
 
+    def _path(self, filename: str) -> str:
+        """Ghép đường dẫn tệp trạng thái bên trong thư mục `/var/lib/warp-proxy`."""
+        return os.path.join(self.state_dir, filename)
+
     def _find_binary(self, name: str) -> Optional[str]:
-        """Tìm đường dẫn thực thi của `warp-svc`/`warp-cli` trong `PATH` và các thư mục hệ thống chuẩn."""
+        """Tìm đường dẫn thực thi của `wgcf`/`wireproxy` trong `PATH` và các thư mục hệ thống chuẩn."""
         found = self._which(name)
         if found:
             return found
@@ -309,9 +423,20 @@ class WarpProxyService:
                 return candidate
         return None
 
+    def missing_binaries(self) -> list[str]:
+        """Liệt kê các binary bắt buộc (`wgcf`, `wireproxy`) còn thiếu trong container."""
+        return [name for name in WARP_REQUIRED_BINARIES if not self._find_binary(name)]
+
     def is_installed(self) -> bool:
-        """Kiểm tra cả hai binary `warp-svc` và `warp-cli` có tồn tại trong container hay không."""
-        return bool(self._find_binary("warp-svc") and self._find_binary("warp-cli"))
+        """Kiểm tra cả hai binary tĩnh `wgcf` và `wireproxy` có tồn tại trong container hay không."""
+        return not self.missing_binaries()
+
+    def _not_installed_message(self) -> str:
+        """Thông điệp chẩn đoán nêu rõ binary nào còn thiếu."""
+        missing = self.missing_binaries()
+        if missing and len(missing) < len(WARP_REQUIRED_BINARIES):
+            return f"Chưa cài {missing[0]}"
+        return NOT_INSTALLED_MESSAGE
 
     def effective_proxy_url(self) -> str:
         """Trả về URL proxy hiệu lực (`socks5h://127.0.0.1:40000`) nếu WARP đang bật & sẵn sàng, ngược lại trả về `""` (Direct)."""
@@ -331,6 +456,8 @@ class WarpProxyService:
         self.proxy_url = f"socks5h://{DEFAULT_WARP_PROXY_HOST}:{port_int}"
         self.safe_proxy_url = self.proxy_url
         self.explicit_proxy_url = False
+        if self.http_port == port_int:
+            self.http_port = None
 
     def _set_diagnostic(self, code: str, message: Optional[str]) -> None:
         """Cập nhật mã và thông điệp chẩn đoán đã làm sạch cho thẻ WARP trên Dashboard."""
@@ -338,20 +465,29 @@ class WarpProxyService:
         self._diagnostic = sanitize_warp_diagnostic(message) if message else None
         self._last_error = self._diagnostic
 
+    def _mark_checked(self) -> None:
+        """Ghi nhận mốc thời gian kiểm tra và đọc lại RAM/PID của `wireproxy`."""
+        self._probed_once = True
+        self._last_checked_mono = time.monotonic()
+        self._last_checked_iso = datetime.now(timezone.utc).isoformat()
+        self._pid, self._ram_mb = self._metrics_fn()
+
+    def _managed_alive(self) -> bool:
+        """Cho biết tiến trình `wireproxy` do Python khởi chạy còn sống hay không."""
+        return self._daemon_proc is not None and getattr(self._daemon_proc, "returncode", None) is None
+
     def _infer_offline_diagnostic(self) -> tuple[str, str]:
         """Suy luận chẩn đoán rõ ràng khi WARP đang bật nhưng cổng loopback chưa phản hồi."""
         if not self.is_installed():
-            return "not_installed", "Chưa cài cloudflare-warp"
+            return "not_installed", self._not_installed_message()
         pid, _ram = self._metrics_fn()
-        daemon_alive = (
-            self._daemon_proc is not None and getattr(self._daemon_proc, "returncode", None) is None
-        ) or (pid is not None)
-        if not daemon_alive:
-            log_path = self._log_path or "/var/log/cloudflare-warp/warp-svc.log"
-            tail = _read_sanitized_log_tail(log_path) or _read_sanitized_log_tail("/tmp/warp-svc.log")
+        if not self._managed_alive() and pid is None:
+            if not os.path.isfile(self._path(WIREPROXY_CONFIG_FILE)):
+                return "profile_missing", "Chưa tạo hồ sơ WARP (wgcf register/generate)"
+            tail = _read_sanitized_log_tail(self._log_path or self._path(WIREPROXY_LOG_FILE))
             if tail:
-                return "daemon_not_running", f"warp-svc chưa khởi động ({tail})"
-            return "daemon_not_running", "warp-svc chưa khởi động"
+                return "daemon_not_running", f"wireproxy chưa chạy ({tail})"
+            return "daemon_not_running", "wireproxy chưa chạy"
         return "proxy_not_listening", f"127.0.0.1:{self.port} chưa phản hồi — đang dùng Direct fallback"
 
     def probe_initial_sync(self) -> bool:
@@ -367,14 +503,11 @@ class WarpProxyService:
             return False
         reachable = bool(self._probe_sync(self.host, self.port, min(0.2, self._probe_timeout)))
         self._connected = reachable
-        self._probed_once = True
-        self._last_checked_mono = time.monotonic()
-        self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-        self._pid, self._ram_mb = self._metrics_fn()
+        self._mark_checked()
         self._applied_proxy_url = self.proxy_url if reachable else None
         if reachable:
             self._set_diagnostic("connected", None)
-            log.info("Đã phát hiện Cloudflare WARP proxy sẵn sàng tại %s (RAM: %s MB).", self.safe_proxy_url, self._ram_mb)
+            log.info("Đã phát hiện WARP proxy (wireproxy) sẵn sàng tại %s (RAM: %s MB).", self.safe_proxy_url, self._ram_mb)
         else:
             code, msg = self._infer_offline_diagnostic()
             self._set_diagnostic(code, msg)
@@ -399,46 +532,121 @@ class WarpProxyService:
         else:
             log.info("Đã chuyển định tuyến Outbound (Gemini & Discord) sang kết nối trực tiếp (Direct).")
 
-    async def _run_warp_cli(self, *args: str, timeout: Optional[float] = None) -> tuple[int, str, str]:
-        """Chạy `warp-cli --accept-tos ...` an toàn (`shell=False`, tách biệt env bí mật, giới hạn timeout)."""
-        warp_cli = self._find_binary("warp-cli")
-        if not warp_cli:
-            return 127, "", "Chưa cài cloudflare-warp"
-        cmd = (warp_cli, "--accept-tos", *args)
+    async def _run_wgcf(self, *args: str, license_key: str = "") -> tuple[int, str]:
+        """Chạy `wgcf <args>` an toàn trong `/var/lib/warp-proxy` (`shell=False`, env tối giản, giới hạn timeout); trả về `(rc, chẩn đoán đã che)`."""
+        wgcf_bin = self._find_binary("wgcf")
+        if not wgcf_bin:
+            return 127, "Chưa cài wgcf"
         try:
             proc = await self._spawn(
-                *cmd,
+                wgcf_bin,
+                *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=build_warp_subprocess_env(),
+                cwd=self.state_dir,
+                env=build_warp_subprocess_env(license_key=license_key),
             )
         except FileNotFoundError:
-            return 127, "", "Chưa cài cloudflare-warp"
+            return 127, "Chưa cài wgcf"
         except Exception as exc:
-            return 1, "", sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}")
+            return 1, sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}")
 
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout if timeout is not None else self._cli_timeout,
-            )
+            stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=self._cli_timeout)
         except asyncio.TimeoutError:
             try:
                 proc.kill()
                 await proc.wait()
             except Exception:
                 pass
-            return 124, "", f"warp-cli {args[0] if args else ''} quá hạn thời gian"
+            return 124, f"wgcf {args[0] if args else ''} quá hạn thời gian"
         except Exception as exc:
-            return 1, "", sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}")
+            return 1, sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}")
 
-        stdout_text = (stdout_b or b"").decode("utf-8", errors="replace").strip()
-        stderr_text = (stderr_b or b"").decode("utf-8", errors="replace").strip()
         rc = getattr(proc, "returncode", 0)
-        return int(rc if rc is not None else 0), stdout_text, stderr_text
+        rc = int(rc if rc is not None else 0)
+        if rc == 0:
+            return 0, ""
+        text = (stderr_b or b"").decode("utf-8", errors="replace") or (stdout_b or b"").decode("utf-8", errors="replace")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        err_lines = [ln for ln in lines if any(t in ln.lower() for t in ("error", "fail", "denied", "refused", "timeout", "unable"))]
+        return rc, sanitize_warp_diagnostic((err_lines or lines or [""])[-1])
+
+    def _write_private_file(self, path: str, content: str) -> None:
+        """Ghi tệp chứa khóa WireGuard với quyền `0600` (chỉ chủ sở hữu đọc được)."""
+        tmp_path = f"{path}.tmp"
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fp:
+            fp.write(content)
+        os.replace(tmp_path, path)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+    async def _ensure_profile_locked(self) -> tuple[bool, Optional[str], str]:
+        """Đảm bảo `wgcf-account.toml`, `wgcf-profile.conf` và `wireproxy.conf` (bind `127.0.0.1:<port>`) tồn tại và hợp lệ."""
+        try:
+            os.makedirs(self.state_dir, mode=0o700, exist_ok=True)
+        except OSError as exc:
+            return False, f"Không tạo được thư mục trạng thái WARP ({sanitize_warp_diagnostic(str(exc))})", "state_dir_error"
+        if not os.access(self.state_dir, os.W_OK):
+            return False, "Thư mục trạng thái WARP không ghi được", "state_dir_error"
+
+        account_path = self._path(ACCOUNT_FILE)
+        profile_path = self._path(PROFILE_FILE)
+        marker_path = self._path(LICENSE_MARKER_FILE)
+        regenerate = False
+
+        if not os.path.isfile(account_path):
+            rc, detail = await self._run_wgcf("register", "--accept-tos")
+            if rc != 0 or not os.path.isfile(account_path):
+                msg = f"Đăng ký tài khoản WARP thất bại ({detail})" if detail else "Đăng ký tài khoản WARP thất bại"
+                return False, msg, "registration_failed"
+            regenerate = True
+            try:
+                os.chmod(account_path, 0o600)
+            except OSError:
+                pass
+
+        license_key = _license_key_from_env()
+        if license_key:
+            digest = hashlib.sha256(license_key.encode("utf-8")).hexdigest()
+            applied = ""
+            try:
+                with open(marker_path, "r", encoding="utf-8") as fp:
+                    applied = fp.read().strip()
+            except OSError:
+                applied = ""
+            if applied != digest:
+                rc, detail = await self._run_wgcf("update", license_key=license_key)
+                if rc == 0:
+                    self._write_private_file(marker_path, digest)
+                    regenerate = True
+                else:
+                    log.warning("Không áp dụng được WARP_LICENSE_KEY: %s", detail or "rejected")
+
+        if regenerate or not os.path.isfile(profile_path):
+            rc, detail = await self._run_wgcf("generate")
+            if rc != 0 or not os.path.isfile(profile_path):
+                msg = f"Tạo hồ sơ WireGuard thất bại ({detail})" if detail else "Tạo hồ sơ WireGuard thất bại"
+                return False, msg, "generate_failed"
+            try:
+                os.chmod(profile_path, 0o600)
+            except OSError:
+                pass
+
+        try:
+            with open(profile_path, "r", encoding="utf-8") as fp:
+                interface, peer = parse_wgcf_profile(fp.read())
+            content = render_wireproxy_config(interface, peer, socks_port=self.port, http_port=self.http_port)
+            self._write_private_file(self._path(WIREPROXY_CONFIG_FILE), content)
+        except (OSError, ValueError, configparser.Error) as exc:
+            return False, f"Hồ sơ WireGuard không hợp lệ ({sanitize_warp_diagnostic(str(exc))})", "profile_invalid"
+        return True, None, "profile_ready"
 
     def _close_daemon_log_handle(self) -> None:
-        """Đóng file handle log của `warp-svc` an toàn nếu đang mở."""
+        """Đóng file handle log của `wireproxy` an toàn nếu đang mở."""
         fp = self._daemon_log_fp
         self._daemon_log_fp = None
         if fp is not None:
@@ -447,167 +655,75 @@ class WarpProxyService:
             except Exception:
                 pass
 
-    async def _spawn_warp_daemon(self, warp_svc_bin: str, *, accept_tos: bool) -> tuple[Any, str]:
-        """Khởi chạy nền `warp-svc` với luồng log chuyển hướng an toàn không phụ thuộc systemd/dbus."""
-        for runtime_dir in ("/var/lib/cloudflare-warp", "/run/cloudflare-warp"):
+    async def _stop_wireproxy_locked(self, *, include_external: bool) -> None:
+        """Dừng `wireproxy` do Python quản lý (và tùy chọn cả tiến trình do entrypoint khởi chạy)."""
+        proc = self._daemon_proc
+        self._daemon_proc = None
+        keep: set[int] = set()
+        if proc is not None and getattr(proc, "returncode", None) is None:
             try:
-                os.makedirs(runtime_dir, exist_ok=True)
-            except OSError:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=3.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+            except Exception:
+                pass
+        self._close_daemon_log_handle()
+        if include_external:
+            try:
+                await asyncio.to_thread(self._terminate_external, keep)
+            except Exception:
                 pass
 
-        log_path = self._log_path or _resolve_writable_log_path()
+    async def _spawn_wireproxy_locked(self) -> tuple[Any, str]:
+        """Khởi chạy nền `wireproxy -c /var/lib/warp-proxy/wireproxy.conf` bằng `asyncio.create_subprocess_exec` (không shell)."""
+        wireproxy_bin = self._find_binary("wireproxy")
+        if not wireproxy_bin:
+            raise FileNotFoundError("wireproxy")
+        log_path = self._log_path or self._path(WIREPROXY_LOG_FILE)
         self._log_path = log_path
         self._close_daemon_log_handle()
-
         stdout_target: Any = asyncio.subprocess.DEVNULL
-        stderr_target: Any = asyncio.subprocess.PIPE
         try:
-            fp = open(log_path, "ab")
+            fp = open(log_path, "wb")
             self._daemon_log_fp = fp
             stdout_target = fp
-            stderr_target = fp
         except OSError:
             stdout_target = asyncio.subprocess.DEVNULL
-            stderr_target = asyncio.subprocess.PIPE
-
-        cmd = (warp_svc_bin, "--accept-tos") if accept_tos else (warp_svc_bin,)
         proc = await self._spawn(
-            *cmd,
+            wireproxy_bin,
+            "-c",
+            self._path(WIREPROXY_CONFIG_FILE),
             stdout=stdout_target,
-            stderr=stderr_target,
+            stderr=asyncio.subprocess.STDOUT if stdout_target is not asyncio.subprocess.DEVNULL else asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.DEVNULL,
+            cwd=self.state_dir,
             env=build_warp_subprocess_env(),
         )
         self._daemon_proc = proc
         return proc, log_path
 
-    async def _read_proc_exit_reason(self, proc: Any, log_path: str) -> str:
-        """Lấy thông điệp lỗi đã làm sạch khi tiến trình `warp-svc` thoát sớm."""
-        stderr_obj = getattr(proc, "stderr", None)
-        if stderr_obj is not None and hasattr(stderr_obj, "read"):
-            try:
-                data = await asyncio.wait_for(stderr_obj.read(), timeout=0.3)
-                if data:
-                    text = sanitize_warp_diagnostic(data.decode("utf-8", errors="replace"))
-                    if text:
-                        return text
-            except Exception:
-                pass
-        return _read_sanitized_log_tail(log_path)
-
-    async def _ensure_daemon_ready_locked(self) -> tuple[bool, Optional[str], str]:
-        """Đảm bảo `warp-svc` đang chạy và IPC socket phản hồi trong tối đa 5 giây (gọi bên trong `self._lock`)."""
-        # 1) Kiểm tra nhanh IPC xem daemon có sẵn sàng rồi hay không
-        rc, _out, _err = await self._run_warp_cli("status", timeout=min(3.0, self._cli_timeout))
-        if rc == 0:
-            return True, None, "connected"
-
-        warp_svc_bin = self._find_binary("warp-svc")
-        if not warp_svc_bin:
-            return False, "Chưa cài cloudflare-warp", "not_installed"
-
-        # 2) Nếu chưa có tiến trình `warp-svc` đang chạy -> khởi chạy nền
-        pid, _ram = self._metrics_fn()
-        managed_alive = (
-            self._daemon_proc is not None and getattr(self._daemon_proc, "returncode", None) is None
-        )
-        log_path = self._log_path
-        if not managed_alive and pid is None:
-            try:
-                proc, log_path = await self._spawn_warp_daemon(warp_svc_bin, accept_tos=True)
-            except FileNotFoundError:
-                return False, "Chưa cài cloudflare-warp", "not_installed"
-            except Exception as exc:
-                detail = sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}")
-                return False, f"warp-svc chưa khởi động ({detail})", "daemon_not_running"
-
-            await asyncio.sleep(min(0.25, self._ipc_poll_interval))
-            if getattr(proc, "returncode", None) is not None:
-                early_err = await self._read_proc_exit_reason(proc, log_path)
-                if any(tok in early_err.lower() for tok in ("unexpected argument", "unrecognized", "unknown option", "accept-tos")):
-                    try:
-                        proc, log_path = await self._spawn_warp_daemon(warp_svc_bin, accept_tos=False)
-                    except Exception as exc:
-                        detail = sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}")
-                        return False, f"warp-svc chưa khởi động ({detail})", "daemon_not_running"
-                else:
-                    msg = f"warp-svc chưa khởi động ({early_err})" if early_err else "warp-svc chưa khởi động"
-                    return False, msg, "daemon_not_running"
-
-        # 3) Chờ IPC socket sẵn sàng trong 3–5 giây
-        deadline = time.monotonic() + self._ipc_wait_timeout
-        while True:
-            if self._daemon_proc is not None and getattr(self._daemon_proc, "returncode", None) is not None:
-                reason = await self._read_proc_exit_reason(self._daemon_proc, log_path)
-                msg = f"warp-svc chưa khởi động ({reason})" if reason else "warp-svc chưa khởi động"
-                return False, msg, "daemon_not_running"
-
-            rc, _out, err = await self._run_warp_cli("status", timeout=min(2.5, self._cli_timeout))
-            if rc == 0:
-                return True, None, "ipc_ready"
-
-            if time.monotonic() >= deadline:
-                detail = sanitize_warp_diagnostic(err) or _read_sanitized_log_tail(log_path)
-                if detail:
-                    return False, f"warp-svc chưa khởi động ({detail})", "daemon_not_running"
-                return False, "warp-svc chưa khởi động (IPC chưa sẵn sàng)", "daemon_not_running"
-
-            await asyncio.sleep(self._ipc_poll_interval)
-
-    async def _configure_and_connect_locked(self) -> tuple[bool, Optional[str], str]:
-        """Đăng ký profile WARP (nếu thiếu), nạp license key tùy chọn, ép chế độ proxy loopback và gọi `connect`."""
-        # 1) Kiểm tra hồ sơ đăng ký hiện tại
-        reg_rc, reg_out, reg_err = await self._run_warp_cli("registration", "show")
-        reg_combined = f"{reg_out} {reg_err}".lower()
-        needs_registration = reg_rc != 0 or any(
-            phrase in reg_combined for phrase in ("missing registration", "no registration", "not registered")
-        )
-
-        connector_token = (os.getenv("WARP_CONNECTOR_TOKEN") or "").strip()
-        license_key = (os.getenv("WARP_LICENSE_KEY") or "").strip()
-
-        if needs_registration:
-            if connector_token:
-                c_rc, c_out, c_err = await self._run_warp_cli("connector", "new", connector_token)
-                if c_rc != 0:
-                    detail = sanitize_warp_diagnostic(c_err or c_out)
-                    msg = f"Đăng ký WARP Connector thất bại ({detail})" if detail else "Đăng ký WARP Connector thất bại"
-                    return False, msg, "registration_failed"
-            else:
-                n_rc, n_out, n_err = await self._run_warp_cli("registration", "new")
-                if n_rc != 0:
-                    detail = sanitize_warp_diagnostic(n_err or n_out)
-                    msg = f"Đăng ký hồ sơ WARP thất bại ({detail})" if detail else "Đăng ký hồ sơ WARP thất bại"
-                    return False, msg, "registration_failed"
-
-        if license_key and not connector_token:
-            l_rc, l_out, l_err = await self._run_warp_cli("registration", "license", license_key)
-            if l_rc != 0:
-                # Không làm hỏng quá trình kết nối nếu license đã gắn hoặc key bị từ chối tạm thời, chỉ ghi cảnh báo đã che bí mật
-                log.warning(
-                    "Không áp dụng được WARP_LICENSE_KEY: %s",
-                    sanitize_warp_diagnostic(l_err or l_out) or "rejected",
-                )
-
-        # 2) Ép chế độ user-space proxy, đặt cổng loopback và kết nối
-        m_rc, m_out, m_err = await self._run_warp_cli("mode", "proxy")
-        if m_rc != 0:
-            detail = sanitize_warp_diagnostic(m_err or m_out)
-            msg = f"Không đặt được WARP mode proxy ({detail})" if detail else "Không đặt được WARP mode proxy"
-            return False, msg, "mode_proxy_failed"
-
-        p_rc, p_out, p_err = await self._run_warp_cli("proxy", "port", str(self.port))
-        if p_rc != 0:
-            detail = sanitize_warp_diagnostic(p_err or p_out)
-            msg = f"Không đặt được cổng WARP proxy {self.port} ({detail})" if detail else f"Không đặt được cổng WARP proxy {self.port}"
-            return False, msg, "proxy_port_failed"
-
-        conn_rc, conn_out, conn_err = await self._run_warp_cli("connect")
-        if conn_rc != 0:
-            detail = sanitize_warp_diagnostic(conn_err or conn_out)
-            msg = f"Lệnh warp-cli connect thất bại ({detail})" if detail else "Lệnh warp-cli connect thất bại"
-            return False, msg, "connect_failed"
-
-        return True, None, "connecting"
+    async def _verify_trace_locked(self) -> dict[str, Any]:
+        """Xác minh lưu lượng thực sự đi qua WARP bằng `cdn-cgi/trace` qua `socks5h://127.0.0.1:<port>` (không lưu IP thô)."""
+        checked_at = datetime.now(timezone.utc).isoformat()
+        try:
+            text = await asyncio.wait_for(self._trace_fn(self.proxy_url), timeout=10.0)
+            result = parse_trace_payload(text)
+            result["error"] = None
+        except Exception as exc:
+            result = {
+                "warp": "unknown",
+                "warp_ok": False,
+                "colo": None,
+                "loc": None,
+                "http": None,
+                "error": sanitize_warp_diagnostic(f"{type(exc).__name__}: {exc}") or type(exc).__name__,
+            }
+        result["checked_at"] = checked_at
+        self._trace = result
+        return result
 
     async def start_and_connect(
         self,
@@ -615,64 +731,55 @@ class WarpProxyService:
         port: Optional[int] = None,
         force_reconnect: bool = False,
     ) -> dict[str, Any]:
-        """Khởi động `warp-svc` (nếu cần), đăng ký/cấu hình proxy loopback, gọi `connect` và poll `127.0.0.1:<port>` 6–8s."""
+        """Tạo hồ sơ `wgcf` (nếu thiếu), sinh `wireproxy.conf`, khởi chạy `wireproxy`, poll `127.0.0.1:<port>` và xác minh `cdn-cgi/trace`."""
         async with self._lock:
+            port_changed = port is not None and int(port) != self.port
             if port is not None:
                 self._set_loopback_port(port)
             self._enabled = True
 
-            # Nhánh nhanh: nếu cổng loopback đã lắng nghe sẵn và không yêu cầu cấu hình lại
-            if not force_reconnect:
+            if not force_reconnect and not port_changed:
                 already_up = bool(await self._probe_async(self.host, self.port, self._probe_timeout))
                 if already_up:
                     self._connected = True
-                    self._probed_once = True
-                    self._last_checked_mono = time.monotonic()
-                    self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-                    self._pid, self._ram_mb = self._metrics_fn()
+                    self._mark_checked()
                     self._set_diagnostic("connected", None)
                     await self._apply_route_hooks(self.proxy_url)
                     return self.status_snapshot()
 
-            # Kiểm tra cài đặt binary trước khi thao tác
             if not self.is_installed():
                 self._connected = False
-                self._probed_once = True
-                self._last_checked_mono = time.monotonic()
-                self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-                self._pid, self._ram_mb = self._metrics_fn()
-                self._set_diagnostic("not_installed", "Chưa cài cloudflare-warp")
+                self._mark_checked()
+                self._set_diagnostic("not_installed", self._not_installed_message())
                 await self._apply_route_hooks(None)
                 return self.status_snapshot()
 
-            # Đảm bảo daemon `warp-svc` chạy và IPC sẵn sàng (3–5s)
-            daemon_ok, daemon_msg, daemon_code = await self._ensure_daemon_ready_locked()
-            if not daemon_ok:
+            async def _fail(code: str, msg: Optional[str]) -> dict[str, Any]:
                 self._connected = False
-                self._probed_once = True
-                self._last_checked_mono = time.monotonic()
-                self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-                self._pid, self._ram_mb = self._metrics_fn()
-                self._set_diagnostic(daemon_code, daemon_msg)
+                self._mark_checked()
+                self._set_diagnostic(code, msg)
                 await self._apply_route_hooks(None)
                 return self.status_snapshot()
 
-            # Đăng ký (nếu thiếu), đặt mode proxy + proxy port + connect
-            cfg_ok, cfg_msg, cfg_code = await self._configure_and_connect_locked()
-            if not cfg_ok:
-                self._connected = False
-                self._probed_once = True
-                self._last_checked_mono = time.monotonic()
-                self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-                self._pid, self._ram_mb = self._metrics_fn()
-                self._set_diagnostic(cfg_code, cfg_msg)
-                await self._apply_route_hooks(None)
-                return self.status_snapshot()
+            ok, msg, code = await self._ensure_profile_locked()
+            if not ok:
+                return await _fail(code, msg)
 
-            # Poll chủ động socket 127.0.0.1:<port> trong 6–8 giây (mỗi 0.5s) trước khi trả về Frontend
+            await self._stop_wireproxy_locked(include_external=True)
+            self._trace = None
+            try:
+                proc, log_path = await self._spawn_wireproxy_locked()
+            except FileNotFoundError:
+                return await _fail("not_installed", self._not_installed_message())
+            except Exception as exc:
+                return await _fail("daemon_not_running", f"wireproxy chưa chạy ({type(exc).__name__}: {exc})")
+
             poll_deadline = time.monotonic() + self._connect_poll_timeout
             reachable = False
             while True:
+                if getattr(proc, "returncode", None) is not None:
+                    tail = _read_sanitized_log_tail(log_path)
+                    return await _fail("daemon_not_running", f"wireproxy thoát sớm ({tail})" if tail else "wireproxy thoát sớm")
                 if await self._probe_async(self.host, self.port, self._probe_timeout):
                     reachable = True
                     break
@@ -680,72 +787,60 @@ class WarpProxyService:
                     break
                 await asyncio.sleep(self._connect_poll_interval)
 
-            self._connected = reachable
-            self._probed_once = True
-            self._last_checked_mono = time.monotonic()
-            self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-            self._pid, self._ram_mb = self._metrics_fn()
+            if not reachable:
+                tail = _read_sanitized_log_tail(log_path)
+                diag = f"127.0.0.1:{self.port} chưa lắng nghe ({tail})" if tail else f"127.0.0.1:{self.port} chưa phản hồi sau khi khởi chạy wireproxy"
+                return await _fail("proxy_not_listening", diag)
 
-            if reachable:
-                self._set_diagnostic("connected", None)
-                await self._apply_route_hooks(self.proxy_url)
-                return self.status_snapshot()
-
-            # Thu thập trạng thái thực tế từ `warp-cli status` để trả về chẩn đoán rõ ràng thay vì timeout chung chung
-            st_rc, st_out, st_err = await self._run_warp_cli("status", timeout=min(3.0, self._cli_timeout))
-            status_detail = sanitize_warp_diagnostic(st_out or st_err)
-            if not status_detail and self._log_path:
-                status_detail = _read_sanitized_log_tail(self._log_path)
-            if status_detail:
-                diag_msg = f"127.0.0.1:{self.port} chưa lắng nghe ({status_detail})"
-            else:
-                diag_msg = f"127.0.0.1:{self.port} chưa phản hồi sau khi gọi warp-cli connect"
-            self._set_diagnostic("proxy_not_listening", diag_msg)
-            await self._apply_route_hooks(None)
+            self._connected = True
+            self._mark_checked()
+            self._set_diagnostic("connected", None)
+            await self._apply_route_hooks(self.proxy_url)
+            if self._verify_trace_on_start:
+                trace = await self._verify_trace_locked()
+                if not trace.get("warp_ok"):
+                    log.warning("wireproxy đã lắng nghe nhưng cdn-cgi/trace chưa xác nhận warp=on (%s).", trace.get("error") or trace.get("warp"))
             return self.status_snapshot()
 
+    async def verify_warp_trace(self) -> dict[str, Any]:
+        """Kiểm tra `https://www.cloudflare.com/cdn-cgi/trace` qua WARP proxy và trả về kết quả đã làm sạch (`warp=on/plus`, `colo`, `loc`)."""
+        async with self._lock:
+            reachable = bool(await self._probe_async(self.host, self.port, self._probe_timeout))
+            self._connected = reachable
+            self._mark_checked()
+            if not reachable:
+                self._trace = {
+                    "warp": "off",
+                    "warp_ok": False,
+                    "colo": None,
+                    "loc": None,
+                    "http": None,
+                    "error": f"127.0.0.1:{self.port} chưa phản hồi",
+                    "checked_at": datetime.now(timezone.utc).isoformat(),
+                }
+                return {"trace": dict(self._trace), "warp": self.status_snapshot()}
+            trace = await self._verify_trace_locked()
+            return {"trace": dict(trace), "warp": self.status_snapshot()}
+
     async def stop_and_disconnect(self) -> dict[str, Any]:
-        """Tắt định tuyến Outbound WARP, ngắt kết nối `warp-cli` (best-effort) và chuyển ngay Gemini + Discord sang Direct."""
+        """Tắt định tuyến Outbound WARP, dừng `wireproxy` (giải phóng RAM) và chuyển ngay Gemini + Discord sang Direct."""
         async with self._lock:
             self._enabled = False
             self._connected = False
-            self._probed_once = True
-            self._last_checked_mono = time.monotonic()
-            self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-
             await self._apply_route_hooks(None)
-
-            if self._find_binary("warp-cli"):
-                pid, _ram = self._metrics_fn()
-                managed_alive = (
-                    self._daemon_proc is not None and getattr(self._daemon_proc, "returncode", None) is None
-                )
-                if managed_alive or pid is not None:
-                    await self._run_warp_cli("disconnect", timeout=min(3.0, self._cli_timeout))
-
-            self._pid, self._ram_mb = self._metrics_fn()
+            await self._stop_wireproxy_locked(include_external=True)
+            self._trace = None
+            self._mark_checked()
             self._set_diagnostic("disabled", None)
             return self.status_snapshot()
 
     async def shutdown(self) -> None:
-        """Dừng an toàn tiến trình con `warp-svc` nếu do tiến trình Python trực tiếp khởi tạo."""
+        """Dừng an toàn tiến trình con `wireproxy` nếu do tiến trình Python trực tiếp khởi tạo."""
         async with self._lock:
-            proc = self._daemon_proc
-            self._daemon_proc = None
-            if proc is not None and getattr(proc, "returncode", None) is None:
-                try:
-                    proc.terminate()
-                    try:
-                        await asyncio.wait_for(proc.wait(), timeout=3.0)
-                    except asyncio.TimeoutError:
-                        proc.kill()
-                        await proc.wait()
-                except Exception:
-                    pass
-            self._close_daemon_log_handle()
+            await self._stop_wireproxy_locked(include_external=False)
 
     async def refresh_status(self, *, force: bool = False) -> dict[str, Any]:
-        """Kiểm tra tình trạng kết nối WARP proxy và RAM của `warp-svc` (có cache ngắn); tự động fallback/khôi phục khi cần."""
+        """Kiểm tra tình trạng kết nối WARP proxy và RAM của `wireproxy` (có cache ngắn); tự động fallback/khôi phục khi cần."""
         now = time.monotonic()
         if not force and self._probed_once and (now - self._last_checked_mono) < self._cache_ttl:
             return self.status_snapshot()
@@ -764,10 +859,7 @@ class WarpProxyService:
                 reachable = False
 
             self._connected = reachable
-            self._probed_once = True
-            self._last_checked_mono = time.monotonic()
-            self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-            self._pid, self._ram_mb = self._metrics_fn()
+            self._mark_checked()
 
             if reachable and self._enabled:
                 self._set_diagnostic("connected", None)
@@ -775,17 +867,14 @@ class WarpProxyService:
                 self._set_diagnostic("disabled", None)
             elif probe_err:
                 self._set_diagnostic("probe_error", probe_err)
-            elif not self._diagnostic:
+            elif not self._diagnostic or self._diagnostic_code == "connected":
                 code, msg = self._infer_offline_diagnostic()
                 self._set_diagnostic(code, msg)
 
             desired_proxy = self.proxy_url if (self._enabled and self._connected) else None
             if desired_proxy != self._applied_proxy_url:
                 if self._enabled and not self._connected and self._applied_proxy_url is not None:
-                    log.warning(
-                        "WARP proxy %s không phản hồi — tự động fallback sang Outbound Direct.",
-                        self.safe_proxy_url,
-                    )
+                    log.warning("WARP proxy %s không phản hồi — tự động fallback sang Outbound Direct.", self.safe_proxy_url)
                 await self._apply_route_hooks(desired_proxy)
 
             return self.status_snapshot()
@@ -798,7 +887,7 @@ class WarpProxyService:
         bootstrap: bool = False,
         port: Optional[int] = None,
     ) -> dict[str, Any]:
-        """Bật hoặc tắt định tuyến Outbound qua Cloudflare WARP ngay lập tức; khi `bootstrap=True` sẽ tự khởi chạy `warp-svc` và poll kết nối."""
+        """Bật hoặc tắt định tuyến Outbound qua WARP ngay lập tức; khi `bootstrap=True` sẽ tự khởi chạy `wgcf` + `wireproxy` và poll kết nối."""
         if enabled and bootstrap:
             return await self.start_and_connect(port=port, force_reconnect=False)
         if not enabled and bootstrap:
@@ -814,10 +903,7 @@ class WarpProxyService:
                 except Exception as exc:
                     self._set_diagnostic("probe_error", f"{type(exc).__name__}: {exc}")
                     self._connected = False
-                self._probed_once = True
-                self._last_checked_mono = time.monotonic()
-                self._last_checked_iso = datetime.now(timezone.utc).isoformat()
-                self._pid, self._ram_mb = self._metrics_fn()
+                self._mark_checked()
 
             if self._enabled and self._connected:
                 self._set_diagnostic("connected", None)
@@ -842,15 +928,12 @@ class WarpProxyService:
             if reason:
                 self._set_diagnostic("runtime_fallback", reason)
             if was_using_proxy:
-                log.warning(
-                    "Phát hiện lỗi kết nối WARP proxy (%s) — lập tức chuyển sang Direct.",
-                    self._last_error or "unreachable",
-                )
+                log.warning("Phát hiện lỗi kết nối WARP proxy (%s) — lập tức chuyển sang Direct.", self._last_error or "unreachable")
                 await self._apply_route_hooks(None)
             return was_using_proxy
 
     def status_snapshot(self) -> dict[str, Any]:
-        """Xuất telemetry gọn nhẹ về Cloudflare WARP cho API `/api/status` và Dashboard (không chứa bí mật hay đường dẫn nội bộ)."""
+        """Xuất telemetry gọn nhẹ về WARP (wireproxy) cho API `/api/status` và Dashboard (không chứa bí mật, khóa, IP thô hay đường dẫn nội bộ)."""
         active = self.is_active
         fallback_direct = bool(self._enabled and self._probed_once and not self._connected)
         return {
@@ -861,9 +944,11 @@ class WarpProxyService:
             "proxy_url": self.safe_proxy_url,
             "proxy_port": self.port,
             "outbound_mode": "proxy" if active else "direct",
+            "engine": "wireproxy",
             "warp_installed": self.is_installed(),
             "warp_ram_mb": self._ram_mb,
             "warp_pid": self._pid,
+            "trace": dict(self._trace) if (self._trace and self._enabled) else None,
             "diagnostic": None if (active or not self._enabled) else self._diagnostic,
             "diagnostic_code": "connected" if active else ("disabled" if not self._enabled else self._diagnostic_code),
             "last_checked_at": self._last_checked_iso,

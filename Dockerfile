@@ -20,16 +20,28 @@ RUN echo "cache-bust: ${CACHE_BUST}" \
  && (pip list --format=freeze | grep -i -E "^(google-genai|discord.py|pymongo|fastapi|uvicorn|httpx|socksio|aiohttp-socks|pydantic)==" || true) \
  && rm -f /tmp/pypi-*.json
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl gnupg ca-certificates \
- && curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg | gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg \
- && CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")" \
- && echo "deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${CODENAME} main" > /etc/apt/sources.list.d/cloudflare-client.list \
+ARG TARGETARCH
+ARG WGCF_VERSION=2.3.1
+ARG WIREPROXY_VERSION=1.1.3
+RUN set -eux \
  && apt-get update \
- && apt-get install -y --no-install-recommends cloudflare-warp \
- && ls -la "$(command -v warp-svc)" "$(command -v warp-cli)" \
- && apt-get purge -y --auto-remove gnupg \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" \
+ && case "${ARCH}" in \
+      amd64|x86_64) ARCH=amd64 ;; \
+      arm64|aarch64) ARCH=arm64 ;; \
+      *) echo "Unsupported architecture for wgcf/wireproxy: ${ARCH}" >&2; exit 1 ;; \
+    esac \
+ && curl -fsSL --retry 3 --retry-delay 2 -o /usr/local/bin/wgcf \
+      "https://github.com/ViRb3/wgcf/releases/download/v${WGCF_VERSION}/wgcf_${WGCF_VERSION}_linux_${ARCH}" \
+ && curl -fsSL --retry 3 --retry-delay 2 \
+      "https://github.com/whyvl/wireproxy/releases/download/v${WIREPROXY_VERSION}/wireproxy_linux_${ARCH}.tar.gz" \
+    | tar -xz -C /usr/local/bin wireproxy \
+ && chmod 0755 /usr/local/bin/wgcf /usr/local/bin/wireproxy \
+ && apt-get purge -y --auto-remove curl \
  && rm -rf /var/lib/apt/lists/*
+
+RUN wgcf --help >/dev/null && wireproxy --version
 
 COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/cloudflared
 
@@ -40,9 +52,9 @@ COPY static/ ./static/
 
 RUN chmod +x /app/docker-entrypoint.sh \
  && useradd --create-home --no-log-init --shell /usr/sbin/nologin botuser \
- && mkdir -p /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp /home/botuser/.local/share/warp \
- && chown -R botuser:botuser /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp /home/botuser /app \
- && chmod 0775 /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp
+ && mkdir -p /var/lib/warp-proxy \
+ && chown -R botuser:botuser /var/lib/warp-proxy /home/botuser /app \
+ && chmod 0775 /var/lib/warp-proxy
 
 USER botuser
 

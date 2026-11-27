@@ -39,9 +39,10 @@ def create_config_router(
     start_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     update_warp_fn: Optional[Callable[..., Awaitable[dict[str, Any]]]] = None,
     stop_warp_fn: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None,
+    trace_warp_fn: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None,
     get_tunnel_status_fn: Optional[Callable[[], dict[str, Any]]] = None,
 ) -> APIRouter:
-    """Tạo router cho `/api/config*` và các endpoint điều khiển WARP `/api/warp/start`, `/api/warp/update`, `/api/warp/stop`."""
+    """Tạo router cho `/api/config*` và các endpoint điều khiển WARP `/api/warp/start`, `/api/warp/update`, `/api/warp/stop`, `/api/warp/trace`."""
     router = APIRouter(tags=["config"])
 
     @router.get("/api/config")
@@ -256,7 +257,7 @@ def create_config_router(
         payload: Optional[WarpActionPayload] = None,
         user: dict[str, Any] = Depends(auth_deps.require_admin),
     ):
-        """Khởi động `warp-svc`, đăng ký/cấu hình `mode proxy` + `proxy port` + `connect` và poll `127.0.0.1:<port>` trước khi trả trạng thái."""
+        """Tạo hồ sơ `wgcf` (nếu thiếu), sinh `wireproxy.conf` bind `127.0.0.1:<port>`, khởi chạy `wireproxy` và poll socket trước khi trả trạng thái."""
         port = payload.warp_proxy_port if payload is not None else None
         changes = payload.changes if payload is not None else None
         return await _execute_warp_change(
@@ -273,7 +274,7 @@ def create_config_router(
         payload: Optional[WarpActionPayload] = None,
         user: dict[str, Any] = Depends(auth_deps.require_admin),
     ):
-        """Áp dụng lại cấu hình WARP (`mode proxy`, `proxy port`, `connect`) và poll socket `127.0.0.1:<port>` tới 6–8 giây."""
+        """Sinh lại `wireproxy.conf`, khởi động lại `wireproxy` và poll socket `127.0.0.1:<port>` tới 6–8 giây."""
         enabled = True if (payload is None or payload.warp_outbound_enabled is None) else bool(payload.warp_outbound_enabled)
         port = payload.warp_proxy_port if payload is not None else None
         changes = payload.changes if payload is not None else None
@@ -296,7 +297,7 @@ def create_config_router(
         payload: Optional[WarpActionPayload] = None,
         user: dict[str, Any] = Depends(auth_deps.require_admin),
     ):
-        """Tắt định tuyến Outbound Cloudflare WARP, ngắt kết nối `warp-cli` và chuyển ngay về Direct."""
+        """Tắt định tuyến Outbound Cloudflare WARP, dừng `wireproxy` và chuyển ngay về Direct."""
         changes = payload.changes if payload is not None else None
         return await _execute_warp_change(
             enabled=False,
@@ -306,5 +307,18 @@ def create_config_router(
             summary="Tắt định tuyến Outbound Cloudflare WARP (chuyển về Direct)",
             client_changes=changes,
         )
+
+    @router.api_route("/api/warp/trace", methods=["GET", "POST"])
+    async def api_warp_trace(_user: dict[str, Any] = Depends(auth_deps.require_admin)):
+        """Xác minh lưu lượng đi qua WARP bằng `cdn-cgi/trace` qua `socks5h://127.0.0.1:<port>` (chỉ trả `warp`/`colo`/`loc`, không lộ IP thô)."""
+        if trace_warp_fn is None:
+            return {"ok": False, "trace": None, "warp": None}
+        result = await trace_warp_fn()
+        trace = result.get("trace") if isinstance(result, dict) else None
+        return {
+            "ok": bool(trace and trace.get("warp_ok")),
+            "trace": trace,
+            "warp": result.get("warp") if isinstance(result, dict) else None,
+        }
 
     return router

@@ -1,4 +1,4 @@
-"""Kiểm thử toàn diện tích hợp Cloudflare WARP User-Space Proxy (127.0.0.1:40000), fallback Direct, API toggle và vệ sinh HTML comment."""
+"""Kiểm thử toàn diện WARP User-Space Proxy (wgcf + wireproxy, 127.0.0.1:40000), fallback Direct, API toggle/trace và vệ sinh HTML comment."""
 from __future__ import annotations
 
 import asyncio
@@ -14,40 +14,75 @@ from fastapi.testclient import TestClient
 from app.bot.client import AskBot
 from app.core.security import is_sensitive_key, redact_secrets, sanitize_config_for_response
 from app.core.settings import AppSettings
-from app.core.warp_proxy import WarpProxyService
+from app.core.warp_proxy import (
+    WarpProxyService,
+    parse_trace_payload,
+    parse_wgcf_profile,
+    render_wireproxy_config,
+    sanitize_warp_diagnostic,
+)
 from app.main import build_container, build_gemini_http_options
 from app.web.app import create_dashboard_app
 
 
-def test_dockerfile_and_entrypoint_configure_cloudflare_warp_proxy():
-    """Xác minh Dockerfile cài đặt cloudflare-warp, giữ nguyên cloudflared và docker-entrypoint.sh cấu hình proxy mode non-blocking."""
+def test_dockerfile_and_entrypoint_install_static_wgcf_wireproxy():
+    """Xác minh Dockerfile cài binary tĩnh wgcf + wireproxy ở stage cuối, giữ nguyên cloudflared, và entrypoint bind 127.0.0.1 non-blocking."""
     root = Path(__file__).resolve().parents[1]
+    dockerfiles = sorted(p.name for p in root.glob("Dockerfile*"))
+    assert dockerfiles == ["Dockerfile"]
     dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
     entrypoint = (root / "docker-entrypoint.sh").read_text(encoding="utf-8")
 
     assert "FROM python:3.12-slim-bookworm" in dockerfile
-    assert "cloudflare-warp" in dockerfile
+    assert dockerfile.count("FROM ") == 1
+    assert "ARG TARGETARCH" in dockerfile
+    assert "github.com/ViRb3/wgcf/releases/download" in dockerfile
+    assert "github.com/whyvl/wireproxy/releases/download" in dockerfile
+    assert "/usr/local/bin/wgcf" in dockerfile and "/usr/local/bin/wireproxy" in dockerfile
+    assert "RUN wgcf --help >/dev/null && wireproxy --version" in dockerfile
+    assert "/var/lib/warp-proxy" in dockerfile
+    assert "cloudflare-warp" not in dockerfile
+    assert "pkg.cloudflareclient.com" not in dockerfile
     assert "COPY --from=cloudflare/cloudflared:latest /usr/local/bin/cloudflared /usr/local/bin/cloudflared" in dockerfile
-    assert "/var/lib/cloudflare-warp" in dockerfile
     assert 'ENTRYPOINT ["/app/docker-entrypoint.sh"]' in dockerfile
 
-    assert "warp-svc" in entrypoint
-    assert "warp-cli --accept-tos mode proxy" in entrypoint
-    assert "warp-cli --accept-tos proxy port" in entrypoint
-    assert "warp-cli --accept-tos connect" in entrypoint
-    assert "WARP_LICENSE_KEY" in entrypoint
-    assert "WARP_CONNECTOR_TOKEN" in entrypoint
+    assert "warp-cli" not in entrypoint and "warp-svc" not in entrypoint
+    assert "register --accept-tos" in entrypoint
+    assert "run_wgcf generate" in entrypoint
+    assert "WGCF_LICENSE_KEY=" in entrypoint
+    assert 'BindAddress = 127.0.0.1:{socks_port}' in entrypoint
+    assert "BindAddress = 0.0.0.0" not in entrypoint
+    assert 'wireproxy -c "${WARP_STATE_DIR}/wireproxy.conf"' in entrypoint
 
-    # Chạy thật docker-entrypoint.sh khi không có warp-svc -> phải khởi chạy lệnh Python bình thường không bị block hay crash
+    # Chạy thật docker-entrypoint.sh khi không có wgcf/wireproxy -> phải khởi chạy lệnh Python bình thường không bị block hay crash
     proc = subprocess.run(
         [str(root / "docker-entrypoint.sh"), "python3", "-c", "print('warp-fallback-boot-ok')"],
         capture_output=True,
         text=True,
-        timeout=5,
-        env={**os.environ, "WARP_ENABLED": "true", "WARP_STARTUP_TIMEOUT": "2"},
+        timeout=10,
+        env={**os.environ, "PATH": "/usr/bin:/bin", "WARP_ENABLED": "true", "WARP_STARTUP_TIMEOUT": "2"},
     )
     assert proc.returncode == 0
     assert "warp-fallback-boot-ok" in proc.stdout
+
+
+def test_wireproxy_config_rendering_binds_loopback_only():
+    """`wireproxy.conf` sinh từ `wgcf-profile.conf` phải giữ khóa WireGuard và chỉ bind `127.0.0.1:<port>`."""
+    interface, peer = parse_wgcf_profile(_FAKE_PROFILE)
+    conf = render_wireproxy_config(interface, peer, socks_port=40000, http_port=40001)
+    assert "[Interface]" in conf and "[Peer]" in conf
+    assert "PrivateKey = " + _FAKE_PRIVATE_KEY in conf
+    assert "Endpoint = engage.cloudflareclient.com:2408" in conf
+    assert "[Socks5]\nBindAddress = 127.0.0.1:40000" in conf
+    assert "[http]\nBindAddress = 127.0.0.1:40001" in conf
+    assert "0.0.0.0:" not in conf
+
+    with pytest.raises(ValueError):
+        parse_wgcf_profile("[Interface]\nAddress = 172.16.0.2/32\n")
+
+    trace = parse_trace_payload("fl=1\nip=203.0.113.77\ncolo=SIN\nloc=VN\nhttp=http/1.1\nwarp=plus\n")
+    assert trace == {"warp": "plus", "warp_ok": True, "colo": "SIN", "loc": "VN", "http": "http/1.1"}
+    assert "203.0.113.77" not in str(trace)
 
 
 @pytest.mark.asyncio
@@ -290,8 +325,21 @@ def test_warp_license_key_zero_secret_protection():
     assert "warp_license_key" not in sanitized["tunnel"]
 
 
+_FAKE_PRIVATE_KEY = "kOc3Zr1Lq3lYpPq0p2Vx7mYc3e9bHq2f3T0dY0xg2Xo="
+_FAKE_PROFILE = f"""[Interface]
+PrivateKey = {_FAKE_PRIVATE_KEY}
+Address = 172.16.0.2/32, 2606:4700:110:8176:3744:8216:1861:296a/128
+DNS = 1.1.1.1, 1.0.0.1
+MTU = 1280
+[Peer]
+PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = engage.cloudflareclient.com:2408
+"""
+
+
 class _FakeCliProcess:
-    """Mô phỏng tiến trình `warp-cli` trả về stdout/stderr cho `communicate()`."""
+    """Mô phỏng tiến trình `wgcf` trả về stdout/stderr cho `communicate()`."""
 
     def __init__(self, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
         self.returncode = returncode
@@ -309,17 +357,12 @@ class _FakeCliProcess:
 
 
 class _FakeDaemonProcess:
-    """Mô phỏng tiến trình nền `warp-svc` có thể sống bền hoặc thoát sớm kèm stderr."""
+    """Mô phỏng tiến trình nền `wireproxy` có thể sống bền hoặc thoát sớm."""
 
-    def __init__(self, pid: int = 8800, returncode: int | None = None, stderr_bytes: bytes = b""):
+    def __init__(self, pid: int = 8800, returncode: int | None = None):
         self.pid = pid
         self.returncode = returncode
         self.terminated = False
-        self.stderr = SimpleNamespace(read=self._read_stderr) if stderr_bytes else None
-        self._stderr_bytes = stderr_bytes
-
-    async def _read_stderr(self) -> bytes:
-        return self._stderr_bytes
 
     def terminate(self) -> None:
         self.terminated = True
@@ -334,86 +377,79 @@ class _FakeDaemonProcess:
 
 
 @pytest.mark.asyncio
-async def test_warp_start_update_stop_daemon_bootstrap_and_socket_readiness_poll(
+async def test_warp_start_update_stop_trace_wgcf_wireproxy_lifecycle(
     fake_db, fake_gemini, fake_bot, monkeypatch, tmp_path
 ):
-    """Kiểm thử toàn bộ chuỗi POST /api/warp/start, /api/warp/update, /api/warp/stop: khởi chạy warp-svc, chờ IPC, đăng ký, mode proxy, proxy port, connect và poll socket 127.0.0.1:<port>."""
+    """POST /api/warp/start|update|stop + /api/warp/trace: wgcf register/update/generate, sinh wireproxy.conf, spawn wireproxy, poll socket và trace."""
     monkeypatch.setenv("WARP_LICENSE_KEY", "SUPER-SECRET-WARP-KEY-9999")
-    monkeypatch.delenv("WARP_CONNECTOR_TOKEN", raising=False)
+    monkeypatch.delenv("WGCF_LICENSE_KEY", raising=False)
+    state_dir = tmp_path / "warp-proxy"
 
-    state = {
-        "daemon_spawned": False,
-        "status_calls": 0,
-        "registered": False,
-        "proxy_mode": False,
-        "proxy_port": 40000,
-        "connected_cmd": False,
-        "socket_polls_after_connect": 0,
-        "commands": [],
-        "child_envs": [],
+    state: dict[str, Any] = {
+        "wgcf_calls": [],
+        "child_envs": {},
+        "spawned": [],
+        "listening_port": None,
+        "polls": 0,
+        "external_terminations": 0,
     }
 
     async def fake_spawn(*cmd, **kwargs):
-        state["commands"].append(cmd)
-        state["child_envs"].append(dict(kwargs.get("env") or {}))
         binary = Path(cmd[0]).name
-        if binary == "warp-svc":
-            state["daemon_spawned"] = True
-            return _FakeDaemonProcess(pid=8811, returncode=None)
-
-        # warp-cli --accept-tos ...
-        args = cmd[2:]
-        if args == ("status",):
-            state["status_calls"] += 1
-            # Lần đầu IPC chưa chạy -> kích hoạt spawn warp-svc; lần sau daemon đã sẵn sàng
-            if not state["daemon_spawned"] or state["status_calls"] < 2:
-                return _FakeCliProcess(1, stderr=b"Unable to connect to CloudflareWARP daemon")
-            return _FakeCliProcess(0, stdout=b"Status update: Disconnected")
-        if args == ("registration", "show"):
-            if not state["registered"]:
-                return _FakeCliProcess(1, stderr=b"Error: Missing registration")
-            return _FakeCliProcess(0, stdout=b"Account type: Unlimited")
-        if args == ("registration", "new"):
-            state["registered"] = True
-            return _FakeCliProcess(0, stdout=b"Success")
-        if args[:2] == ("registration", "license"):
-            return _FakeCliProcess(0, stdout=b"Success")
-        if args == ("mode", "proxy"):
-            state["proxy_mode"] = True
-            return _FakeCliProcess(0, stdout=b"Success")
-        if args[:2] == ("proxy", "port"):
-            state["proxy_port"] = int(args[2])
-            return _FakeCliProcess(0, stdout=b"Success")
-        if args == ("connect",):
-            state["connected_cmd"] = True
-            state["socket_polls_after_connect"] = 0
-            return _FakeCliProcess(0, stdout=b"Success")
-        if args == ("disconnect",):
-            state["connected_cmd"] = False
-            return _FakeCliProcess(0, stdout=b"Success")
-        return _FakeCliProcess(0)
+        env = dict(kwargs.get("env") or {})
+        cwd = Path(kwargs.get("cwd") or ".")
+        if binary == "wgcf":
+            sub = cmd[1]
+            state["wgcf_calls"].append(tuple(cmd[1:]))
+            state["child_envs"][sub] = env
+            if sub == "register":
+                assert "--accept-tos" in cmd
+                (cwd / "wgcf-account.toml").write_text('private_key = "x"\n', encoding="utf-8")
+            elif sub == "update":
+                assert env.get("WGCF_LICENSE_KEY") == "SUPER-SECRET-WARP-KEY-9999"
+            elif sub == "generate":
+                (cwd / "wgcf-profile.conf").write_text(_FAKE_PROFILE, encoding="utf-8")
+            return _FakeCliProcess(0, stdout=b"ok")
+        assert binary == "wireproxy"
+        assert cmd[1:] == ("-c", str(state_dir / "wireproxy.conf"))
+        state["child_envs"]["wireproxy"] = env
+        conf = (state_dir / "wireproxy.conf").read_text(encoding="utf-8")
+        port = int(conf.split("[Socks5]\nBindAddress = 127.0.0.1:")[1].split()[0])
+        state["listening_port"] = port
+        state["polls"] = 0
+        proc = _FakeDaemonProcess(pid=8811 + len(state["spawned"]))
+        state["spawned"].append(proc)
+        return proc
 
     async def fake_probe_async(host: str, port: int, _timeout: float) -> bool:
         assert host == "127.0.0.1"
-        if not state["connected_cmd"] or port != state["proxy_port"]:
+        alive = state["spawned"] and state["spawned"][-1].returncode is None
+        if not alive or port != state["listening_port"]:
             return False
-        state["socket_polls_after_connect"] += 1
-        # Mô phỏng WARP cần 3 lượt poll socket mới mở cổng 127.0.0.1:<port>
-        return state["socket_polls_after_connect"] >= 3
+        state["polls"] += 1
+        return state["polls"] >= 3
+
+    async def fake_trace(proxy_url: str) -> str:
+        assert proxy_url.startswith("socks5h://127.0.0.1:")
+        return "fl=1\nip=198.51.100.23\nts=1\ncolo=SIN\nloc=VN\nwarp=plus\n"
+
+    def fake_terminate_external(_keep: set[int]) -> int:
+        state["external_terminations"] += 1
+        return 0
 
     warp_service = WarpProxyService(
         warp_port=40000,
         enabled=False,
         probe_sync_fn=lambda _h, _p, _t: False,
         probe_async_fn=fake_probe_async,
-        metrics_fn=lambda: (8811, 28.6) if state["daemon_spawned"] else (None, None),
-        which_fn=lambda name: f"/usr/bin/{name}" if name in ("warp-svc", "warp-cli") else None,
+        metrics_fn=lambda: (8811, 10.4) if state["spawned"] and state["spawned"][-1].returncode is None else (None, None),
+        which_fn=lambda name: f"/usr/local/bin/{name}" if name in ("wgcf", "wireproxy") else None,
         spawn_subprocess=fake_spawn,
-        ipc_wait_timeout=1.0,
-        ipc_poll_interval=0.02,
+        trace_fn=fake_trace,
+        terminate_external_fn=fake_terminate_external,
+        state_dir=str(state_dir),
         connect_poll_timeout=1.0,
         connect_poll_interval=0.02,
-        log_path=str(tmp_path / "warp-svc.log"),
     )
 
     settings = AppSettings(
@@ -434,96 +470,154 @@ async def test_warp_start_update_stop_daemon_bootstrap_and_socket_readiness_poll
 
     web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
     with TestClient(web_app) as client:
-        # Chưa đăng nhập -> 401 cho tất cả endpoint điều khiển WARP
-        assert client.post("/api/warp/start").status_code == 401
-        assert client.post("/api/warp/update").status_code == 401
-        assert client.post("/api/warp/stop").status_code == 401
+        for path in ("/api/warp/start", "/api/warp/update", "/api/warp/stop", "/api/warp/trace"):
+            assert client.post(path).status_code == 401
 
-        # Operator -> 403
         client.post("/auth/login", json={"username": "operator1", "password": "OperPass123!"})
-        assert client.post("/api/warp/start").status_code == 403
-        assert client.post("/api/warp/update").status_code == 403
-        assert client.post("/api/warp/stop").status_code == 403
+        for path in ("/api/warp/start", "/api/warp/update", "/api/warp/stop", "/api/warp/trace"):
+            assert client.post(path).status_code == 403
+        assert client.get("/api/warp/trace").status_code == 403
 
-        # Admin -> POST /api/warp/start tự khởi động warp-svc, đăng ký, áp dụng license, ép mode proxy + port 40000 + connect và poll tới khi cổng mở
         client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
         start_res = client.post("/api/warp/start", json={"warp_outbound_enabled": True})
         assert start_res.status_code == 200
         start_body = start_res.json()
         assert start_body["warp"]["active"] is True
-        assert start_body["warp"]["connected"] is True
+        assert start_body["warp"]["engine"] == "wireproxy"
+        assert start_body["warp"]["warp_installed"] is True
         assert start_body["warp"]["diagnostic"] is None
         assert start_body["warp"]["proxy_url"] == "socks5h://127.0.0.1:40000"
+        assert start_body["warp"]["trace"]["warp"] == "plus"
+        assert start_body["warp"]["trace"]["warp_ok"] is True
         assert start_body["cloudflare_tunnel"]["outbound_mode"] == "proxy"
-        assert state["daemon_spawned"] is True
-        assert state["registered"] is True
-        assert state["proxy_mode"] is True
-        assert state["socket_polls_after_connect"] >= 3
-        # Không bao giờ rò rỉ WARP_LICENSE_KEY trong JSON trả về hay biến môi trường subprocess
-        assert "SUPER-SECRET-WARP-KEY-9999" not in start_res.text
-        assert all("WARP_LICENSE_KEY" not in env for env in state["child_envs"])
-        assert all("DISCORD_TOKEN" not in env for env in state["child_envs"])
+        assert [c[0] for c in state["wgcf_calls"]] == ["register", "update", "generate"]
+        assert state["polls"] >= 3
 
-        # POST /api/warp/update với cổng loopback mới 40001 -> luôn khóa về socks5h://127.0.0.1:40001
+        conf_path = state_dir / "wireproxy.conf"
+        conf = conf_path.read_text(encoding="utf-8")
+        assert "BindAddress = 127.0.0.1:40000" in conf
+        assert "0.0.0.0:" not in conf
+        assert (conf_path.stat().st_mode & 0o077) == 0
+        assert "SUPER-SECRET" not in (state_dir / ".license-applied").read_text(encoding="utf-8")
+
+        # Zero-secret: không lộ license key, private key hay IP thô trong JSON trả về
+        for leaked in ("SUPER-SECRET-WARP-KEY-9999", _FAKE_PRIVATE_KEY, "198.51.100.23"):
+            assert leaked not in start_res.text
+        # License chỉ được truyền cho `wgcf update`; không tiến trình con nào nhận bí mật bot
+        assert "WGCF_LICENSE_KEY" not in state["child_envs"]["register"]
+        assert "WGCF_LICENSE_KEY" not in state["child_envs"]["generate"]
+        assert "WGCF_LICENSE_KEY" not in state["child_envs"]["wireproxy"]
+        assert all("WARP_LICENSE_KEY" not in env for env in state["child_envs"].values())
+        assert all("DISCORD_TOKEN" not in env for env in state["child_envs"].values())
+
+        trace_res = client.get("/api/warp/trace")
+        assert trace_res.status_code == 200
+        assert trace_res.json()["ok"] is True
+        assert trace_res.json()["trace"]["colo"] == "SIN"
+        assert "198.51.100.23" not in trace_res.text
+
+        # Cập nhật cổng 40001 -> sinh lại wireproxy.conf và khởi động lại wireproxy (không đăng ký lại wgcf)
         upd_res = client.post("/api/warp/update", json={"warp_outbound_enabled": True, "warp_proxy_port": 40001})
         assert upd_res.status_code == 200
         assert upd_res.json()["warp"]["active"] is True
         assert upd_res.json()["warp"]["proxy_url"] == "socks5h://127.0.0.1:40001"
-        assert state["proxy_port"] == 40001
+        assert "BindAddress = 127.0.0.1:40001" in conf_path.read_text(encoding="utf-8")
+        assert len(state["spawned"]) == 2
+        assert state["spawned"][0].terminated is True
+        assert [c[0] for c in state["wgcf_calls"]] == ["register", "update", "generate"]
 
-        # POST /api/warp/stop -> ngắt kết nối và chuyển ngay về Direct
         stop_res = client.post("/api/warp/stop")
         assert stop_res.status_code == 200
         assert stop_res.json()["warp"]["active"] is False
         assert stop_res.json()["cloudflare_tunnel"]["outbound_mode"] == "direct"
-        assert state["connected_cmd"] is False
+        assert state["spawned"][-1].terminated is True
+        assert state["external_terminations"] >= 1
 
 
 @pytest.mark.asyncio
-async def test_warp_clear_sanitized_diagnostics_on_missing_binary_and_daemon_failure(monkeypatch, tmp_path):
-    """Kiểm tra chẩn đoán rõ ràng & đã che bí mật/đường dẫn khi thiếu binary hoặc warp-svc thoát lỗi."""
+async def test_warp_clear_sanitized_diagnostics_on_missing_binary_and_wireproxy_failure(monkeypatch, tmp_path):
+    """Chẩn đoán rõ ràng & đã che bí mật/khóa/IP/đường dẫn khi thiếu binary, wgcf lỗi hoặc wireproxy thoát sớm."""
     monkeypatch.setenv("WARP_LICENSE_KEY", "SECRET-KEY-SHOULD-NOT-LEAK")
 
-    # 1) Thiếu binary cloudflare-warp -> trả đúng thông điệp "Chưa cài cloudflare-warp"
+    # 1) Thiếu binary -> "Chưa cài wgcf/wireproxy" (không còn báo "Chưa cài cloudflare-warp")
     missing_service = WarpProxyService(
         warp_port=40000,
         probe_sync_fn=lambda _h, _p, _t: False,
         probe_async_fn=lambda _h, _p, _t: asyncio.sleep(0, result=False),
         which_fn=lambda _name: None,
+        state_dir=str(tmp_path / "missing"),
     )
     snap_missing = await missing_service.start_and_connect()
     assert snap_missing["active"] is False
+    assert snap_missing["warp_installed"] is False
     assert snap_missing["diagnostic_code"] == "not_installed"
-    assert snap_missing["diagnostic"] == "Chưa cài cloudflare-warp"
+    assert snap_missing["diagnostic"] == "Chưa cài wgcf/wireproxy"
+    assert "cloudflare-warp" not in str(snap_missing)
 
-    # 2) warp-svc thoát sớm với stderr chứa đường dẫn nội bộ + WARP_LICENSE_KEY -> phải che sạch trước khi trả về UI
-    log_file = tmp_path / "warp-fail.log"
+    only_wgcf = WarpProxyService(which_fn=lambda name: "/usr/local/bin/wgcf" if name == "wgcf" else None)
+    assert only_wgcf.is_installed() is False
+    assert only_wgcf._not_installed_message() == "Chưa cài wireproxy"
+
+    # 2) wgcf register thất bại -> chẩn đoán đã che license + IP
+    async def failing_register(*cmd, **kwargs):
+        return _FakeCliProcess(
+            1,
+            stderr=b"Error: failed to register: dial tcp 162.159.192.1:443: connect: connection refused SECRET-KEY-SHOULD-NOT-LEAK",
+        )
+
+    reg_fail = WarpProxyService(
+        probe_async_fn=lambda _h, _p, _t: asyncio.sleep(0, result=False),
+        metrics_fn=lambda: (None, None),
+        which_fn=lambda name: f"/usr/local/bin/{name}",
+        spawn_subprocess=failing_register,
+        terminate_external_fn=lambda _k: 0,
+        state_dir=str(tmp_path / "regfail"),
+    )
+    snap_reg = await reg_fail.start_and_connect()
+    assert snap_reg["diagnostic_code"] == "registration_failed"
+    assert snap_reg["diagnostic"].startswith("Đăng ký tài khoản WARP thất bại")
+    assert "SECRET-KEY-SHOULD-NOT-LEAK" not in snap_reg["diagnostic"]
+    assert "162.159.192.1" not in snap_reg["diagnostic"]
+
+    # 3) wireproxy thoát sớm với log chứa đường dẫn nội bộ, private key, IP endpoint -> phải che sạch
+    state_dir = tmp_path / "wpfail"
+    state_dir.mkdir()
+    (state_dir / "wgcf-account.toml").write_text("x = 1\n", encoding="utf-8")
+    (state_dir / "wgcf-profile.conf").write_text(_FAKE_PROFILE, encoding="utf-8")
+    (state_dir / ".license-applied").write_text(
+        __import__("hashlib").sha256(b"SECRET-KEY-SHOULD-NOT-LEAK").hexdigest(), encoding="utf-8"
+    )
 
     async def failing_spawn(*cmd, **kwargs):
-        if Path(cmd[0]).name == "warp-svc":
-            log_file.write_text(
-                "ERROR Permission denied opening /var/lib/cloudflare-warp/reg.json for SECRET-KEY-SHOULD-NOT-LEAK\n",
-                encoding="utf-8",
-            )
-            return _FakeDaemonProcess(pid=9901, returncode=1)
-        return _FakeCliProcess(1, stderr=b"Unable to connect to CloudflareWARP daemon")
+        assert Path(cmd[0]).name == "wireproxy"
+        (state_dir / "wireproxy.log").write_text(
+            "DEBUG: noisy handshake\n"
+            f"ERROR: listen tcp 127.0.0.1:40000: bind: address already in use /var/lib/warp-proxy/wireproxy.conf "
+            f"PrivateKey={_FAKE_PRIVATE_KEY} peer 162.159.192.1:2408\n",
+            encoding="utf-8",
+        )
+        return _FakeDaemonProcess(pid=9901, returncode=1)
 
     failing_service = WarpProxyService(
         warp_port=40000,
         probe_sync_fn=lambda _h, _p, _t: False,
         probe_async_fn=lambda _h, _p, _t: asyncio.sleep(0, result=False),
         metrics_fn=lambda: (None, None),
-        which_fn=lambda name: f"/usr/bin/{name}" if name in ("warp-svc", "warp-cli") else None,
+        which_fn=lambda name: f"/usr/local/bin/{name}",
         spawn_subprocess=failing_spawn,
-        ipc_wait_timeout=0.3,
-        ipc_poll_interval=0.02,
-        log_path=str(log_file),
+        terminate_external_fn=lambda _k: 0,
+        state_dir=str(state_dir),
+        connect_poll_timeout=0.3,
+        connect_poll_interval=0.02,
     )
     snap_fail = await failing_service.start_and_connect()
     assert snap_fail["active"] is False
     assert snap_fail["diagnostic_code"] == "daemon_not_running"
-    assert snap_fail["diagnostic"] is not None
-    assert snap_fail["diagnostic"].startswith("warp-svc chưa khởi động")
-    assert "SECRET-KEY-SHOULD-NOT-LEAK" not in snap_fail["diagnostic"]
-    assert "/var/lib/cloudflare-warp/reg.json" not in snap_fail["diagnostic"]
+    diag = snap_fail["diagnostic"]
+    assert diag.startswith("wireproxy thoát sớm")
+    assert "address already in use" in diag
+    assert "127.0.0.1:40000" in diag
+    for leaked in ("SECRET-KEY-SHOULD-NOT-LEAK", _FAKE_PRIVATE_KEY, "162.159.192.1", "/var/lib/warp-proxy"):
+        assert leaked not in diag
 
+    assert sanitize_warp_diagnostic("peer 2606:4700:d0::a29f:c001 timeout at 15:00:31") == "peer [ip] timeout at 15:00:31"

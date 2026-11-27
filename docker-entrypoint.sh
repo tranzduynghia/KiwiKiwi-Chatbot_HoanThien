@@ -1,34 +1,36 @@
 #!/usr/bin/env bash
 # Non-blocking container entrypoint:
-# - Ensures WARP state/runtime directories are present and writable
-# - Starts Cloudflare WARP daemon (warp-svc) in user-space proxy mode strictly bound to 127.0.0.1:<WARP_PROXY_PORT>
-# - Uses bounded timeouts (IPC wait + short proxy readiness check) so bot startup never hangs or crashes
-# - Never prints secret values (WARP_LICENSE_KEY, WARP_CONNECTOR_TOKEN) to stdout/stderr
+# - Ensures the WARP state directory (/var/lib/warp-proxy) exists and is writable
+# - Registers a free Cloudflare WARP account with static `wgcf` (optional WARP+ via WGCF_LICENSE_KEY) and generates a WireGuard profile
+# - Renders wireproxy.conf with a SOCKS5 listener strictly bound to 127.0.0.1:<WARP_PROXY_PORT> (never 0.0.0.0)
+# - Starts `wireproxy` (user-space WireGuard, no root / TUN / DBus / systemd) in the background with a bounded readiness check
+# - Never prints secret values (WARP_LICENSE_KEY, WireGuard private keys) to stdout/stderr
 
 set -u
 
 WARP_ENABLED_RAW="${WARP_ENABLED:-true}"
 WARP_PROXY_PORT_RAW="${WARP_PROXY_PORT:-40000}"
-WARP_IPC_TIMEOUT_RAW="${WARP_STARTUP_TIMEOUT:-5}"
-WARP_CONNECT_WAIT_RAW="${WARP_BOOT_CONNECT_WAIT:-4}"
+WARP_HTTP_PROXY_PORT_RAW="${WARP_HTTP_PROXY_PORT:-}"
+WARP_STARTUP_TIMEOUT_RAW="${WARP_STARTUP_TIMEOUT:-5}"
+WARP_STATE_DIR="${WARP_STATE_DIR:-/var/lib/warp-proxy}"
+WGCF_TIMEOUT=25
 
-# Validate numeric port & timeouts safely (loopback port 1..65535)
+# Validate numeric ports & timeout safely (loopback port 1..65535)
 if [[ "${WARP_PROXY_PORT_RAW}" =~ ^[0-9]+$ ]] && [ "${WARP_PROXY_PORT_RAW}" -ge 1 ] && [ "${WARP_PROXY_PORT_RAW}" -le 65535 ]; then
   WARP_PROXY_PORT="${WARP_PROXY_PORT_RAW}"
 else
   WARP_PROXY_PORT=40000
 fi
 
-if [[ "${WARP_IPC_TIMEOUT_RAW}" =~ ^[0-9]+$ ]] && [ "${WARP_IPC_TIMEOUT_RAW}" -ge 1 ] && [ "${WARP_IPC_TIMEOUT_RAW}" -le 15 ]; then
-  WARP_IPC_TIMEOUT="${WARP_IPC_TIMEOUT_RAW}"
-else
-  WARP_IPC_TIMEOUT=5
+WARP_HTTP_PROXY_PORT=""
+if [[ "${WARP_HTTP_PROXY_PORT_RAW}" =~ ^[0-9]+$ ]] && [ "${WARP_HTTP_PROXY_PORT_RAW}" -ge 1 ] && [ "${WARP_HTTP_PROXY_PORT_RAW}" -le 65535 ] && [ "${WARP_HTTP_PROXY_PORT_RAW}" != "${WARP_PROXY_PORT}" ]; then
+  WARP_HTTP_PROXY_PORT="${WARP_HTTP_PROXY_PORT_RAW}"
 fi
 
-if [[ "${WARP_CONNECT_WAIT_RAW}" =~ ^[0-9]+$ ]] && [ "${WARP_CONNECT_WAIT_RAW}" -ge 1 ] && [ "${WARP_CONNECT_WAIT_RAW}" -le 10 ]; then
-  WARP_CONNECT_WAIT="${WARP_CONNECT_WAIT_RAW}"
+if [[ "${WARP_STARTUP_TIMEOUT_RAW}" =~ ^[0-9]+$ ]] && [ "${WARP_STARTUP_TIMEOUT_RAW}" -ge 1 ] && [ "${WARP_STARTUP_TIMEOUT_RAW}" -le 15 ]; then
+  WARP_STARTUP_TIMEOUT="${WARP_STARTUP_TIMEOUT_RAW}"
 else
-  WARP_CONNECT_WAIT=4
+  WARP_STARTUP_TIMEOUT=5
 fi
 
 is_truthy() {
@@ -47,14 +49,54 @@ with socket.create_connection(("127.0.0.1", port), timeout=0.25):
 PY
 }
 
+sanitize_line() {
+  tr '\r\n' '  ' \
+    | sed -E 's#(/[A-Za-z0-9._-]+){2,}#[path]#g; s/([Pp]rivate_?[Kk]ey|[Ll]icense_?[Kk]ey|[Tt]oken|[Ss]ecret)[ ]*[=:][ ]*[^ ]+/\1=[REDACTED]/g; s/[A-Za-z0-9+\/]{42,43}=/[REDACTED]/g; s/\b([0-9]{1,3}\.){3}[0-9]{1,3}\b/[ip]/g' \
+    | cut -c1-180
+}
+
 tail_sanitized_log() {
   local logfile="$1"
   if [ -r "${logfile}" ]; then
-    tail -n 3 "${logfile}" 2>/dev/null \
-      | tr '\r\n' ' ' \
-      | sed -E 's#(/[A-Za-z0-9._-]+){2,}#[path]#g; s/([Tt]oken|[Kk]ey|[Ss]ecret)[=:][^ ]+/\1=[REDACTED]/g' \
-      | cut -c1-180
+    grep -v '^DEBUG' "${logfile}" 2>/dev/null | tail -n 2 | sanitize_line
   fi
+}
+
+run_wgcf() {
+  # Runs wgcf inside the state dir with a bounded timeout; output is captured (never echoed raw)
+  local out
+  out="$(cd "${WARP_STATE_DIR}" && timeout "${WGCF_TIMEOUT}" wgcf "$@" 2>&1)"
+  local rc=$?
+  if [ "${rc}" -ne 0 ]; then
+    printf '%s' "${out}" | grep -iE 'error|fail|refused|timeout|unable' | tail -n 1 | sanitize_line
+  fi
+  return "${rc}"
+}
+
+render_wireproxy_config() {
+  python3 - "${WARP_STATE_DIR}/wgcf-profile.conf" "${WARP_STATE_DIR}/wireproxy.conf" "${WARP_PROXY_PORT}" "${WARP_HTTP_PROXY_PORT}" <<'PY'
+import configparser, os, sys
+src, dst, socks_port, http_port = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+cp = configparser.ConfigParser(interpolation=None, strict=False)
+cp.optionxform = str
+cp.read(src)
+iface, peer = cp["Interface"], cp["Peer"]
+for key, sec in (("PrivateKey", iface), ("Address", iface), ("PublicKey", peer), ("Endpoint", peer)):
+    if not sec.get(key):
+        raise SystemExit(f"profile missing {key}")
+lines = ["[Interface]"]
+lines += [f"{k} = {iface[k]}" for k in ("PrivateKey", "Address", "DNS", "MTU") if iface.get(k)]
+lines += ["", "[Peer]"]
+lines += [f"{k} = {peer[k]}" for k in ("PublicKey", "AllowedIPs", "Endpoint", "PersistentKeepalive") if peer.get(k)]
+lines += ["", "[Socks5]", f"BindAddress = 127.0.0.1:{socks_port}"]
+if http_port:
+    lines += ["", "[http]", f"BindAddress = 127.0.0.1:{int(http_port)}"]
+tmp = dst + ".tmp"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as fp:
+    fp.write("\n".join(lines) + "\n")
+os.replace(tmp, dst)
+PY
 }
 
 start_warp_proxy() {
@@ -63,98 +105,83 @@ start_warp_proxy() {
     return 0
   fi
 
-  if ! command -v warp-svc >/dev/null 2>&1 || ! command -v warp-cli >/dev/null 2>&1; then
-    echo "[WARP] cloudflare-warp (warp-svc/warp-cli) not installed; booting with direct outbound."
+  if ! command -v wgcf >/dev/null 2>&1 || ! command -v wireproxy >/dev/null 2>&1; then
+    echo "[WARP] wgcf/wireproxy not installed; booting with direct outbound."
     return 0
   fi
 
-  # Ensure runtime directories exist (handles fresh tmpfs /run on cloud hosts like Northflank)
-  mkdir -p /var/lib/cloudflare-warp /run/cloudflare-warp /var/log/cloudflare-warp 2>/dev/null || true
-
-  local log_dir="/var/log/cloudflare-warp"
-  local log_file="${log_dir}/warp-svc.log"
-  if [ ! -w "${log_dir}" ]; then
-    log_file="/tmp/warp-svc.log"
-  fi
-
-  local warp_pid=""
-  local svc_ready=0
-
-  # Check if warp-svc IPC is already responsive before spawning a new daemon
-  if warp-cli --accept-tos status >/dev/null 2>&1; then
-    svc_ready=1
-  else
-    # Try launching warp-svc with --accept-tos first; fallback to plain warp-svc if flag unsupported
-    warp-svc --accept-tos >>"${log_file}" 2>&1 &
-    warp_pid=$!
-    sleep 0.25
-    if ! kill -0 "${warp_pid}" >/dev/null 2>&1; then
-      if grep -qiE "unexpected argument|unrecognized|unknown option|accept-tos" "${log_file}" 2>/dev/null; then
-        warp-svc >>"${log_file}" 2>&1 &
-        warp_pid=$!
-      fi
-    fi
-
-    # Wait up to WARP_IPC_TIMEOUT seconds (default 5s) for warp-svc IPC socket to accept commands
-    local ipc_deadline=$(( $(date +%s) + WARP_IPC_TIMEOUT ))
-    while [ "$(date +%s)" -lt "${ipc_deadline}" ]; do
-      if ! kill -0 "${warp_pid}" >/dev/null 2>&1; then
-        local reason
-        reason="$(tail_sanitized_log "${log_file}")"
-        echo "[WARP] warp-svc exited early (${reason:-no stderr}); falling back to direct outbound."
-        return 0
-      fi
-      if warp-cli --accept-tos status >/dev/null 2>&1; then
-        svc_ready=1
-        break
-      fi
-      sleep 0.25
-    done
-  fi
-
-  if [ "${svc_ready}" -ne 1 ]; then
-    echo "[WARP] warp-svc IPC not ready within ${WARP_IPC_TIMEOUT}s; continuing boot (Python WARP manager will retry/fallback)."
+  if probe_proxy_port "${WARP_PROXY_PORT}"; then
+    echo "[WARP] 127.0.0.1:${WARP_PROXY_PORT} already listening; skipping wireproxy bootstrap."
     return 0
   fi
 
-  # Register non-interactively if no profile exists yet (never echo license keys or tokens)
-  if ! warp-cli --accept-tos registration show >/dev/null 2>&1; then
-    if [ -n "${WARP_CONNECTOR_TOKEN:-}" ]; then
-      warp-cli --accept-tos connector new "${WARP_CONNECTOR_TOKEN}" >/dev/null 2>&1 || true
-    else
-      warp-cli --accept-tos registration new >/dev/null 2>&1 || true
-      if [ -n "${WARP_LICENSE_KEY:-}" ]; then
-        warp-cli --accept-tos registration license "${WARP_LICENSE_KEY}" >/dev/null 2>&1 || true
-      fi
+  mkdir -p "${WARP_STATE_DIR}" 2>/dev/null || true
+  if [ ! -w "${WARP_STATE_DIR}" ]; then
+    echo "[WARP] State dir not writable; booting with direct outbound (Python WARP manager will retry)."
+    return 0
+  fi
+  umask 077
+
+  local regenerate=0
+  local reason=""
+  if [ ! -s "${WARP_STATE_DIR}/wgcf-account.toml" ]; then
+    if ! reason="$(run_wgcf register --accept-tos)"; then
+      echo "[WARP] wgcf register failed (${reason:-no detail}); booting with direct outbound."
+      return 0
     fi
-  elif [ -n "${WARP_LICENSE_KEY:-}" ]; then
-    warp-cli --accept-tos registration license "${WARP_LICENSE_KEY}" >/dev/null 2>&1 || true
+    regenerate=1
   fi
 
-  # Force lightweight user-space proxy mode bound strictly to 127.0.0.1:<WARP_PROXY_PORT>
-  warp-cli --accept-tos mode proxy >/dev/null 2>&1 || true
-  warp-cli --accept-tos proxy port "${WARP_PROXY_PORT}" >/dev/null 2>&1 || true
-  warp-cli --accept-tos connect >/dev/null 2>&1 || true
+  local license_key="${WARP_LICENSE_KEY:-${WGCF_LICENSE_KEY:-}}"
+  if [ -n "${license_key}" ]; then
+    local digest
+    digest="$(printf '%s' "${license_key}" | sha256sum | cut -d' ' -f1)"
+    if [ "$(cat "${WARP_STATE_DIR}/.license-applied" 2>/dev/null)" != "${digest}" ]; then
+      # License key is passed only to this single wgcf process via env, never echoed
+      if reason="$(WGCF_LICENSE_KEY="${license_key}" run_wgcf update)"; then
+        printf '%s' "${digest}" > "${WARP_STATE_DIR}/.license-applied"
+        regenerate=1
+      else
+        echo "[WARP] WARP+ license not applied (${reason:-rejected}); continuing with free profile."
+      fi
+    fi
+  fi
+  unset license_key
 
-  # Dedicated short socket readiness poll on 127.0.0.1:<WARP_PROXY_PORT>
-  local proxy_ready=0
-  local connect_deadline=$(( $(date +%s) + WARP_CONNECT_WAIT ))
-  while [ "$(date +%s)" -le "${connect_deadline}" ]; do
+  if [ "${regenerate}" -eq 1 ] || [ ! -s "${WARP_STATE_DIR}/wgcf-profile.conf" ]; then
+    if ! reason="$(run_wgcf generate)"; then
+      echo "[WARP] wgcf generate failed (${reason:-no detail}); booting with direct outbound."
+      return 0
+    fi
+  fi
+
+  if ! render_wireproxy_config >/dev/null 2>&1; then
+    echo "[WARP] Could not render wireproxy.conf from WireGuard profile; booting with direct outbound."
+    return 0
+  fi
+
+  local log_file="${WARP_STATE_DIR}/wireproxy.log"
+  wireproxy -c "${WARP_STATE_DIR}/wireproxy.conf" >"${log_file}" 2>&1 </dev/null &
+  local wp_pid=$!
+
+  local deadline=$(( $(date +%s) + WARP_STARTUP_TIMEOUT ))
+  while [ "$(date +%s)" -le "${deadline}" ]; do
+    if ! kill -0 "${wp_pid}" >/dev/null 2>&1; then
+      reason="$(tail_sanitized_log "${log_file}")"
+      echo "[WARP] wireproxy exited early (${reason:-no stderr}); booting with direct outbound."
+      return 0
+    fi
     if probe_proxy_port "${WARP_PROXY_PORT}"; then
-      proxy_ready=1
-      break
+      echo "[WARP] wireproxy SOCKS5 ready at 127.0.0.1:${WARP_PROXY_PORT} (pid=${wp_pid})."
+      return 0
     fi
     sleep 0.5
   done
 
-  if [ "${proxy_ready}" -eq 1 ]; then
-    echo "[WARP] Cloudflare WARP user-space proxy ready at 127.0.0.1:${WARP_PROXY_PORT}${warp_pid:+ (pid=${warp_pid})}."
-  else
-    echo "[WARP] Proxy 127.0.0.1:${WARP_PROXY_PORT} still warming up after ${WARP_CONNECT_WAIT}s; continuing boot (Python will auto-detect or fall back to direct)."
-  fi
+  echo "[WARP] 127.0.0.1:${WARP_PROXY_PORT} still warming up after ${WARP_STARTUP_TIMEOUT}s; continuing boot (Python will auto-detect or fall back to direct)."
   return 0
 }
 
-start_warp_proxy || true
+( start_warp_proxy ) || true
 
 exec "$@"

@@ -159,6 +159,8 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     const warpDiagnostic = String(
       telemetry.warp_diagnostic ?? warpInfo.diagnostic ?? warpInfo.last_error ?? ""
     ).trim();
+    const warpTrace = telemetry.warp_trace ?? warpInfo.trace ?? null;
+    renderWarpTrace(warpEnabled ? warpTrace : null);
 
     if (outboundEl) {
       const nextText = warpActive ? "Outbound: Cloudflare WARP" : "Outbound: Direct";
@@ -262,6 +264,44 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     syncToggleButton(Boolean(telemetry.running));
   }
 
+  function renderWarpTrace(trace) {
+    const traceEl = document.getElementById("cf-warp-trace");
+    if (!traceEl) return;
+    if (!trace || typeof trace !== "object") {
+      traceEl.textContent = "";
+      traceEl.classList.add("hidden");
+      return;
+    }
+    const warpState = String(trace.warp || "unknown");
+    const parts = [`trace: warp=${warpState}`];
+    if (trace.colo) parts.push(`colo=${trace.colo}`);
+    if (trace.loc) parts.push(`loc=${trace.loc}`);
+    if (trace.error) parts.push(`⚠️ ${trace.error}`);
+    const text = `${trace.warp_ok ? "✅" : "❔"} ${parts.join(" · ")}`;
+    if (traceEl.textContent !== text) traceEl.textContent = text;
+    traceEl.classList.toggle("text-emerald-300", Boolean(trace.warp_ok));
+    traceEl.classList.toggle("text-slate-400", !trace.warp_ok);
+    traceEl.classList.remove("hidden");
+  }
+
+  async function submitWarpTrace() {
+    const btn = document.getElementById("btn-warp-trace");
+    if (btn) btn.disabled = true;
+    try {
+      const res = await apiRequest("/api/warp/trace", { method: "POST" });
+      renderWarpTrace(res.trace);
+      if (res.ok) {
+        showToast(`✅ WARP xác nhận warp=${res.trace?.warp || "on"}${res.trace?.colo ? ` (${res.trace.colo})` : ""}`);
+      } else {
+        showToast(`⚠️ Trace chưa xác nhận WARP: ${res.trace?.error || res.trace?.warp || "không rõ"}`, false);
+      }
+    } catch {
+      showToast("⚠️ Không kiểm tra được cdn-cgi/trace qua WARP.", false);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function submitWarpToggle(nextEnabled) {
     const warpToggleEl = document.getElementById("cf-warp-outbound-toggle");
     const prevEnabled = Boolean(initialState?.tunnel?.warp_outbound_enabled ?? !nextEnabled);
@@ -273,7 +313,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
           ? "Xác nhận bật Outbound qua Cloudflare WARP"
           : "Xác nhận tắt Outbound Cloudflare WARP",
         subtitle: nextEnabled
-          ? "Hệ thống sẽ khởi động warp-svc, ép mode proxy 127.0.0.1 và kiểm tra kết nối trong tối đa ~7 giây"
+          ? "Hệ thống sẽ tạo hồ sơ wgcf (nếu thiếu), khởi chạy wireproxy tại 127.0.0.1 và kiểm tra kết nối trong tối đa ~7 giây"
           : "Định tuyến Gemini API & Discord sẽ chuyển ngay về kết nối Direct (MongoDB Atlas luôn giữ Direct TLS)",
         before: { tunnel: { warp_outbound_enabled: prevEnabled } },
         after: { tunnel: { warp_outbound_enabled: Boolean(nextEnabled) } },
@@ -326,7 +366,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
     try {
       await showConfirmModal({
         title: "Khởi động lại & kiểm tra Cloudflare WARP",
-        subtitle: "Khởi động warp-svc (nếu chưa chạy), đăng ký/áp dụng mode proxy 127.0.0.1 và chờ cổng lắng nghe (~7 giây)",
+        subtitle: "Sinh lại wireproxy.conf từ hồ sơ wgcf, khởi động lại wireproxy tại 127.0.0.1 và chờ cổng lắng nghe (~7 giây)",
         confirmLabel: "Kết nối lại WARP",
         confirmTone: "primary",
         entries: [
@@ -334,7 +374,7 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
             key: "tunnel.warp_outbound_enabled",
             label: "Định tuyến Outbound Cloudflare WARP",
             before: "Kiểm tra / cấu hình lại",
-            after: "mode proxy (127.0.0.1) + connect",
+            after: "wireproxy SOCKS5 (127.0.0.1) + trace",
             formattedBefore: "Hiện tại",
             formattedAfter: "Khởi động & kết nối lại",
             isSensitive: false,
@@ -607,6 +647,13 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
       if (clickedCopy) {
         event.preventDefault();
         copyOriginToClipboard();
+        return;
+      }
+
+      const clickedWarpTrace = target.closest("#btn-warp-trace");
+      if (clickedWarpTrace && !clickedWarpTrace.disabled && isAdmin) {
+        event.preventDefault();
+        submitWarpTrace();
         return;
       }
 
