@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="normal">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="{{ doc.title }} — {{ bot_display_name or 'KiwiKiwi' }} Bot" />
+  <title>{{ doc.title }} · {{ bot_display_name or 'KiwiKiwi' }}</title>
+  {# Nạp giao diện đồng bộ trước first paint (Zero-FOUC) #}
+  <script src="/static/js/core/themeInit.js?v={{ asset_version }}"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_version }}" />
+</head>
+<body class="ox-body min-h-screen flex flex-col">
+  {# Thanh tiêu đề công khai gọn gàng kèm nút chuyển 3 giao diện Normal / Dark / Light #}
+  <header class="ox-topbar sticky top-0 z-30 px-4 sm:px-6">
+    <div class="max-w-4xl w-full mx-auto flex items-center justify-between gap-3">
+      <a href="/legal" class="flex items-center gap-2.5 min-w-0">
+        {% if bot_avatar_url %}
+        <img
+          src="{{ bot_avatar_url }}"
+          alt="{{ bot_display_name or 'KiwiKiwi' }}"
+          class="w-8 h-8 rounded-full object-cover border border-[var(--border-strong)] shrink-0"
+        />
+        {% else %}
+        <div class="ox-avatar-fallback" aria-hidden="true">{{ (bot_display_name or 'K')[0] | upper }}</div>
+        {% endif %}
+        <div class="min-w-0">
+          <div class="text-sm font-bold tracking-tight truncate">{{ bot_display_name or 'KiwiKiwi' }}</div>
+          <div class="text-[10px] text-[var(--text-secondary)] truncate">Trung tâm Pháp lý &amp; Điều khoản</div>
+        </div>
+      </a>
+
+      <div class="flex items-center gap-2.5 shrink-0">
+        <div class="ox-theme-switcher" role="group" aria-label="Chọn giao diện hiển thị">
+          <button type="button" class="ox-theme-btn" data-theme-option="normal" aria-pressed="true">Normal</button>
+          <button type="button" class="ox-theme-btn" data-theme-option="dark" aria-pressed="false">Dark</button>
+          <button type="button" class="ox-theme-btn" data-theme-option="light" aria-pressed="false">Light</button>
+        </div>
+        <a href="/login" class="btn-ghost text-xs hidden sm:inline-flex items-center">Dashboard</a>
+      </div>
+    </div>
+  </header>
+
+  {# Nội dung chính trang pháp lý công khai #}
+  <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 space-y-6">
+    {# Thanh điều hướng giữa 4 tài liệu pháp lý #}
+    <nav class="flex flex-wrap gap-2" aria-label="Tài liệu pháp lý">
+      {% for item in nav_items %}
+      <a
+        href="{{ item.path }}"
+        class="px-3.5 py-2 rounded-lg text-xs font-medium border transition-colors duration-150 {{ 'bg-rose-600 text-white border-rose-500 shadow-sm' if item.key == active_key else 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:text-[var(--text-primary)]' }}"
+      >
+        {{ item.label }}
+      </a>
+      {% endfor %}
+    </nav>
+
+    {# Thẻ nội dung tài liệu hiện hành kèm phiên bản ToS và mốc cập nhật theo CF-Timezone #}
+    <article class="card p-6 sm:p-8 space-y-6">
+      <div class="border-b border-[var(--border-subtle)] pb-5 space-y-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/35">
+            Phiên bản {{ doc.active_tos_version }}
+          </span>
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+            Cập nhật: {{ doc.tos_updated_at_formatted }}
+          </span>
+          <span class="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+            Múi giờ: {{ timezone_label }}
+          </span>
+        </div>
+        <h1 class="text-xl sm:text-2xl font-bold tracking-tight">{{ doc.title }}</h1>
+        {% if doc.subtitle %}
+        <p class="text-sm text-[var(--text-secondary)] leading-relaxed">{{ doc.subtitle }}</p>
+        {% endif %}
+      </div>
+
+      <div class="space-y-4 text-sm leading-7">
+        {% for para in paragraphs %}
+        <p class="whitespace-pre-line text-[var(--text-primary)]">{{ para }}</p>
+        {% endfor %}
+      </div>
+    </article>
+
+    <footer class="text-center text-xs text-[var(--text-secondary)] pt-2 pb-6 space-y-2">
+      <div class="flex flex-wrap items-center justify-center gap-4">
+        <a href="/legal" class="hover:underline">Pháp lý</a>
+        <a href="/terms" class="hover:underline">Điều khoản Dịch vụ</a>
+        <a href="/policies" class="hover:underline">Chính sách Quyền riêng tư</a>
+        <a href="/guidelines" class="hover:underline">Nguyên tắc Cộng đồng</a>
+      </div>
+      <p>&copy; {{ bot_display_name or 'KiwiKiwi' }} Bot · Phiên bản Điều khoản {{ doc.active_tos_version }}</p>
+    </footer>
+  </main>
+
+  <script type="module" src="/static/js/features/legal/publicLegal.js?v={{ asset_version }}"></script>
+</body>
+</html>

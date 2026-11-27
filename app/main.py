@@ -16,6 +16,7 @@ from google.genai import types
 
 from app.bot.client import AskBot
 from app.bot.maintenance_gate import MaintenanceGate
+from app.bot.tos_gate import TosConsentGate
 from app.core.cloudflare_tunnel import CloudflareTunnelService
 from app.core.concurrency import DynamicSemaphore, UserLockManager
 from app.core.database import MongoDatabaseManager
@@ -28,6 +29,7 @@ from app.core.warp_proxy import WarpProxyService
 from app.features.audit.repository import AuditRepository
 from app.features.audit.service import AuditService
 from app.features.auth.dependencies import AuthDependencies
+from app.features.auth.login_history import AdminLoginHistoryRepository
 from app.features.auth.oauth import DiscordOAuthService
 from app.features.auth.repository import UserRepository
 from app.features.auth.service import AuthService
@@ -36,6 +38,8 @@ from app.features.chat.gemini_service import GeminiChatService
 from app.features.config.atlas_watcher import AtlasConfigWatcher
 from app.features.config.repository import ConfigRepository
 from app.features.config.service import ConfigService
+from app.features.legal.repository import TosAcceptanceRepository
+from app.features.legal.service import LegalService
 from app.features.models.cooldown import ModelCooldownTracker
 from app.features.models.registry import ModelRegistry
 from app.features.monitoring.service import MonitoringService
@@ -63,6 +67,10 @@ class AppContainer:
     config_service: ConfigService
     atlas_config_watcher: AtlasConfigWatcher
     maintenance_gate: MaintenanceGate
+    tos_acceptance_repo: TosAcceptanceRepository
+    legal_service: LegalService
+    tos_gate: TosConsentGate
+    login_history_repo: AdminLoginHistoryRepository
     permission_repo: PermissionRepository
     permission_service: PermissionService
     user_repo: UserRepository
@@ -200,6 +208,16 @@ def build_container(
         admin_discord_id=settings.admin_discord_id,
     )
     config_service.on_update(lambda cfg: maintenance_gate.sync_from_config(cfg.get("presence") if isinstance(cfg, dict) else None))
+
+    # Hệ thống Pháp lý / ToS CMS, Cổng đồng thuận có phiên bản và Lịch sử đăng nhập Admin
+    tos_acceptance_repo = TosAcceptanceRepository()
+    legal_service = LegalService(
+        config_repo=config_repo,
+        config_service=config_service,
+        acceptance_repo=tos_acceptance_repo,
+    )
+    tos_gate = TosConsentGate(legal_service)
+    login_history_repo = AdminLoginHistoryRepository()
 
     # Model Gemini, phiên chat, dịch vụ hỏi đáp và giám sát
     model_cooldowns = ModelCooldownTracker()
@@ -354,6 +372,10 @@ def build_container(
         config_service=config_service,
         atlas_config_watcher=atlas_config_watcher,
         maintenance_gate=maintenance_gate,
+        tos_acceptance_repo=tos_acceptance_repo,
+        legal_service=legal_service,
+        tos_gate=tos_gate,
+        login_history_repo=login_history_repo,
         permission_repo=permission_repo,
         permission_service=permission_service,
         user_repo=user_repo,

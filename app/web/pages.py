@@ -12,8 +12,10 @@ from fastapi.templating import Jinja2Templates
 from app.core.security import sanitize_https_url
 from app.core.settings import DEFAULT_OCR_INSTRUCTION, DEFAULT_SYSTEM_PROMPT
 from app.core.sync import WriteBehindSyncCoordinator
+from app.core.timezone import format_timezone_badge, resolve_request_timezone
 from app.features.auth.dependencies import AuthDependencies
 from app.features.auth.oauth import DiscordOAuthService
+from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS
 from app.features.monitoring.stats import UsageStats
 
 # Mã phiên bản tài nguyên tĩnh giúp trình duyệt luôn nạp bản JS/CSS mới nhất sau mỗi lần deploy
@@ -96,8 +98,9 @@ def create_pages_router(
     tunnel_origin_url: str = "http://127.0.0.1:8080",
     get_tunnel_running: Optional[Callable[[], bool]] = None,
     get_bot_status: Optional[Callable[[], str]] = None,
+    legal_service: Optional[Any] = None,
 ) -> APIRouter:
-    """Tạo router giao diện HTML cho trang gốc, trang đăng nhập và trang quản trị Dashboard."""
+    """Tạo router giao diện HTML cho trang gốc, đăng nhập, quản trị Dashboard và 4 trang Pháp lý công khai."""
     router = APIRouter(tags=["pages"])
 
     @router.api_route("/", methods=["GET", "HEAD"])
@@ -116,6 +119,7 @@ def create_pages_router(
             get_bot() if callable(get_bot) else None,
             usage_stats,
         )
+        active_tos_version = legal_service.active_tos_version if legal_service is not None else "v1.0"
         return _render_template(
             templates,
             request,
@@ -126,6 +130,7 @@ def create_pages_router(
                 "db_connected": sync_coordinator.connected,
                 "bot_avatar_url": bot_avatar_url,
                 "bot_display_name": bot_display_name,
+                "active_tos_version": active_tos_version,
                 "asset_version": ASSET_VERSION,
             },
         )
@@ -143,6 +148,7 @@ def create_pages_router(
         safe_user["avatar_url"] = sanitize_https_url(str(user.get("avatar_url") or ""))
         tunnel_running = bool(get_tunnel_running()) if callable(get_tunnel_running) else False
         bot_status = str(get_bot_status() if callable(get_bot_status) else "online").strip().lower() or "online"
+        active_tos_version = legal_service.active_tos_version if legal_service is not None else "v1.0"
         return _render_template(
             templates,
             request,
@@ -157,8 +163,67 @@ def create_pages_router(
                 "tunnel_running": tunnel_running,
                 "bot_status": bot_status,
                 "dnd_maintenance": bot_status == "dnd",
+                "active_tos_version": active_tos_version,
                 "asset_version": ASSET_VERSION,
             },
         )
+
+    async def _render_public_legal(request: Request, doc_key: str):
+        tz_name, tz_info = resolve_request_timezone(request.headers)
+        tz_badge = format_timezone_badge(tz_name, tz_info)
+        if legal_service is not None:
+            doc = legal_service.get_doc(doc_key, tz_info=tz_info)
+        else:
+            from app.features.legal.defaults import DEFAULT_ACTIVE_TOS_VERSION, DEFAULT_LEGAL_DOCS
+
+            base = DEFAULT_LEGAL_DOCS[doc_key]
+            doc = {
+                "key": doc_key,
+                "label": LEGAL_DOC_LABELS[doc_key],
+                "title": base["title"],
+                "subtitle": base["subtitle"],
+                "body": base["body"],
+                "active_tos_version": DEFAULT_ACTIVE_TOS_VERSION,
+                "tos_updated_at": "",
+                "tos_updated_at_formatted": "—",
+            }
+        bot_avatar_url, bot_display_name = await _resolve_bot_branding(
+            get_bot() if callable(get_bot) else None,
+            usage_stats,
+        )
+        paragraphs = [p.strip() for p in str(doc.get("body") or "").split("\n\n") if p.strip()]
+        nav_items = [{"key": k, "path": f"/{k}", "label": LEGAL_DOC_LABELS[k]} for k in LEGAL_DOC_KEYS]
+        return _render_template(
+            templates,
+            request,
+            "legal_page.html",
+            {
+                "doc": doc,
+                "paragraphs": paragraphs,
+                "nav_items": nav_items,
+                "active_key": doc_key,
+                "timezone_name": tz_name,
+                "timezone_label": tz_badge,
+                "bot_avatar_url": bot_avatar_url,
+                "bot_display_name": bot_display_name,
+                "asset_version": ASSET_VERSION,
+            },
+        )
+
+    @router.get("/legal", response_class=HTMLResponse)
+    async def public_legal_page(request: Request):
+        return await _render_public_legal(request, "legal")
+
+    @router.get("/terms", response_class=HTMLResponse)
+    async def public_terms_page(request: Request):
+        return await _render_public_legal(request, "terms")
+
+    @router.get("/policies", response_class=HTMLResponse)
+    async def public_policies_page(request: Request):
+        return await _render_public_legal(request, "policies")
+
+    @router.get("/guidelines", response_class=HTMLResponse)
+    async def public_guidelines_page(request: Request):
+        return await _render_public_legal(request, "guidelines")
 
     return router

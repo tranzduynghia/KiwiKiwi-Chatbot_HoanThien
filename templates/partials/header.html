@@ -39,6 +39,13 @@
       Đang tải...
     </span>
 
+    {# Bộ chuyển đổi 3 giao diện phân đoạn (Normal | Dark | Light) không cần tải lại trang #}
+    <div class="ox-theme-switcher hidden md:inline-flex" role="group" aria-label="Chọn giao diện hiển thị">
+      <button type="button" class="ox-theme-btn" data-theme-option="normal" aria-pressed="true" title="Giao diện Midnight Slate (Mặc định)">Normal</button>
+      <button type="button" class="ox-theme-btn" data-theme-option="dark" aria-pressed="false" title="Giao diện True Obsidian (OLED Dark)">Dark</button>
+      <button type="button" class="ox-theme-btn" data-theme-option="light" aria-pressed="false" title="Giao diện Sáng (Crisp Daylight)">Light</button>
+    </div>
+
     <button type="button" id="btn-topbar-refresh" class="ox-icon-btn" title="Làm mới trạng thái">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="23 4 23 10 17 10" />

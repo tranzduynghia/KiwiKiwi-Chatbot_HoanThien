@@ -106,6 +106,8 @@ def infer_audit_section(changes: list[dict[str, Any]]) -> str:
         return "ask"
     if all(f.startswith("models.") for f in fields):
         return "models"
+    if all(f.startswith("legal.") for f in fields):
+        return "legal"
     if all(f in ("system_prompt", "ocr_instruction", "append_current_date") for f in fields):
         return "prompt"
     return "config"

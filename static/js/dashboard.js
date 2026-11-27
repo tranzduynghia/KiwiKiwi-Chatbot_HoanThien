@@ -3,11 +3,13 @@
  */
 
 import { apiRequest, showToast } from "./core/api.js";
+import { initThemeSwitcher } from "./core/themeSwitcher.js";
 import { createAuditTabController } from "./features/audit/auditTab.js";
 import { createAskConfigTabController } from "./features/config/askConfigTab.js";
 import { createPresenceCardController } from "./features/config/presenceCard.js";
 import { createPromptConfigTabController } from "./features/config/promptConfigTab.js";
 import { createTunnelCardController } from "./features/config/tunnelCard.js";
+import { createLegalTabController, initWebTosConsentGate } from "./features/legal/legalTab.js";
 import { createModelsTabController } from "./features/models/modelsTab.js";
 import { createStatusTabController } from "./features/monitoring/statusTab.js";
 import { createPermissionsTabController } from "./features/permissions/permissionsTab.js";
@@ -31,6 +33,7 @@ const statusTab = createStatusTabController({
 });
 const permissionsTab = createPermissionsTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
 const sessionsTab = createSessionsTabController();
+const legalTab = createLegalTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
 const auditTab = createAuditTabController();
 
 let askConfigTab;
@@ -75,7 +78,7 @@ promptConfigTab = createPromptConfigTabController({
 });
 modelsTab = createModelsTabController({ onRefreshAll: refreshAll });
 
-const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "audit"]);
+const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "legal", "audit"]);
 const SYSTEM_POLL_INTERVAL_MS = 1000;
 const GEMINI_INITIAL_DELAY_MS = 200;
 const GEMINI_POLL_INTERVAL_MS = 15000;
@@ -121,6 +124,8 @@ function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}
     permissionsTab.loadPermissions();
   } else if (safeTab === "sessions") {
     sessionsTab.searchSessions(0, { silent: false });
+  } else if (safeTab === "legal") {
+    legalTab.loadAll();
   } else if (safeTab === "audit") {
     auditTab.loadAuditLogs({ silent: false });
   }
@@ -271,6 +276,8 @@ function bindShellControls() {
         activateTab("ask");
       } else if (q.includes("perm") || q.includes("admin") || q.includes("user") || q.includes("quyền")) {
         activateTab("perms");
+      } else if (q.includes("tos") || q.includes("legal") || q.includes("điều khoản") || q.includes("chính sách")) {
+        activateTab("legal");
       } else if (q.includes("audit") || q.includes("log") || q.includes("nhật ký")) {
         activateTab("audit");
       } else {
@@ -282,7 +289,8 @@ function bindShellControls() {
   }
 }
 
-// Khởi chạy toàn bộ trình lắng nghe sự kiện, hiệu ứng lần đầu và vòng lặp nền 2000ms
+// Khởi chạy bộ chuyển 3 giao diện, trình lắng nghe sự kiện, hiệu ứng lần đầu và vòng lặp nền
+initThemeSwitcher();
 bindShellControls();
 statusTab.bindEvents();
 askConfigTab.bindEvents();
@@ -292,6 +300,7 @@ promptConfigTab.bindEvents();
 modelsTab.bindEvents();
 permissionsTab.bindEvents();
 sessionsTab.bindEvents();
+legalTab.bindEvents();
 auditTab.bindEvents();
 
 applyInitialCardEntrance();
@@ -305,3 +314,4 @@ if (VALID_TABS.has(initialTab) && initialTab !== "status") {
 statusTab.loadStatus(false, { silent: false });
 loadConfig();
 startBackgroundPolling({ scheduleInitialGemini: true });
+initWebTosConsentGate();

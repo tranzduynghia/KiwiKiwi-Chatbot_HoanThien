@@ -6,8 +6,102 @@
 import { apiRequest, escapeHtml, showToast } from "../../core/api.js";
 import { confirmSaveChanges, showConfirmModal } from "../../core/confirmSave.js";
 
+function detectBrowserTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+const FAILURE_REASON_LABELS = {
+  invalid_credentials: "Sai tài khoản / mật khẩu",
+  rate_limited: "Bị giới hạn tốc độ (429)",
+  not_authorized: "Không có quyền Dashboard",
+  invalid_oauth_state: "OAuth state hết hạn",
+  oauth_exchange_failed: "Lỗi xác thực Discord OAuth",
+};
+
 export function createPermissionsTabController({ isAdmin }) {
   let discordPermsById = new Map();
+  let loginHistCursor = "0";
+  let loginHistNext = null;
+  let loginHistPrev = null;
+  let loginHistStatus = "all";
+
+  async function loadLoginHistory(cursor = "0") {
+    const tbody = document.getElementById("login-history-tbody");
+    try {
+      const tz = detectBrowserTimezone();
+      const params = new URLSearchParams({
+        limit: "15",
+        cursor: String(cursor || "0"),
+        status: loginHistStatus,
+      });
+      if (tz) params.set("tz", tz);
+      const data = await apiRequest(`/api/auth/login-history?${params.toString()}`);
+
+      loginHistCursor = data.cursor || "0";
+      loginHistNext = data.next_cursor;
+      loginHistPrev = data.prev_cursor;
+
+      const tzBadge = document.getElementById("login-history-timezone-badge");
+      if (tzBadge && data.timezone_label) {
+        tzBadge.textContent = `🕒 Múi giờ IP truy cập: ${data.timezone_label}`;
+      }
+      const countEl = document.getElementById("login-history-count");
+      if (countEl) countEl.textContent = `${data.total || 0} lượt`;
+
+      const pageNum = Math.floor(Number(loginHistCursor || 0) / (data.limit || 15)) + 1;
+      const pageInfo = document.getElementById("login-history-page-info");
+      if (pageInfo) pageInfo.textContent = `Trang ${pageNum} · Hiển thị ${data.items.length}/${data.total || 0}`;
+
+      const prevBtn = document.getElementById("btn-login-hist-prev");
+      const nextBtn = document.getElementById("btn-login-hist-next");
+      if (prevBtn) prevBtn.disabled = loginHistPrev === null || loginHistPrev === undefined;
+      if (nextBtn) nextBtn.disabled = !data.has_more;
+
+      if (!tbody) return;
+      if (!data.items.length) {
+        tbody.innerHTML =
+          '<tr><td colspan="5" class="py-6 text-center text-slate-500">Chưa có bản ghi lịch sử đăng nhập nào.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = data.items
+        .map((item) => {
+          const isSuccess = item.status === "success";
+          const statusBadge = isSuccess
+            ? '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/35">Thành công</span>'
+            : `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/35" title="${escapeHtml(FAILURE_REASON_LABELS[item.failure_reason] || item.failure_reason || "Đăng nhập thất bại")}">Thất bại</span>`;
+          const reasonHint =
+            !isSuccess && item.failure_reason
+              ? `<div class="text-[10px] text-rose-400/80 mt-0.5">${escapeHtml(FAILURE_REASON_LABELS[item.failure_reason] || item.failure_reason)}</div>`
+              : "";
+          const methodTag =
+            item.auth_method === "discord_oauth"
+              ? '<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">OAuth2</span>'
+              : "";
+          const countryPart = item.country_code
+            ? ` <span class="px-1.5 py-0.5 rounded bg-slate-800/80 text-[10px] font-mono text-slate-300">${escapeHtml(item.country_code)}</span>`
+            : "";
+          return `
+            <tr>
+              <td class="py-2.5 pr-3 font-mono text-slate-300 whitespace-nowrap">${escapeHtml(item.created_at_formatted || "—")}</td>
+              <td class="py-2.5 pr-3 font-medium text-slate-100">${escapeHtml(item.username || "unknown")}${methodTag}</td>
+              <td class="py-2.5 pr-3">${statusBadge}${reasonHint}</td>
+              <td class="py-2.5 pr-3 font-mono text-slate-300">${escapeHtml(item.ip_address || "unknown")}${countryPart}</td>
+              <td class="py-2.5 text-right text-slate-400">${escapeHtml(item.device_summary || "Không xác định")}</td>
+            </tr>
+          `;
+        })
+        .join("");
+    } catch (err) {
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-rose-400">${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+  }
 
   async function loadPermissions() {
     try {
@@ -73,6 +167,8 @@ export function createPermissionsTabController({ isAdmin }) {
             )
             .join("")
         : '<tr><td colspan="4" class="py-3 text-slate-500 text-center">Chưa có tài khoản mật khẩu nào.</td></tr>';
+
+      await loadLoginHistory("0");
     } catch (err) {
       showToast(err.message, false);
     }
@@ -315,7 +411,32 @@ export function createPermissionsTabController({ isAdmin }) {
         });
       }
     });
+
+    // Bộ lọc trạng thái & phân trang cursor cho Lịch sử đăng nhập tài khoản Admin
+    const statusFilterEl = document.getElementById("login-history-status-filter");
+    if (statusFilterEl) {
+      statusFilterEl.addEventListener("change", () => {
+        loginHistStatus = statusFilterEl.value || "all";
+        loadLoginHistory("0");
+      });
+    }
+    const refreshHistBtn = document.getElementById("btn-refresh-login-history");
+    if (refreshHistBtn) {
+      refreshHistBtn.addEventListener("click", () => loadLoginHistory(loginHistCursor));
+    }
+    const prevHistBtn = document.getElementById("btn-login-hist-prev");
+    const nextHistBtn = document.getElementById("btn-login-hist-next");
+    if (prevHistBtn) {
+      prevHistBtn.addEventListener("click", () => {
+        if (loginHistPrev !== null && loginHistPrev !== undefined) loadLoginHistory(loginHistPrev);
+      });
+    }
+    if (nextHistBtn) {
+      nextHistBtn.addEventListener("click", () => {
+        if (loginHistNext !== null && loginHistNext !== undefined) loadLoginHistory(loginHistNext);
+      });
+    }
   }
 
-  return { loadPermissions, bindEvents };
+  return { loadPermissions, loadLoginHistory, bindEvents };
 }

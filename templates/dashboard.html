@@ -1,10 +1,12 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="vi" data-theme="normal">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="KiwiKiwi Bot Admin Dashboard — Quản trị cấu hình, model Gemini, phân quyền và giám sát thời gian thực." />
   <title>KiwiKiwi · Admin Dashboard</title>
+  {# Nạp giao diện đồng bộ từ localStorage trước first paint (Zero-FOUC) #}
+  <script src="/static/js/core/themeInit.js?v={{ asset_version }}"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -34,6 +36,7 @@
         {% include "partials/models_tab.html" %}
         {% include "partials/permissions_tab.html" %}
         {% include "partials/sessions_tab.html" %}
+        {% include "partials/legal_tab.html" %}
         {% include "partials/audit_tab.html" %}
       </main>
     </div>
@@ -42,12 +45,16 @@
   {# Hộp thoại xác nhận lưu cấu hình toàn cục (Before/After Diff) #}
   {% include "partials/confirm_save_modal.html" %}
 
+  {# Hộp thoại đồng thuận Điều khoản toàn màn hình (Web Consent Gate) #}
+  {% include "partials/tos_consent_modal.html" %}
+
   {# Dữ liệu khởi tạo từ server cho các module JavaScript #}
   <script id="dashboard-bootstrap" type="application/json">
     {{ {
       "defaultSystemPrompt": default_system_prompt,
       "defaultOcrInstruction": default_ocr_instruction,
-      "isAdmin": (true if user.is_admin else false)
+      "isAdmin": (true if user.is_admin else false),
+      "activeTosVersion": active_tos_version or "v1.0"
     } | tojson }}
   </script>
 

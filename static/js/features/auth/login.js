@@ -2,6 +2,10 @@
  * Xử lý biểu mẫu đăng nhập truyền thống bằng tên đăng nhập và mật khẩu.
  */
 
+import { initThemeSwitcher } from "../../core/themeSwitcher.js";
+
+initThemeSwitcher();
+
 const loginForm = document.getElementById("login-form");
 const errorBox = document.getElementById("client-error");
 const submitBtn = document.getElementById("submit-btn");

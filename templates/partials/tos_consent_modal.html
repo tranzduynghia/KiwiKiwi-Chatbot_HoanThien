@@ -1,0 +1,43 @@
+{# Hộp thoại đồng thuận Điều khoản toàn màn hình (Web Consent Gate) kiểm tra tos_accepted_version == active_tos_version #}
+<div
+  id="tos-consent-modal"
+  class="ox-modal-backdrop fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/55 backdrop-blur-[2px] transition-opacity duration-200 ease-out opacity-0 pointer-events-none"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="tos-consent-title"
+>
+  <div
+    id="tos-consent-panel"
+    class="ox-modal-panel card w-full max-w-lg flex flex-col shadow-2xl overflow-hidden border border-slate-700/80"
+  >
+    <div class="p-5 border-b border-[var(--border-subtle)] space-y-1.5">
+      <div class="flex items-center justify-between gap-2">
+        <span class="inline-flex items-center gap-1.5 text-[11px] font-mono font-semibold px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-400 border border-rose-500/35">
+          📜 Điều khoản Dịch vụ <span id="tos-consent-version">{{ active_tos_version or 'v1.0' }}</span>
+        </span>
+      </div>
+      <h3 id="tos-consent-title" class="text-base font-semibold">Xác nhận đồng ý Điều khoản &amp; Chính sách</h3>
+      <p id="tos-consent-desc" class="text-xs text-[var(--text-secondary)] leading-relaxed">
+        Trước khi tiếp tục sử dụng bảng điều khiển KiwiKiwi, vui lòng xem qua và xác nhận đồng ý phiên bản Điều khoản hiện hành.
+      </p>
+    </div>
+
+    <div class="p-5 space-y-3 text-xs">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <a href="/terms" target="_blank" rel="noopener noreferrer" class="btn-ghost text-center">📄 Điều khoản Dịch vụ (/terms)</a>
+        <a href="/policies" target="_blank" rel="noopener noreferrer" class="btn-ghost text-center">🔒 Chính sách Riêng tư (/policies)</a>
+        <a href="/guidelines" target="_blank" rel="noopener noreferrer" class="btn-ghost text-center">🤝 Nguyên tắc Cộng đồng (/guidelines)</a>
+        <a href="/legal" target="_blank" rel="noopener noreferrer" class="btn-ghost text-center">⚖️ Thông tin Pháp lý (/legal)</a>
+      </div>
+      <p class="text-[11px] text-[var(--text-secondary)] leading-relaxed">
+        Bằng việc nhấn <strong>Tôi đồng ý</strong>, hệ thống sẽ lưu bản ghi đồng thuận kèm phiên bản hiện tại và thời gian UTC.
+      </p>
+    </div>
+
+    <div class="px-5 py-3.5 border-t border-[var(--border-subtle)] flex items-center justify-end gap-2">
+      <button type="button" id="btn-accept-tos-web" class="btn-primary text-xs">
+        ✅ Tôi đồng ý (Accept Terms)
+      </button>
+    </div>
+  </div>
+</div>

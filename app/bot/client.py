@@ -68,16 +68,21 @@ def _build_discord_proxy_kwargs(proxy_url: Optional[str]) -> dict[str, Any]:
 
 
 class DndCommandTree(app_commands.CommandTree):
-    """Cây lệnh Discord gắn cổng kiểm soát toàn cục (`interaction_check`) chặn người dùng thường khi bot đang ở chế độ bảo trì DND."""
+    """Cây lệnh Discord gắn cổng kiểm soát toàn cục (`interaction_check`) cho DND bảo trì và đồng thuận ToS có phiên bản."""
 
-    def __init__(self, client: discord.Client, *, maintenance_gate: Any = None):
+    def __init__(self, client: discord.Client, *, maintenance_gate: Any = None, tos_gate: Any = None):
         super().__init__(client)
         self._maintenance_gate = maintenance_gate
+        self._tos_gate = tos_gate
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        """Chặn ngay lập tức mọi slash command từ non-admin khi `bot_status == 'dnd'`, cho phép Admin vượt khóa kiểm thử."""
+        """Kiểm tra khóa bảo trì DND trước, sau đó kiểm tra phiên bản đồng thuận ToS trước khi gọi Gemini."""
         if self._maintenance_gate is not None:
-            return await self._maintenance_gate.check_interaction(interaction)
+            allowed_dnd = await self._maintenance_gate.check_interaction(interaction)
+            if not allowed_dnd:
+                return False
+        if self._tos_gate is not None:
+            return await self._tos_gate.check_interaction(interaction)
         return True
 
 
@@ -93,7 +98,11 @@ class AskBot(discord.Client):
         self._active_outbound_proxy: Optional[str] = proxy_url
         super().__init__(intents=discord.Intents.default(), **_build_discord_proxy_kwargs(proxy_url))
         self.container = container
-        self.tree = DndCommandTree(self, maintenance_gate=getattr(container, "maintenance_gate", None))
+        self.tree = DndCommandTree(
+            self,
+            maintenance_gate=getattr(container, "maintenance_gate", None),
+            tos_gate=getattr(container, "tos_gate", None),
+        )
         self.ready_at: Optional[float] = None
         self._cleaned_guild_cmds = False
         self._web_server: Optional[uvicorn.Server] = None
@@ -242,6 +251,10 @@ class AskBot(discord.Client):
         self.container.usage_stats.attach_db(db)
         await self.container.session_repo.attach_db(db)
         await self.container.sync_coordinator.attach_db(db)
+        if getattr(self.container, "tos_acceptance_repo", None) is not None:
+            await self.container.tos_acceptance_repo.attach_db(db)
+        if getattr(self.container, "login_history_repo", None) is not None:
+            await self.container.login_history_repo.attach_db(db)
         if getattr(self.container, "maintenance_gate", None) is not None:
             self.container.maintenance_gate.sync_from_config()
         await self.container.session_repo.archive_expired()
@@ -255,12 +268,9 @@ class AskBot(discord.Client):
             await gate.check_interaction(interaction)
 
     async def on_message(self, message: discord.Message) -> None:
-        """Chặn nhắc tên bot, trả lời tin nhắn bot hoặc nhắn tin trực tiếp khi đang bật chế độ bảo trì DND."""
+        """Chặn nhắc tên bot, trả lời tin nhắn bot hoặc nhắn tin trực tiếp khi bật DND hoặc chưa đồng ý phiên bản ToS hiện hành."""
         author = getattr(message, "author", None)
         if author is None or getattr(author, "bot", False):
-            return
-        gate = getattr(self.container, "maintenance_gate", None)
-        if gate is None or not gate.is_dnd:
             return
 
         is_dm = getattr(message, "guild", None) is None
@@ -278,7 +288,15 @@ class AskBot(discord.Client):
         if not (is_dm or is_mentioned or is_reply_to_bot):
             return
 
-        await gate.check_message(message)
+        gate = getattr(self.container, "maintenance_gate", None)
+        if gate is not None and gate.is_dnd:
+            allowed_dnd = await gate.check_message(message)
+            if not allowed_dnd:
+                return
+
+        tos_gate = getattr(self.container, "tos_gate", None)
+        if tos_gate is not None:
+            await tos_gate.check_message(message)
 
     async def model_refresher(self) -> None:
         """Tác vụ nền định kỳ tải lại danh sách model từ Gemini API theo `model_refresh_hours`."""

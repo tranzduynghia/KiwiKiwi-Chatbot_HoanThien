@@ -19,6 +19,7 @@ from app.core.security import is_trusted_proxy_ip
 from app.features.audit.router import create_audit_router
 from app.features.auth.router import create_auth_router
 from app.features.config.router import create_config_router
+from app.features.legal.router import create_legal_router
 from app.features.models.router import create_models_router
 from app.features.monitoring.router import create_monitoring_router
 from app.features.permissions.router import create_permissions_router
@@ -208,6 +209,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
                 if getattr(container, "maintenance_gate", None) is not None
                 else str(container.config_repo.presence_cfg().get("status", "online"))
             ),
+            legal_service=getattr(container, "legal_service", None),
         )
     )
     app.include_router(
@@ -225,8 +227,16 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             permission_service=container.permission_service,
             sync_coordinator=container.sync_coordinator,
             auth_deps=container.auth_deps,
+            login_history_repo=getattr(container, "login_history_repo", None),
         )
     )
+    if getattr(container, "legal_service", None) is not None:
+        app.include_router(
+            create_legal_router(
+                legal_service=container.legal_service,
+                auth_deps=container.auth_deps,
+            )
+        )
     has_warp = getattr(container, "warp_proxy", None) is not None
     app.include_router(
         create_config_router(

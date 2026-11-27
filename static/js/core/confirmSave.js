@@ -278,6 +278,9 @@ function detectHighImpactWarning(key, beforeVal, afterVal) {
   if ((k === "presence.status" || k === "status") && String(beforeVal || "").toLowerCase() === "dnd" && String(afterVal || "").toLowerCase() !== "dnd") {
     return "Tắt chế độ 'Không làm phiền (DND)' sẽ mở khóa lại toàn bộ lệnh /ask và phiên chat AI cho người dùng thường ngay lập tức.";
   }
+  if (k === "legal.active_tos_version" && beforeVal && afterVal && String(beforeVal) !== String(afterVal)) {
+    return `Nâng phiên bản Điều khoản (${beforeVal} → ${afterVal}) sẽ yêu cầu TẤT CẢ người dùng Discord và Web bấm "Tôi đồng ý" lại trước khi dùng /ask hoặc Dashboard.`;
+  }
   if (k === "ask.gemini_timeout_seconds" && Number(afterVal) < 30) {
     return `Timeout Gemini API thấp (${afterVal}s) có thể làm ngắt sớm các câu trả lời dài hoặc bật Thinking.`;
   }

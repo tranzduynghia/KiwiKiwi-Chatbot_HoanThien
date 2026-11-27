@@ -244,6 +244,14 @@ def build_default_config() -> dict[str, Any]:
             "auto_rotate": False,
         },
         "tunnel": build_env_tunnel_defaults(),
+        "legal": _default_legal_config(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",
     }
+
+
+def _default_legal_config() -> dict[str, Any]:
+    """Nạp cấu trúc nhánh `legal` mặc định tránh vòng lặp import khi khởi tạo cấu hình."""
+    from app.features.legal.defaults import build_default_legal_config
+
+    return build_default_legal_config()

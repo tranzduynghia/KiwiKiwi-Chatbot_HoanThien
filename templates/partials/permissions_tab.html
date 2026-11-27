@@ -100,4 +100,64 @@
       </table>
     </div>
   </div>
+
+  {# Bảng lịch sử đăng nhập tài khoản Admin (TTL 90 ngày, phân trang cursor 15 mục/trang, múi giờ IP truy cập) #}
+  <div class="card p-5 space-y-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="font-medium text-sm text-rose-400">Lịch sử đăng nhập tài khoản Admin</h3>
+        <p class="text-[11px] text-[#8b95a7] mt-0.5">
+          Ghi nhận cả lượt đăng nhập thành công và thất bại (tự động lưu giữ 90 ngày, không bao giờ lưu mật khẩu hay token)
+        </p>
+      </div>
+      <span
+        id="login-history-timezone-badge"
+        class="inline-flex items-center gap-1.5 text-[11px] font-mono px-2.5 py-1 rounded-full bg-sky-500/10 text-sky-300 border border-sky-500/30"
+      >
+        🕒 Múi giờ IP truy cập: Đang xác định...
+      </span>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-2.5">
+      <div class="flex items-center gap-2">
+        <label for="login-history-status-filter" class="text-xs text-[#8b95a7]">Trạng thái:</label>
+        <select id="login-history-status-filter" class="inp text-xs w-auto min-w-[140px]">
+          <option value="all">Tất cả</option>
+          <option value="success">Thành công</option>
+          <option value="failed">Thất bại</option>
+        </select>
+      </div>
+      <div class="flex items-center gap-2">
+        <span id="login-history-count" class="text-xs text-[#8b95a7] font-mono">0 lượt</span>
+        <button type="button" id="btn-refresh-login-history" class="btn-ghost text-xs">↻ Làm mới</button>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto">
+      <table class="w-full text-left text-xs border-collapse">
+        <thead>
+          <tr class="border-b border-slate-800 text-slate-400">
+            <th class="py-2.5 pr-3">Thời gian (HH:mm:ss DD/MM/YYYY)</th>
+            <th class="py-2.5 pr-3">Tài khoản</th>
+            <th class="py-2.5 pr-3">Trạng thái</th>
+            <th class="py-2.5 pr-3">Địa chỉ IP &amp; Quốc gia</th>
+            <th class="py-2.5 text-right">Thiết bị / Trình duyệt</th>
+          </tr>
+        </thead>
+        <tbody id="login-history-tbody" class="divide-y divide-slate-800/70">
+          <tr>
+            <td colspan="5" class="py-6 text-center text-slate-500">Đang tải lịch sử đăng nhập...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
+      <span id="login-history-page-info" class="text-[#8b95a7] font-mono">Trang 1</span>
+      <div class="flex items-center gap-2">
+        <button type="button" id="btn-login-hist-prev" class="btn-ghost text-xs disabled:opacity-40" disabled>← Trang trước</button>
+        <button type="button" id="btn-login-hist-next" class="btn-ghost text-xs disabled:opacity-40" disabled>Trang sau →</button>
+      </div>
+    </div>
+  </div>
 </section>
