@@ -76,6 +76,51 @@
         {% if doc.subtitle %}
         <p class="text-sm text-[var(--text-secondary)] leading-relaxed">{{ doc.subtitle }}</p>
         {% endif %}
+
+        {# Thanh thông tin tác giả cập nhật gần nhất kèm avatar Discord/mặc định & mốc giờ theo IP người xem #}
+        <div class="flex flex-wrap items-center gap-2 text-xs text-[var(--text-secondary)] pt-1">
+          <span class="font-medium">Author:</span>
+          <span class="inline-flex items-center gap-1.5">
+            {% if doc.updated_by_avatar_url %}
+            <img
+              src="{{ doc.updated_by_avatar_url }}"
+              alt="{{ doc.updated_by_name or 'Hệ thống KiwiKiwi' }}"
+              width="22"
+              height="22"
+              class="w-[22px] h-[22px] rounded-full object-cover border border-[var(--border-subtle)] shrink-0 js-author-avatar"
+            />
+            <span
+              class="hidden w-[22px] h-[22px] rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] items-center justify-center shrink-0 text-[var(--text-secondary)] js-author-avatar-fallback"
+              aria-hidden="true"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </span>
+            {% else %}
+            <span
+              class="inline-flex w-[22px] h-[22px] rounded-full bg-[var(--bg-elevated)] border border-[var(--border-subtle)] items-center justify-center shrink-0 text-[var(--text-secondary)]"
+              aria-hidden="true"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </span>
+            {% endif %}
+            <strong class="font-semibold text-[var(--text-primary)]">{{ doc.updated_by_name or 'Hệ thống KiwiKiwi' }}</strong>
+          </span>
+          {% if doc.updated_at_utc %}
+          <span>
+            Lúc
+            <time
+              datetime="{{ doc.updated_at_utc }}"
+              data-utc-ts="{{ doc.updated_at_utc }}"
+              class="font-mono font-medium text-[var(--text-primary)] js-local-minute-ts"
+            >{{ doc.updated_at_minute_formatted }}</time>
+            <span class="text-[11px] opacity-80">(based on your IP)</span>
+          </span>
+          {% endif %}
+        </div>
       </div>
 
       <div class="ox-legal-prose text-sm leading-7">

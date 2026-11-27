@@ -271,3 +271,88 @@ async def test_discord_id_blacklist_blocks_bot_and_me_with_reason_and_forbids_ad
         assert await container.maintenance_gate.check_interaction(interaction_after) is True
         logs_after = await container.audit_service.list_logs(limit=30)
         assert any(e.get("action") == "USER_UNBLACKLISTED" for e in logs_after)
+
+
+@pytest.mark.asyncio
+async def test_public_legal_author_attribution_discord_and_local_admin_across_all_5_routes(fake_db, fake_gemini, fake_bot):
+    """Kiểm tra hiển thị `Author: [Avatar] {Tên} Lúc {HH:mm DD/MM/YYYY} (based on your IP)` cho cả Discord OAuth2 Admin và Admin mật khẩu trên cả 5 tuyến pháp lý."""
+    from app.features.auth.dependencies import SESSION_COOKIE_NAME
+
+    settings = AppSettings(
+        discord_token="test-token",
+        gemini_api_key="test-key",
+        session_secret="test-secret-author-attribution-32chars",
+    )
+    container = build_container(settings, gemini_client=fake_gemini, reserve_buffer_bytes=16 * 1024)
+    await container.sync_coordinator.attach_db(fake_db)
+    await container.legal_doc_repo.attach_db(fake_db)
+    await container.auth_service.create_user("tranzduynghia", "AdminPass123!", role="admin")
+
+    discord_admin_id = "1240503090185109536"
+    discord_avatar_url = f"https://cdn.discordapp.com/avatars/{discord_admin_id}/a_demoavatar123.png?size=64"
+    await container.permission_service.upsert_permission(
+        discord_admin_id, label="DiscordAdmin", is_admin=True, can_dashboard=True, can_status=True, actor="system"
+    )
+
+    web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
+    all_routes = ("toslinks", "legal", "terms", "policies", "guidelines")
+
+    with TestClient(web_app) as client:
+        # 1) Trước khi Admin sửa: hiển thị fallback "Hệ thống KiwiKiwi" và avatar mặc định (không có <img> Discord)
+        for slug in all_routes:
+            res = client.get(f"/{slug}", headers={"CF-Timezone": "Asia/Ho_Chi_Minh"})
+            assert res.status_code == 200
+            assert "Author:" in res.text
+            assert "Hệ thống KiwiKiwi" in res.text
+            assert "js-author-avatar" not in res.text
+
+        # 2) Admin đăng nhập bằng mật khẩu cục bộ lưu /terms và /policies -> tên tài khoản Admin + avatar SVG mặc định (avatar_url=None)
+        assert client.post("/auth/login", json={"username": "tranzduynghia", "password": "AdminPass123!"}).status_code == 200
+        for slug in ("terms", "policies"):
+            save_res = client.put(
+                "/api/legal",
+                json={
+                    "doc_key": slug,
+                    "title": f"Tài liệu {slug} cập nhật",
+                    "subtitle": "Phiên bản chuẩn",
+                    "body": f"<h2>Mục 1</h2><p>Nội dung cập nhật bởi tài khoản cục bộ cho {slug}.</p>",
+                },
+            )
+            assert save_res.status_code == 200
+            page_res = client.get(f"/{slug}", headers={"CF-Timezone": "Asia/Ho_Chi_Minh"})
+            assert page_res.status_code == 200
+            assert "tranzduynghia" in page_res.text
+            assert "(based on your IP)" in page_res.text
+            assert "data-utc-ts=" in page_res.text
+            assert "js-author-avatar" not in page_res.text
+
+        # 3) Admin đăng nhập qua Discord OAuth2 lưu /toslinks, /legal và /guidelines -> tên Discord + <img src="https://cdn.discordapp.com/avatars/...">
+        discord_cookie = container.auth_deps.signer.encode({
+            "auth_type": "discord",
+            "discord_id": discord_admin_id,
+            "username": "nghia_discord",
+            "display_name": "Nghĩa Admin",
+            "avatar_url": discord_avatar_url,
+            "role": "admin",
+            "is_admin": True,
+        })
+        with TestClient(web_app) as discord_client:
+            discord_client.cookies.set(SESSION_COOKIE_NAME, discord_cookie)
+            for slug in ("toslinks", "legal", "guidelines"):
+                save_res = discord_client.put(
+                    "/api/legal",
+                    json={
+                        "doc_key": slug,
+                        "title": f"Tài liệu {slug} Discord",
+                        "subtitle": "Cập nhật qua OAuth2",
+                        "body": f"<h2>Mục 1</h2><p>Nội dung cập nhật bởi Discord OAuth2 Admin cho {slug}.</p>",
+                    },
+                )
+                assert save_res.status_code == 200
+                page_res = discord_client.get(f"/{slug}", headers={"CF-Timezone": "America/Los_Angeles"})
+                assert page_res.status_code == 200
+                assert "Nghĩa Admin" in page_res.text
+                assert discord_avatar_url in page_res.text
+                assert "(based on your IP)" in page_res.text
+                assert "data-utc-ts=" in page_res.text
+

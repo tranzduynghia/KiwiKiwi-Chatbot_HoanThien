@@ -67,6 +67,8 @@ class LegalService:
 
     async def get_doc(self, doc_key: str, tz_info: Optional[ZoneInfo] = None) -> dict[str, Any]:
         """Truy vấn theo yêu cầu 1 trang pháp lý từ MongoDB `legal_documents` (100% read-only, không đệm HTML trong RAM)."""
+        from app.core.timezone import format_minute_timestamp
+
         meta = self._legal_meta()
         doc = await self._documents.get_document(doc_key)
         effective_updated = doc.get("updated_at") or meta["tos_updated_at"]
@@ -75,11 +77,18 @@ class LegalService:
             if effective_updated
             else "—"
         )
+        formatted_minute = (
+            (format_minute_timestamp(effective_updated, tz_info) if tz_info else effective_updated)
+            if effective_updated
+            else "—"
+        )
         return {
             **doc,
             "active_tos_version": meta["active_tos_version"],
             "tos_updated_at": effective_updated,
             "tos_updated_at_formatted": formatted_updated,
+            "updated_at_utc": effective_updated,
+            "updated_at_minute_formatted": formatted_minute,
         }
 
     async def get_cms_overview(
@@ -279,7 +288,21 @@ class LegalService:
             if active_tos_version is not None and str(active_tos_version).strip()
             else meta["active_tos_version"]
         )
+        from app.features.legal.repository import validate_discord_avatar_url
+
         now_iso = datetime.now(timezone.utc).isoformat()
+        meta_dict = actor_meta if isinstance(actor_meta, dict) else {}
+        author_name = str(meta_dict.get("actor_display_name") or "").strip()
+        if not author_name:
+            raw_actor = str(actor or "Admin").strip()
+            author_name = raw_actor.split(" (discord:")[0].strip() or raw_actor
+        author_avatar_url: Optional[str] = None
+        if str(actor_type or "").strip().lower() == "discord" or meta_dict.get("actor_discord_id"):
+            author_avatar_url = validate_discord_avatar_url(
+                meta_dict.get("actor_avatar_url"),
+                discord_user_id=meta_dict.get("actor_discord_id"),
+                discord_avatar=meta_dict.get("actor_discord_avatar"),
+            )
 
         # 1) Lưu nội dung Rich-Text đã làm sạch xuống collection riêng `legal_documents` (không phình bot_config RAM)
         await self._documents.save_document(
@@ -288,6 +311,8 @@ class LegalService:
             subtitle=clean_subtitle,
             body_html=clean_body,
             updated_by=actor,
+            updated_by_name=author_name,
+            updated_by_avatar_url=author_avatar_url,
             updated_at=now_iso,
         )
 

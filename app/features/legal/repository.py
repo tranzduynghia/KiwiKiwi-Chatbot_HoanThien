@@ -13,6 +13,31 @@ from app.features.legal.sanitizer import sanitize_legal_html
 log = logging.getLogger("gemini-bot.legal")
 
 MAX_ACCEPTANCE_CACHE_ENTRIES = 10000
+_DISCORD_AVATAR_URL_RE = re.compile(
+    r"^https://cdn\.discordapp\.com/avatars/\d{17,20}/[A-Za-z0-9_.-]+(?:\.(?:png|jpg|jpeg|webp|gif))?(?:\?size=\d{2,4})?$",
+    re.IGNORECASE,
+)
+_DISCORD_ID_RE = re.compile(r"^\d{17,20}$")
+_DISCORD_AVATAR_HASH_RE = re.compile(r"^[A-Za-z0-9_]{4,64}$")
+
+
+def validate_discord_avatar_url(
+    raw_url: Optional[str],
+    *,
+    discord_user_id: Optional[str] = None,
+    discord_avatar: Optional[str] = None,
+) -> Optional[str]:
+    """Xác thực URL ảnh đại diện Discord CDN (`^https://cdn.discordapp.com/avatars/`); trả về `None` nếu không hợp lệ hoặc tài khoản cục bộ."""
+    candidate = str(raw_url or "").strip()
+    if candidate and _DISCORD_AVATAR_URL_RE.fullmatch(candidate):
+        return candidate
+    uid = str(discord_user_id or "").strip()
+    avatar_hash = str(discord_avatar or "").strip()
+    if _DISCORD_ID_RE.fullmatch(uid) and _DISCORD_AVATAR_HASH_RE.fullmatch(avatar_hash):
+        built = f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.png?size=64"
+        if _DISCORD_AVATAR_URL_RE.fullmatch(built):
+            return built
+    return None
 
 
 class LegalDocumentRepository:
@@ -46,6 +71,8 @@ class LegalDocumentRepository:
 
     async def get_document(self, doc_key: str) -> dict[str, Any]:
         """Đọc thuần túy (100% read-only) nội dung Rich-Text của 1 trang pháp lý từ MongoDB `legal_documents`."""
+        from app.features.legal.defaults import DEFAULT_LEGAL_AUTHOR_NAME
+
         key = str(doc_key or "").strip().lower()
         if key not in LEGAL_DOC_KEYS:
             raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
@@ -65,6 +92,15 @@ class LegalDocumentRepository:
 
         raw_body = str(raw.get("body") or default_doc["body"])
         raw_updated = raw.get("updated_at")
+        raw_updated_by = str(raw.get("updated_by") or "system-default").strip()
+        raw_author_name = str(raw.get("updated_by_name") or "").strip()
+        if not raw_author_name:
+            raw_author_name = (
+                DEFAULT_LEGAL_AUTHOR_NAME
+                if raw_updated_by in ("", "system-default")
+                else raw_updated_by
+            )
+        avatar_url = validate_discord_avatar_url(raw.get("updated_by_avatar_url"))
         return {
             "key": key,
             "label": LEGAL_DOC_LABELS[key],
@@ -72,7 +108,9 @@ class LegalDocumentRepository:
             "subtitle": str(raw.get("subtitle") if raw.get("subtitle") is not None else default_doc["subtitle"]).strip(),
             "body": sanitize_legal_html(raw_body),
             "updated_at": str(raw_updated).strip() if raw_updated else None,
-            "updated_by": str(raw.get("updated_by") or "system-default"),
+            "updated_by": raw_updated_by,
+            "updated_by_name": raw_author_name,
+            "updated_by_avatar_url": avatar_url,
         }
 
     async def save_document(
@@ -83,15 +121,20 @@ class LegalDocumentRepository:
         subtitle: str,
         body_html: str,
         updated_by: str,
+        updated_by_name: Optional[str] = None,
+        updated_by_avatar_url: Optional[str] = None,
         updated_at: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Làm sạch HTML bằng allowlist và ghi thẳng xuống MongoDB `legal_documents`."""
+        """Làm sạch HTML bằng allowlist và ghi thẳng xuống MongoDB `legal_documents` kèm tác giả & avatar."""
         key = str(doc_key or "").strip().lower()
         if key not in LEGAL_DOC_KEYS:
             raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
 
         now_iso = updated_at or datetime.now(timezone.utc).isoformat()
         clean_html = sanitize_legal_html(body_html)
+        clean_actor = str(updated_by or "dashboard").strip()[:64]
+        clean_author_name = " ".join(str(updated_by_name or clean_actor or "Admin").split()).strip()[:64] or "Admin"
+        clean_avatar_url = validate_discord_avatar_url(updated_by_avatar_url)
         doc = {
             "_id": key,
             "key": key,
@@ -100,7 +143,9 @@ class LegalDocumentRepository:
             "subtitle": str(subtitle).strip()[:240],
             "body": clean_html,
             "updated_at": now_iso,
-            "updated_by": str(updated_by or "dashboard")[:64],
+            "updated_by": clean_actor,
+            "updated_by_name": clean_author_name,
+            "updated_by_avatar_url": clean_avatar_url,
         }
         if self.connected:
             await self.collection.replace_one({"_id": key}, doc, upsert=True)

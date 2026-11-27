@@ -214,6 +214,8 @@ def create_pages_router(
                 "active_tos_version": DEFAULT_ACTIVE_TOS_VERSION,
                 "tos_updated_at": base["updated_at"],
                 "tos_updated_at_formatted": "—",
+                "updated_at_utc": base["updated_at"],
+                "updated_at_minute_formatted": "—",
             }
         bot_avatar_url, bot_display_name = await _resolve_bot_branding(
             get_bot() if callable(get_bot) else None,

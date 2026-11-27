@@ -86,6 +86,14 @@ def format_exact_timestamp(value: Any, tz_info: ZoneInfo) -> str:
     return dt.astimezone(tz_info).strftime("%H:%M:%S %d/%m/%Y")
 
 
+def format_minute_timestamp(value: Any, tz_info: ZoneInfo) -> str:
+    """Định dạng mốc thời gian gọn tới phút `HH:mm DD/MM/YYYY` cho thanh tác giả trang pháp lý công khai."""
+    dt = parse_utc_datetime(value)
+    if dt is None:
+        return "—"
+    return dt.astimezone(tz_info).strftime("%H:%M %d/%m/%Y")
+
+
 def extract_cf_country(headers: Any) -> str:
     """Đọc mã quốc gia 2 ký tự từ header `CF-IPCountry` của Cloudflare (nếu hợp lệ)."""
     if headers is None:

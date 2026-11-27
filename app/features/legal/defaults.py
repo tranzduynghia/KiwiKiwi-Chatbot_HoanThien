@@ -128,6 +128,9 @@ def build_default_legal_config() -> dict[str, Any]:
     }
 
 
+DEFAULT_LEGAL_AUTHOR_NAME = "Hệ thống KiwiKiwi"
+
+
 def build_default_legal_document(doc_key: str) -> dict[str, Any]:
     """Trả về bản sao nội dung mặc định của một trong 5 trang pháp lý (mốc cập nhật tĩnh, chỉ đổi khi Admin lưu)."""
     key = str(doc_key or "").strip().lower()
@@ -143,6 +146,8 @@ def build_default_legal_document(doc_key: str) -> dict[str, Any]:
         "body": base["body"],
         "updated_at": DEFAULT_TOS_UPDATED_AT,
         "updated_by": "system-default",
+        "updated_by_name": DEFAULT_LEGAL_AUTHOR_NAME,
+        "updated_by_avatar_url": None,
     }
 
 
