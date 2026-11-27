@@ -397,7 +397,11 @@ function sanitizePreviewHtml(rawHtml) {
   return wrapper.innerHTML;
 }
 
-export function createLegalCmsTabController({ isAdmin } = {}) {
+export function createLegalCmsTabController({
+  isAdmin,
+  isStepUpUnlocked = () => true,
+  onRequestUnlock = null,
+} = {}) {
   let editorInitialized = false;
   let currentDocKey = "toslinks";
   let activeTosVersion = "v1.0";
@@ -922,6 +926,35 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     }
   }
 
+  function setTempLockedView(isLocked) {
+    const lockedCard = document.getElementById("legal-temp-locked-card");
+    const workspace = document.getElementById("legal-editor-workspace");
+    if (lockedCard) lockedCard.classList.toggle("hidden", !isLocked);
+    if (workspace) workspace.classList.toggle("hidden", isLocked);
+  }
+
+  function lockTempIfActive() {
+    if (currentDocKey !== "temp") return;
+    initialSnapshot = null;
+    savedSelectionRange = null;
+    const titleEl = document.getElementById("legal-doc-title");
+    const subEl = document.getElementById("legal-doc-subtitle");
+    const previewTitleEl = document.getElementById("legal-preview-title");
+    const previewSubEl = document.getElementById("legal-preview-subtitle");
+    const editor = getEditorEl();
+    const previewBody = document.getElementById("legal-preview-body");
+    const stepUpBar = document.getElementById("temp-stepup-bar");
+    if (titleEl) titleEl.value = "";
+    if (subEl) subEl.value = "";
+    if (previewTitleEl) previewTitleEl.textContent = "—";
+    if (previewSubEl) previewSubEl.textContent = "";
+    if (editor) editor.replaceChildren();
+    if (previewBody) previewBody.replaceChildren();
+    if (stepUpBar) stepUpBar.replaceChildren();
+    updateCharCount();
+    setTempLockedView(true);
+  }
+
   function syncPageTabs() {
     document.querySelectorAll(".ox-legal-page-tab").forEach((btn) => {
       btn.dataset.active = String(btn.dataset.legalPage === currentDocKey);
@@ -936,11 +969,23 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     if (saveBtn) {
       saveBtn.textContent = currentDocKey === "temp" ? "💾 Lưu bản nháp /temp" : "💾 Lưu trang & Phiên bản ToS";
     }
+    const stepUpBar = document.getElementById("temp-stepup-bar");
+    if (stepUpBar) {
+      stepUpBar.classList.toggle("hidden", currentDocKey !== "temp");
+    }
   }
 
   async function loadPage(docKey = currentDocKey) {
     currentDocKey = docKey;
     syncPageTabs();
+    if (currentDocKey === "temp" && !isStepUpUnlocked()) {
+      lockTempIfActive();
+      if (typeof onRequestUnlock === "function") {
+        onRequestUnlock("temp", { afterUnlock: () => loadPage("temp") });
+      }
+      return;
+    }
+    setTempLockedView(false);
     try {
       const tz = detectBrowserTimezone();
       const params = new URLSearchParams();
@@ -1098,6 +1143,15 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
   function ensureEditorInitialized() {
     if (editorInitialized) return;
     editorInitialized = true;
+
+    const unlockTempBtn = document.getElementById("btn-unlock-temp-draft");
+    if (unlockTempBtn) {
+      unlockTempBtn.addEventListener("click", () => {
+        if (typeof onRequestUnlock === "function") {
+          onRequestUnlock("temp", { afterUnlock: () => loadPage("temp") });
+        }
+      });
+    }
 
     const tabsWrap = document.getElementById("legal-page-tabs");
     if (tabsWrap) {
@@ -1709,7 +1763,14 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     await Promise.all([loadPage(currentDocKey), loadAcceptances("0")]);
   }
 
-  return { onTabActivated, loadPage, loadAcceptances };
+  return {
+    onTabActivated,
+    initEditor: ensureEditorInitialized,
+    loadPage,
+    loadAcceptances,
+    lockTempIfActive,
+    isTempActive: () => currentDocKey === "temp",
+  };
 }
 
 /**

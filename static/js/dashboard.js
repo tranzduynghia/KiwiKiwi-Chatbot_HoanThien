@@ -66,16 +66,21 @@ const statusTab = createStatusTabController({
     if (tunnelCard) tunnelCard.renderTelemetry(telemetry);
   },
 });
-const legalCmsTab = createLegalCmsTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
+const legalCmsTab = createLegalCmsTabController({
+  isAdmin: Boolean(bootstrap.isAdmin),
+  isStepUpUnlocked: () => stepUp.isUnlocked(),
+  onRequestUnlock: (tab, opts) => stepUp.openModal(tab, opts),
+});
 const auditTab = createAuditTabController();
 
 const stepUp = createStepUpController({
   authType: bootstrap.authType || "password",
   timeoutSeconds: Number(bootstrap.stepUpTimeoutSeconds) || 60,
-  getActiveTab: () => activeTab,
+  getActiveTab: () => (activeTab === "legal" && legalCmsTab.isTempActive() ? "temp" : activeTab),
   onLockAll: () => {
     if (permissionsTab) permissionsTab.destroyAndLock();
     if (sessionsTab) sessionsTab.destroyAndLock();
+    if (legalCmsTab) legalCmsTab.lockTempIfActive();
   },
   onUnlockedTab: (tab, afterUnlock) => {
     if (tab === "perms") {
@@ -85,6 +90,12 @@ const stepUp = createStepUpController({
         afterUnlock();
       } else {
         sessionsTab.searchSessions(0);
+      }
+    } else if (tab === "temp") {
+      if (typeof afterUnlock === "function") {
+        afterUnlock();
+      } else {
+        legalCmsTab.loadPage("temp");
       }
     }
   },

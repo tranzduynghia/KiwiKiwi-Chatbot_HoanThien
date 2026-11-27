@@ -272,10 +272,29 @@ def create_pages_router(
             )
         user = await auth_deps.get_current_user(request)
         if not user:
-            return apply_no_store_noindex_headers(
-                PlainTextResponse("Chưa xác thực.", status_code=401)
-            )
-        return await _render_public_legal(request, TEMP_DRAFT_DOC_KEY, is_temp_draft=True)
+            return apply_no_store_noindex_headers(RedirectResponse(url="/login", status_code=302))
+        bot_avatar_url, bot_display_name = await _resolve_bot_branding(
+            get_bot() if callable(get_bot) else None,
+            usage_stats,
+        )
+        safe_user = dict(user)
+        safe_user["avatar_url"] = sanitize_https_url(str(user.get("avatar_url") or ""))
+        active_tos_version = legal_service.active_tos_version if legal_service is not None else "v1.0"
+        response = _render_template(
+            templates,
+            request,
+            "temp_draft.html",
+            {
+                "user": safe_user,
+                "discord_oauth_enabled": oauth_service.is_enabled(request),
+                "bot_avatar_url": bot_avatar_url,
+                "bot_display_name": bot_display_name,
+                "active_tos_version": active_tos_version,
+                "asset_version": ASSET_VERSION,
+                "build_sha": BUILD_SHA,
+            },
+        )
+        return apply_no_store_noindex_headers(response)
 
     @router.get("/toslinks", response_class=HTMLResponse)
     async def public_toslinks_page(request: Request):

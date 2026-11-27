@@ -196,7 +196,7 @@ def create_legal_router(
         request: Request,
         tz: Optional[str] = Query(default=None),
         _: None = Depends(_reject_temp_prefetch),
-        user: dict[str, Any] = Depends(auth_deps.require_user),
+        user: dict[str, Any] = Depends(auth_deps.require_step_up_auth),
     ):
         tz_name, tz_info = resolve_request_timezone(request.headers, fallback_tz=tz)
         doc = await legal_service.get_temp_document(tz_info=tz_info)
@@ -216,7 +216,7 @@ def create_legal_router(
         payload: SaveTempDocumentPayload,
         request: Request,
         _: None = Depends(_reject_temp_prefetch),
-        admin: dict[str, Any] = Depends(auth_deps.require_admin),
+        admin: dict[str, Any] = Depends(auth_deps.require_admin_step_up),
     ):
         _validate_csrf_origin(request)
         tz_name, tz_info = resolve_request_timezone(request.headers)
@@ -250,7 +250,7 @@ def create_legal_router(
         payload: PushTempDocumentPayload,
         request: Request,
         _: None = Depends(_reject_temp_prefetch),
-        admin: dict[str, Any] = Depends(auth_deps.require_admin),
+        admin: dict[str, Any] = Depends(auth_deps.require_admin_step_up),
     ):
         _validate_csrf_origin(request)
         tz_name, tz_info = resolve_request_timezone(request.headers)

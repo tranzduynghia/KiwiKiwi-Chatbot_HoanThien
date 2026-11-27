@@ -11,6 +11,8 @@ import { apiRequest, showToast } from "./api.js";
 const TAB_LABELS = {
   perms: "Phân quyền & Admin",
   sessions: "Tra cứu phiên chat",
+  temp: "Trang nháp (/temp)",
+  "temp-page": "Trang nháp (/temp)",
 };
 
 const ERROR_MESSAGES = {
@@ -41,7 +43,7 @@ export function createStepUpController({
   let pendingAfterUnlock = null;
 
   function isSensitiveTab(tab) {
-    return tab === "perms" || tab === "sessions";
+    return tab === "perms" || tab === "sessions" || tab === "temp" || tab === "temp-page";
   }
 
   function getRemainingSeconds() {
@@ -58,7 +60,7 @@ export function createStepUpController({
   }
 
   function renderStepUpBars() {
-    const barIds = ["perms-stepup-bar", "sessions-stepup-bar"];
+    const barIds = ["perms-stepup-bar", "sessions-stepup-bar", "temp-stepup-bar"];
     const remaining = getRemainingSeconds();
     barIds.forEach((id) => {
       const bar = document.getElementById(id);
@@ -175,7 +177,7 @@ export function createStepUpController({
   }
 
   function openModal(targetTab, { errorMessage = "", afterUnlock = null } = {}) {
-    const safeTab = targetTab === "sessions" ? "sessions" : "perms";
+    const safeTab = TAB_LABELS[targetTab] ? targetTab : "perms";
     pendingTargetTab = safeTab;
     pendingAfterUnlock = typeof afterUnlock === "function" ? afterUnlock : null;
 
@@ -231,8 +233,8 @@ export function createStepUpController({
     stopCountdownTimer();
     detachActivityListeners();
 
-    // Xóa sạch thanh đếm ngược trên cả 2 tab
-    ["perms-stepup-bar", "sessions-stepup-bar"].forEach((id) => {
+    // Xóa sạch thanh đếm ngược trên tất cả các tab nhạy cảm
+    ["perms-stepup-bar", "sessions-stepup-bar", "temp-stepup-bar"].forEach((id) => {
       const bar = document.getElementById(id);
       if (bar) bar.replaceChildren();
     });

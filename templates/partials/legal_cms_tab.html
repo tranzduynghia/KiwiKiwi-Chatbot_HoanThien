@@ -31,6 +31,7 @@
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
+        <div id="temp-stepup-bar" class="flex items-center gap-2"></div>
         <span id="legal-active-version-badge" class="text-[11px] font-mono font-semibold px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/35">
           Phiên bản: {{ active_tos_version or 'v1.0' }}
         </span>
@@ -50,6 +51,24 @@
       <button type="button" class="ox-legal-page-tab" data-legal-page="temp" data-active="false">/temp · Nháp</button>
     </div>
 
+    {# Khung khóa Step-up cho /temp (chỉ hiện khi đang chọn /temp mà chưa xác thực hoặc đã hết 60s) #}
+    <div id="legal-temp-locked-card" class="hidden stepup-lock-card text-center max-w-lg mx-auto space-y-4 my-4">
+      <div class="stepup-shield-icon inline-flex items-center justify-center w-12 h-12 mx-auto" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+      </div>
+      <h4 class="text-base font-semibold stepup-text-primary">Trang nháp (/temp) đang được khóa</h4>
+      <p class="text-xs stepup-text-muted leading-relaxed">
+        Nội dung nháp được bảo vệ bởi Step-up Auth (tự xóa DOM &amp; khóa sau 60 giây nhàn rỗi). Vui lòng xác thực lại để xem và chỉnh sửa.
+      </p>
+      <button type="button" id="btn-unlock-temp-draft" class="btn-primary stepup-btn-radius text-xs">
+        🔓 Xác thực để mở khóa /temp
+      </button>
+    </div>
+
+    <div id="legal-editor-workspace" class="space-y-4">
     {# Siêu dữ liệu trang: Tiêu đề, Phụ đề và Phiên bản ToS dùng chung #}
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-3">
       <div class="lg:col-span-5">
@@ -264,6 +283,7 @@
       </div>
     </div>
     {% endif %}
+    </div>
   </div>
 
   {# Phần 2: Tin nhắn yêu cầu đồng ý ToS trên Discord (Discord Consent Prompt) #}

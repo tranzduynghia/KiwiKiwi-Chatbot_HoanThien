@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="normal">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="description" content="Trang nháp nội bộ (/temp) — KiwiKiwi Bot" />
+  <title>Trang nháp (/temp) · {{ bot_display_name or 'KiwiKiwi' }}</title>
+  {# Nạp giao diện đồng bộ trước first paint (Zero-FOUC) #}
+  <script src="/static/js/core/themeInit.js?v={{ asset_version }}"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_version }}" />
+</head>
+<body class="ox-body min-h-screen flex flex-col">
+  {# Thanh tiêu đề nội bộ kèm nút chuyển 3 giao diện Normal / Dark / Light #}
+  <header class="ox-topbar sticky top-0 z-30 px-4 sm:px-6">
+    <div class="max-w-5xl w-full mx-auto flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2.5 min-w-0">
+        {% if bot_avatar_url %}
+        <img
+          src="{{ bot_avatar_url }}"
+          alt="{{ bot_display_name or 'KiwiKiwi' }}"
+          class="w-8 h-8 rounded-full object-cover border border-[var(--border-strong)] shrink-0"
+        />
+        {% else %}
+        <div class="ox-avatar-fallback" aria-hidden="true">{{ (bot_display_name or 'K')[0] | upper }}</div>
+        {% endif %}
+        <div class="min-w-0">
+          <div class="text-sm font-bold tracking-tight truncate">{{ bot_display_name or 'KiwiKiwi' }} · Trang nháp (/temp)</div>
+          <div class="text-[10px] text-[var(--text-secondary)] truncate">Khu vực nhạy cảm · Yêu cầu Step-up Auth (60s tự khóa)</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2.5 shrink-0">
+        <div class="ox-theme-switcher" role="group" aria-label="Chọn giao diện hiển thị">
+          <button type="button" class="ox-theme-btn" data-theme-option="normal" aria-pressed="true">Normal</button>
+          <button type="button" class="ox-theme-btn" data-theme-option="dark" aria-pressed="false">Dark</button>
+          <button type="button" class="ox-theme-btn" data-theme-option="light" aria-pressed="false">Light</button>
+        </div>
+        <a href="/dashboard#legal" class="btn-ghost text-xs">← Dashboard CMS</a>
+      </div>
+    </div>
+  </header>
+
+  {# Thông báo nhanh dạng Toast #}
+  <div id="toast" class="fixed bottom-5 right-5 z-50 hidden max-w-sm px-4 py-3 rounded-xl text-sm shadow-2xl border"></div>
+
+  {# Vùng nội dung chính — tuyệt đối không render sẵn nội dung nháp trong HTML #}
+  <main class="flex-1 max-w-5xl w-full mx-auto px-4 sm:px-6 py-6 space-y-5">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="text-lg font-semibold stepup-text-primary">Soạn thảo Trang nháp (/temp)</h1>
+        <p class="text-xs stepup-text-muted">Ẩn hoàn toàn khỏi công chúng &amp; /toslinks · Tự xóa DOM và khóa sau 60 giây nhàn rỗi</p>
+      </div>
+      {# Thanh trạng thái đếm ngược 60s + nút Khóa ngay (chỉ dựng bằng JS khi đã mở khóa) #}
+      <div id="temp-stepup-bar" class="flex items-center gap-2"></div>
+    </div>
+
+    {# Vùng chứa nội dung động — bị xóa sạch hoàn toàn bằng replaceChildren() khi khóa #}
+    <div id="temp-content-root" class="space-y-5"></div>
+  </main>
+
+  {# Hộp thoại xác nhận lưu & đẩy trang toàn cục #}
+  {% include "partials/confirm_save_modal.html" %}
+
+  {# Hộp thoại xác thực tăng cường Step-up Authentication (60s idle lock) #}
+  {% include "partials/step_up_modal.html" %}
+
+  {# Hộp thoại Thêm Google Font cho trình soạn thảo Rich-Text #}
+  {% include "partials/google_font_modal.html" %}
+
+  {# Dữ liệu khởi tạo từ server cho JavaScript (không chứa nội dung nháp) #}
+  <script id="dashboard-bootstrap" type="application/json">
+    {{ {
+      "isAdmin": (true if user.is_admin else false),
+      "authType": (user.auth_type or "password"),
+      "discordOauthEnabled": (true if discord_oauth_enabled else false),
+      "stepUpTimeoutSeconds": 60,
+      "activeTosVersion": active_tos_version or "v1.0"
+    } | tojson }}
+  </script>
+
+  <script type="module" src="/static/js/features/legal/tempDraftPage.js?v={{ asset_version }}"></script>
+</body>
+</html>

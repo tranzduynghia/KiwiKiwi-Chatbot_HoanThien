@@ -39,6 +39,8 @@ STEP_UP_TAB_MAP = {
     "permissions": "perms",
     "sessions": "sessions",
     "session": "sessions",
+    "temp": "temp",
+    "temp-page": "temp-page",
 }
 
 
@@ -106,8 +108,14 @@ def create_auth_router(
     ) -> RedirectResponse:
         safe_tab = _normalize_step_up_tab(target_tab)
         safe_code = re.sub(r"[^a-z0-9_-]", "", str(error_code or "failed").lower())[:64] or "failed"
+        if safe_tab == "temp-page":
+            target_url = f"/temp?{urlencode({'step_up_error': safe_code})}"
+        elif safe_tab == "temp":
+            target_url = f"/dashboard?{urlencode({'step_up_error': safe_code})}#legal"
+        else:
+            target_url = f"/dashboard?{urlencode({'step_up_error': safe_code})}#{safe_tab}"
         response = RedirectResponse(
-            url=f"/dashboard?{urlencode({'step_up_error': safe_code})}#{safe_tab}",
+            url=target_url,
             status_code=302,
         )
         is_secure = auth_deps.is_secure_request(request)
@@ -295,7 +303,13 @@ def create_auth_router(
                     secure=is_secure,
                 )
 
-            response = RedirectResponse(url=f"/dashboard?step_up=ok#{target_tab}", status_code=302)
+            if target_tab == "temp-page":
+                ok_url = "/temp?step_up=ok"
+            elif target_tab == "temp":
+                ok_url = "/dashboard?step_up=ok#legal"
+            else:
+                ok_url = f"/dashboard?step_up=ok#{target_tab}"
+            response = RedirectResponse(url=ok_url, status_code=302)
             response.delete_cookie(
                 key=OAUTH_STATE_COOKIE_NAME,
                 path="/",
