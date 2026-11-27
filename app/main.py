@@ -38,7 +38,7 @@ from app.features.chat.gemini_service import GeminiChatService
 from app.features.config.atlas_watcher import AtlasConfigWatcher
 from app.features.config.repository import ConfigRepository
 from app.features.config.service import ConfigService
-from app.features.legal.repository import TosAcceptanceRepository
+from app.features.legal.repository import LegalDocumentRepository, TosAcceptanceRepository
 from app.features.legal.service import LegalService
 from app.features.models.cooldown import ModelCooldownTracker
 from app.features.models.registry import ModelRegistry
@@ -67,6 +67,7 @@ class AppContainer:
     config_service: ConfigService
     atlas_config_watcher: AtlasConfigWatcher
     maintenance_gate: MaintenanceGate
+    legal_doc_repo: LegalDocumentRepository
     tos_acceptance_repo: TosAcceptanceRepository
     legal_service: LegalService
     tos_gate: TosConsentGate
@@ -209,12 +210,15 @@ def build_container(
     )
     config_service.on_update(lambda cfg: maintenance_gate.sync_from_config(cfg.get("presence") if isinstance(cfg, dict) else None))
 
-    # Hệ thống Pháp lý / ToS CMS, Cổng đồng thuận có phiên bản và Lịch sử đăng nhập Admin
+    # Hệ thống Pháp lý / ToS CMS (đọc theo yêu cầu từ MongoDB), Cổng đồng thuận có phiên bản và Lịch sử đăng nhập Admin
+    legal_doc_repo = LegalDocumentRepository()
     tos_acceptance_repo = TosAcceptanceRepository()
     legal_service = LegalService(
         config_repo=config_repo,
         config_service=config_service,
+        document_repo=legal_doc_repo,
         acceptance_repo=tos_acceptance_repo,
+        audit_service=audit_service,
     )
     tos_gate = TosConsentGate(legal_service)
     login_history_repo = AdminLoginHistoryRepository()
@@ -372,6 +376,7 @@ def build_container(
         config_service=config_service,
         atlas_config_watcher=atlas_config_watcher,
         maintenance_gate=maintenance_gate,
+        legal_doc_repo=legal_doc_repo,
         tos_acceptance_repo=tos_acceptance_repo,
         legal_service=legal_service,
         tos_gate=tos_gate,

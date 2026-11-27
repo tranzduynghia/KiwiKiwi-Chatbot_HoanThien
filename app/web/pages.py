@@ -172,26 +172,23 @@ def create_pages_router(
         tz_name, tz_info = resolve_request_timezone(request.headers)
         tz_badge = format_timezone_badge(tz_name, tz_info)
         if legal_service is not None:
-            doc = legal_service.get_doc(doc_key, tz_info=tz_info)
+            doc = await legal_service.get_doc(doc_key, tz_info=tz_info)
         else:
-            from app.features.legal.defaults import DEFAULT_ACTIVE_TOS_VERSION, DEFAULT_LEGAL_DOCS
+            from app.features.legal.defaults import DEFAULT_ACTIVE_TOS_VERSION, build_default_legal_document
+            from app.features.legal.sanitizer import sanitize_legal_html
 
-            base = DEFAULT_LEGAL_DOCS[doc_key]
+            base = build_default_legal_document(doc_key)
             doc = {
-                "key": doc_key,
-                "label": LEGAL_DOC_LABELS[doc_key],
-                "title": base["title"],
-                "subtitle": base["subtitle"],
-                "body": base["body"],
+                **base,
+                "body": sanitize_legal_html(base["body"]),
                 "active_tos_version": DEFAULT_ACTIVE_TOS_VERSION,
-                "tos_updated_at": "",
+                "tos_updated_at": base["updated_at"],
                 "tos_updated_at_formatted": "—",
             }
         bot_avatar_url, bot_display_name = await _resolve_bot_branding(
             get_bot() if callable(get_bot) else None,
             usage_stats,
         )
-        paragraphs = [p.strip() for p in str(doc.get("body") or "").split("\n\n") if p.strip()]
         nav_items = [{"key": k, "path": f"/{k}", "label": LEGAL_DOC_LABELS[k]} for k in LEGAL_DOC_KEYS]
         return _render_template(
             templates,
@@ -199,7 +196,6 @@ def create_pages_router(
             "legal_page.html",
             {
                 "doc": doc,
-                "paragraphs": paragraphs,
                 "nav_items": nav_items,
                 "active_key": doc_key,
                 "timezone_name": tz_name,
@@ -209,6 +205,10 @@ def create_pages_router(
                 "asset_version": ASSET_VERSION,
             },
         )
+
+    @router.get("/toslinks", response_class=HTMLResponse)
+    async def public_toslinks_page(request: Request):
+        return await _render_public_legal(request, "toslinks")
 
     @router.get("/legal", response_class=HTMLResponse)
     async def public_legal_page(request: Request):

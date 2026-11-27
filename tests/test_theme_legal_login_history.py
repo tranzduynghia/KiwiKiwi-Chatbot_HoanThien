@@ -14,7 +14,48 @@ from app.bot.client import DndCommandTree
 from app.bot.tos_gate import TOS_CONSENT_VIEW_TIMEOUT_SECONDS, TosConsentGate, TosConsentView
 from app.core.timezone import format_exact_timestamp, parse_user_agent_summary, resolve_request_timezone
 from app.features.auth.login_history import LOGIN_HISTORY_TTL_SECONDS
+from app.features.legal.sanitizer import sanitize_legal_html
 from app.web.app import create_dashboard_app
+
+
+def test_stdlib_html_sanitizer_allows_safe_rich_text_and_strips_xss():
+    """Bộ lọc thuần html.parser giữ nguyên thẻ/kiểu hợp lệ và triệt tiêu toàn bộ script, on*, iframe, object, javascript:, CSS độc."""
+    dirty_html = (
+        '<h2 style="font-family: Georgia, serif; font-size: 18px; text-align: center; color: #f43f5e; background: url(javascript:alert(1)); position: fixed;">'
+        'Tiêu đề An toàn</h2>'
+        '<p onclick="alert(1)">Đoạn văn <strong>in đậm</strong> <em>nghiêng</em> <u>gạch chân</u> <s>gạch ngang</s>.</p>'
+        '<script>alert("xss")</script>'
+        '<iframe src="https://evil.example"></iframe>'
+        '<object data="evil.swf"></object>'
+        '<img src="x" onerror="alert(2)" />'
+        '<a href="javascript:alert(3)">Link xấu</a> '
+        '<a href="/terms">Tuyến nội bộ</a> '
+        '<a href="https://kiwikiwi.dpdns.org/policies">Liên kết ngoài</a>'
+    )
+    clean = sanitize_legal_html(dirty_html)
+
+    # Triệt tiêu hoàn toàn các vector XSS
+    assert "<script" not in clean.lower()
+    assert "alert(" not in clean
+    assert "<iframe" not in clean.lower()
+    assert "<object" not in clean.lower()
+    assert "<img" not in clean.lower()
+    assert "onclick" not in clean.lower()
+    assert "onerror" not in clean.lower()
+    assert "javascript:" not in clean.lower()
+    assert "background" not in clean.lower()
+    assert "position" not in clean.lower()
+
+    # Giữ nguyên thẻ & thuộc tính an toàn + tự động gắn rel="noopener noreferrer" cho https://
+    assert "<h2 " in clean
+    assert "font-family: Georgia, serif" in clean
+    assert "font-size: 18px" in clean
+    assert "text-align: center" in clean
+    assert "color: #f43f5e" in clean
+    assert "<strong>in đậm</strong>" in clean
+    assert '<a href="/terms">Tuyến nội bộ</a>' in clean
+    assert 'href="https://kiwikiwi.dpdns.org/policies"' in clean
+    assert 'rel="noopener noreferrer"' in clean
 
 
 class FakeInteractionResponse:
@@ -106,18 +147,23 @@ async def test_public_legal_routes_cms_version_bump_and_zero_html_comments(
     fake_db,
     fake_bot,
 ):
-    """4 trang pháp lý công khai trả HTTP 200 không cần đăng nhập, hiển thị nội dung CMS mới nhất, chống XSS và không rò comment HTML."""
+    """5 trang pháp lý công khai (/toslinks..guidelines) trả HTTP 200 không cần đăng nhập, đọc theo yêu cầu từ MongoDB, chống XSS và không rò comment HTML."""
     monkeypatch.setenv("INITIAL_ADMIN_USERNAME", "admin")
     monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "AdminPassword123!")
     await app_container.sync_coordinator.attach_db(fake_db)
+    await app_container.legal_doc_repo.attach_db(fake_db)
     await app_container.tos_acceptance_repo.attach_db(fake_db)
     await app_container.login_history_repo.attach_db(fake_db)
+
+    # Kiểm chứng 5 trang đã được tự động seed trong `legal_documents` và KHÔNG đệm HTML trong `bot_config` RAM
+    assert len(fake_db["legal_documents"].docs) == 5
+    assert "docs" not in (app_container.config_repo.current_config.get("legal") or {})
 
     web_app = create_dashboard_app(app_container, get_bot=lambda: fake_bot)
     client = TestClient(web_app)
 
-    # 1) Kiểm tra cả 4 trang công khai trước khi đăng nhập (kèm CF-Timezone)
-    for route in ("/legal", "/terms", "/policies", "/guidelines"):
+    # 1) Kiểm tra cả 5 trang công khai trước khi đăng nhập (kèm CF-Timezone)
+    for route in ("/toslinks", "/legal", "/terms", "/policies", "/guidelines"):
         res = client.get(route, headers={"CF-Timezone": "Asia/Ho_Chi_Minh"})
         assert res.status_code == 200
         html = res.text
@@ -131,7 +177,7 @@ async def test_public_legal_routes_cms_version_bump_and_zero_html_comments(
     assert "/terms" in login_html and "/policies" in login_html and "/guidelines" in login_html and "/legal" in login_html
     assert "<!--" not in login_html
 
-    # 2) Đăng nhập Admin và cập nhật /terms + nâng phiên bản v1.0 -> v1.1 (kèm payload XSS để kiểm tra thoát HTML)
+    # 2) Đăng nhập Admin và cập nhật /terms + nâng phiên bản v1.0 -> v1.1 (kèm payload XSS để kiểm tra lọc allowlist)
     login_res = client.post("/auth/login", json={"username": "admin", "password": "AdminPassword123!"})
     assert login_res.status_code == 200
 
@@ -142,20 +188,20 @@ async def test_public_legal_routes_cms_version_bump_and_zero_html_comments(
             "doc_key": "terms",
             "title": "Điều khoản mới",
             "subtitle": "Bản thử nghiệm",
-            "body": "Nội dung điều khoản đủ dài trên mười ký tự.",
+            "body": "<p>Nội dung điều khoản đủ dài trên mười ký tự.</p>",
             "active_tos_version": "invalid-ver",
         },
     )
     assert bad_ver.status_code == 400
 
-    # Cập nhật hợp lệ -> nâng lên v1.1 và ghi Audit Log
+    # Cập nhật hợp lệ -> nâng lên v1.1, lọc sạch <script>/onclick và ghi Audit Log
     ok_res = client.put(
         "/api/legal",
         json={
             "doc_key": "terms",
             "title": "Điều khoản Dịch vụ Cập nhật",
             "subtitle": "Hiệu lực từ bản v1.1",
-            "body": "Điều khoản mới áp dụng ngay. <script>alert('xss')</script> an toàn tuyệt đối.",
+            "body": '<p onclick="evil()">Điều khoản <strong>mới</strong> áp dụng ngay.</p><script>alert("xss")</script>',
             "active_tos_version": "v1.1",
         },
     )
@@ -163,22 +209,24 @@ async def test_public_legal_routes_cms_version_bump_and_zero_html_comments(
     assert ok_res.json()["active_tos_version"] == "v1.1"
     assert app_container.legal_service.active_tos_version == "v1.1"
 
-    # Kiểm tra trang công khai /terms đã cập nhật v1.1 và thoát thẻ <script> chống XSS
+    # Kiểm tra trang công khai /terms đã cập nhật v1.1, giữ <strong> và loại bỏ hoàn toàn <script>/onclick
     terms_html = client.get("/terms", headers={"CF-Timezone": "Asia/Tokyo"}).text
     assert "v1.1" in terms_html
     assert "Điều khoản Dịch vụ Cập nhật" in terms_html
     assert "Asia/Tokyo (UTC+9)" in terms_html
-    assert "<script>alert('xss')</script>" not in terms_html
-    assert "&lt;script&gt;alert" in terms_html
+    assert "<strong>mới</strong>" in terms_html
+    assert "<script>" not in terms_html
+    assert "onclick" not in terms_html
     assert "<!--" not in terms_html
 
     # Kiểm tra Audit Log đã lưu dưới chuyên mục legal
     legal_audits = [d for d in fake_db["audit_logs"].docs if d.get("section") == "legal"]
     assert len(legal_audits) >= 1
 
-    # Kiểm tra /dashboard render sạch comment HTML
+    # Kiểm tra /dashboard render sạch comment HTML và có trình soạn thảo Rich-Text
     dash_html = client.get("/dashboard").text
     assert 'id="tab-legal"' in dash_html
+    assert 'id="legal-rte-editor"' in dash_html
     assert 'id="tos-consent-modal"' in dash_html
     assert 'id="login-history-tbody"' in dash_html
     assert "<!--" not in dash_html

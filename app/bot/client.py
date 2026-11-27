@@ -251,6 +251,8 @@ class AskBot(discord.Client):
         self.container.usage_stats.attach_db(db)
         await self.container.session_repo.attach_db(db)
         await self.container.sync_coordinator.attach_db(db)
+        if getattr(self.container, "legal_doc_repo", None) is not None:
+            await self.container.legal_doc_repo.attach_db(db)
         if getattr(self.container, "tos_acceptance_repo", None) is not None:
             await self.container.tos_acceptance_repo.attach_db(db)
         if getattr(self.container, "login_history_repo", None) is not None:

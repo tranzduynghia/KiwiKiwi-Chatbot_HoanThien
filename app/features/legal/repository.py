@@ -1,4 +1,4 @@
-"""Kho lưu trữ danh sách chấp thuận Điều khoản (`tos_acceptances`) kèm bộ đệm RAM O(1)."""
+"""Kho lưu trữ tài liệu pháp lý đọc theo yêu cầu (`legal_documents`, KHÔNG đệm toàn bộ HTML trong RAM) và danh sách chấp thuận ToS (`tos_acceptances`)."""
 from __future__ import annotations
 
 import logging
@@ -7,10 +7,104 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from app.core.timezone import parse_utc_datetime
+from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS, build_default_legal_document
+from app.features.legal.sanitizer import sanitize_legal_html
 
 log = logging.getLogger("gemini-bot.legal")
 
 MAX_ACCEPTANCE_CACHE_ENTRIES = 10000
+
+
+class LegalDocumentRepository:
+    """Truy vấn và lưu nội dung Rich-Text của 5 trang pháp lý trực tiếp trên MongoDB `legal_documents` theo yêu cầu (0 full-HTML RAM cache)."""
+
+    def __init__(self) -> None:
+        self.collection: Any = None
+        # Chỉ dùng dự phòng khi chưa kết nối MongoDB (chế độ offline/unit test)
+        self._offline_fallback: dict[str, dict[str, Any]] = {}
+
+    @property
+    def connected(self) -> bool:
+        """Cho biết collection `legal_documents` đã gắn MongoDB hay chưa."""
+        return self.collection is not None
+
+    async def attach_db(self, db: Any) -> None:
+        """Gắn collection `legal_documents` và tự động khởi tạo 5 trang tiếng Việt mặc định nếu thiếu."""
+        self.collection = db["legal_documents"]
+        try:
+            for key in LEGAL_DOC_KEYS:
+                existing = await self.collection.find_one({"_id": key})
+                if existing is None:
+                    default_doc = build_default_legal_document(key)
+                    await self.collection.replace_one({"_id": key}, default_doc, upsert=True)
+            # Giải phóng hoàn toàn bản dự phòng RAM ngay khi đã gắn MongoDB
+            self._offline_fallback.clear()
+        except Exception as exc:
+            log.warning("Lỗi khởi tạo collection legal_documents trên MongoDB: %s", exc)
+
+    async def get_document(self, doc_key: str) -> dict[str, Any]:
+        """Đọc nội dung Rich-Text của 1 trang pháp lý theo yêu cầu trực tiếp từ MongoDB (không lưu đệm HTML trong RAM)."""
+        key = str(doc_key or "").strip().lower()
+        if key not in LEGAL_DOC_KEYS:
+            raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
+
+        default_doc = build_default_legal_document(key)
+        raw: Optional[dict[str, Any]] = None
+        if self.connected:
+            try:
+                raw = await self.collection.find_one({"_id": key})
+                if raw is None:
+                    await self.collection.replace_one({"_id": key}, default_doc, upsert=True)
+                    raw = default_doc
+            except Exception as exc:
+                log.warning("Lỗi đọc tài liệu pháp lý '%s' từ MongoDB: %s", key, exc)
+                raw = default_doc
+        else:
+            raw = self._offline_fallback.get(key) or default_doc
+
+        raw_body = str(raw.get("body") or default_doc["body"])
+        return {
+            "key": key,
+            "label": LEGAL_DOC_LABELS[key],
+            "title": str(raw.get("title") or default_doc["title"]).strip(),
+            "subtitle": str(raw.get("subtitle") if raw.get("subtitle") is not None else default_doc["subtitle"]).strip(),
+            "body": sanitize_legal_html(raw_body),
+            "updated_at": str(raw.get("updated_at") or default_doc["updated_at"]),
+            "updated_by": str(raw.get("updated_by") or "system-default"),
+        }
+
+    async def save_document(
+        self,
+        *,
+        doc_key: str,
+        title: str,
+        subtitle: str,
+        body_html: str,
+        updated_by: str,
+        updated_at: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Làm sạch HTML bằng allowlist và ghi thẳng xuống MongoDB `legal_documents`."""
+        key = str(doc_key or "").strip().lower()
+        if key not in LEGAL_DOC_KEYS:
+            raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
+
+        now_iso = updated_at or datetime.now(timezone.utc).isoformat()
+        clean_html = sanitize_legal_html(body_html)
+        doc = {
+            "_id": key,
+            "key": key,
+            "label": LEGAL_DOC_LABELS[key],
+            "title": str(title).strip()[:160],
+            "subtitle": str(subtitle).strip()[:240],
+            "body": clean_html,
+            "updated_at": now_iso,
+            "updated_by": str(updated_by or "dashboard")[:64],
+        }
+        if self.connected:
+            await self.collection.replace_one({"_id": key}, doc, upsert=True)
+        else:
+            self._offline_fallback[key] = dict(doc)
+        return doc
 
 
 class TosAcceptanceRepository:
@@ -120,7 +214,7 @@ class TosAcceptanceRepository:
         cursor: Optional[str] = None,
         search: str = "",
     ) -> dict[str, Any]:
-        """Truy vấn danh sách chấp thuận ToS có phân trang theo cursor (dựa trên offset/timestamp an toàn) và tìm kiếm."""
+        """Truy vấn danh sách chấp thuận ToS có phân trang theo cursor và tìm kiếm."""
         safe_limit = max(1, min(50, int(limit or 15)))
         query_text = " ".join(str(search or "").split()).strip()
         cursor_offset = 0

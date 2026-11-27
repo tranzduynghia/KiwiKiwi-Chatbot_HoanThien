@@ -1,100 +1,100 @@
-"""Dịch vụ nghiệp vụ CMS Pháp lý / ToS và quản lý Cổng đồng thuận có phiên bản."""
+"""Dịch vụ nghiệp vụ CMS Pháp lý 5 trang (đọc theo yêu cầu từ MongoDB, không đệm HTML trong RAM) & Cổng đồng thuận ToS."""
 from __future__ import annotations
 
-import copy
 from datetime import datetime, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from app.core.timezone import format_exact_timestamp, parse_utc_datetime
+from app.features.audit.service import AuditService
 from app.features.config.repository import ConfigRepository
 from app.features.config.service import ConfigService
 from app.features.legal.defaults import (
     DEFAULT_ACTIVE_TOS_VERSION,
-    DEFAULT_LEGAL_DOCS,
     LEGAL_DOC_KEYS,
     LEGAL_DOC_LABELS,
-    build_default_legal_config,
     validate_tos_version,
 )
-from app.features.legal.repository import TosAcceptanceRepository
+from app.features.legal.repository import LegalDocumentRepository, TosAcceptanceRepository
+from app.features.legal.sanitizer import sanitize_legal_html
 
 
 class LegalService:
-    """Quản lý 4 tài liệu pháp lý, phiên bản `active_tos_version` và trạng thái đồng thuận của người dùng."""
+    """Giữ duy nhất `active_tos_version` và cache đồng thuận trong RAM; đọc HTML 5 trang pháp lý theo yêu cầu từ MongoDB."""
 
     def __init__(
         self,
         *,
         config_repo: ConfigRepository,
         config_service: ConfigService,
+        document_repo: LegalDocumentRepository,
         acceptance_repo: TosAcceptanceRepository,
+        audit_service: Optional[AuditService] = None,
     ) -> None:
         self._config_repo = config_repo
         self._config_service = config_service
+        self._documents = document_repo
         self._acceptances = acceptance_repo
+        self._audit = audit_service
 
-    def _legal_cfg(self) -> dict[str, Any]:
-        """Đọc nhánh `legal` từ cấu hình RAM (tự động bù giá trị mặc định nếu thiếu tài liệu)."""
+    def _legal_meta(self) -> dict[str, str]:
+        """Đọc siêu dữ liệu gọn nhẹ (`active_tos_version`, `tos_updated_at`) từ `bot_config` RAM."""
         cfg = self._config_repo.current_config
         raw_legal = cfg.get("legal") if isinstance(cfg.get("legal"), dict) else {}
-        defaults = build_default_legal_config()
-        raw_docs = raw_legal.get("docs") if isinstance(raw_legal.get("docs"), dict) else {}
-
-        merged_docs: dict[str, dict[str, str]] = {}
-        for key in LEGAL_DOC_KEYS:
-            default_doc = defaults["docs"][key]
-            stored = raw_docs.get(key) if isinstance(raw_docs.get(key), dict) else {}
-            merged_docs[key] = {
-                "key": key,
-                "label": LEGAL_DOC_LABELS[key],
-                "title": str(stored.get("title") or default_doc["title"]).strip(),
-                "subtitle": str(stored.get("subtitle") if stored.get("subtitle") is not None else default_doc["subtitle"]).strip(),
-                "body": str(stored.get("body") or default_doc["body"]).strip(),
-            }
-
         version = str(raw_legal.get("active_tos_version") or DEFAULT_ACTIVE_TOS_VERSION).strip() or DEFAULT_ACTIVE_TOS_VERSION
-        updated_at = str(raw_legal.get("tos_updated_at") or defaults["tos_updated_at"]).strip()
+        updated_at = str(raw_legal.get("tos_updated_at") or datetime.now(timezone.utc).isoformat()).strip()
         return {
             "active_tos_version": version,
             "tos_updated_at": updated_at,
-            "docs": merged_docs,
         }
 
     @property
     def active_tos_version(self) -> str:
-        """Phiên bản Điều khoản hiện hành đang áp dụng trên toàn hệ thống."""
-        return self._legal_cfg()["active_tos_version"]
+        """Phiên bản Điều khoản hiện hành (chuỗi ngắn lưu đệm trong RAM)."""
+        return self._legal_meta()["active_tos_version"]
 
     @property
     def tos_updated_at(self) -> str:
         """Mốc thời gian UTC cập nhật nội dung pháp lý gần nhất."""
-        return self._legal_cfg()["tos_updated_at"]
+        return self._legal_meta()["tos_updated_at"]
 
-    def get_all_docs(self, tz_info: Optional[ZoneInfo] = None) -> dict[str, Any]:
-        """Trả về toàn bộ 4 tài liệu pháp lý kèm phiên bản và thời gian cập nhật."""
-        legal = self._legal_cfg()
-        formatted_updated = format_exact_timestamp(legal["tos_updated_at"], tz_info) if tz_info else legal["tos_updated_at"]
+    async def get_doc(self, doc_key: str, tz_info: Optional[ZoneInfo] = None) -> dict[str, Any]:
+        """Truy vấn theo yêu cầu 1 trang pháp lý từ MongoDB `legal_documents` (không đệm toàn bộ HTML trong RAM)."""
+        meta = self._legal_meta()
+        doc = await self._documents.get_document(doc_key)
+        effective_updated = doc.get("updated_at") or meta["tos_updated_at"]
         return {
-            "active_tos_version": legal["active_tos_version"],
-            "tos_updated_at": legal["tos_updated_at"],
-            "tos_updated_at_formatted": formatted_updated,
-            "docs": legal["docs"],
+            **doc,
+            "active_tos_version": meta["active_tos_version"],
+            "tos_updated_at": effective_updated,
+            "tos_updated_at_formatted": (
+                format_exact_timestamp(effective_updated, tz_info) if tz_info else effective_updated
+            ),
         }
 
-    def get_doc(self, doc_key: str, tz_info: Optional[ZoneInfo] = None) -> dict[str, Any]:
-        """Lấy một tài liệu pháp lý cụ thể (`legal` | `terms` | `policies` | `guidelines`)."""
-        key = str(doc_key or "").strip().lower()
-        if key not in LEGAL_DOC_KEYS:
-            raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
-        legal = self._legal_cfg()
-        doc = copy.deepcopy(legal["docs"][key])
-        doc["active_tos_version"] = legal["active_tos_version"]
-        doc["tos_updated_at"] = legal["tos_updated_at"]
-        doc["tos_updated_at_formatted"] = (
-            format_exact_timestamp(legal["tos_updated_at"], tz_info) if tz_info else legal["tos_updated_at"]
-        )
-        return doc
+    async def get_cms_overview(
+        self,
+        *,
+        doc_key: str = "toslinks",
+        tz_info: Optional[ZoneInfo] = None,
+    ) -> dict[str, Any]:
+        """Tải danh sách siêu dữ liệu 5 trang + nội dung HTML theo yêu cầu của đúng 1 trang đang chọn sửa."""
+        meta = self._legal_meta()
+        safe_key = doc_key if doc_key in LEGAL_DOC_KEYS else "toslinks"
+        active_doc = await self.get_doc(safe_key, tz_info=tz_info)
+        pages_meta = [
+            {"key": k, "path": f"/{k}", "label": LEGAL_DOC_LABELS[k]}
+            for k in LEGAL_DOC_KEYS
+        ]
+        return {
+            "active_tos_version": meta["active_tos_version"],
+            "tos_updated_at": meta["tos_updated_at"],
+            "tos_updated_at_formatted": (
+                format_exact_timestamp(meta["tos_updated_at"], tz_info) if tz_info else meta["tos_updated_at"]
+            ),
+            "pages": pages_meta,
+            "doc": active_doc,
+        }
 
     async def update_document(
         self,
@@ -109,54 +109,78 @@ class LegalService:
         actor_meta: Optional[dict[str, Any]] = None,
         client_changes: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Cập nhật nội dung một tài liệu pháp lý và/hoặc nâng phiên bản ToS, lưu MongoDB & ghi Audit Log."""
+        """Làm sạch HTML bằng stdlib `html.parser`, lưu `legal_documents`, cập nhật `active_tos_version` và ghi Audit Log."""
         key = str(doc_key or "").strip().lower()
         if key not in LEGAL_DOC_KEYS:
             raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
 
         clean_title = " ".join(str(title or "").split()).strip()[:160]
         clean_subtitle = " ".join(str(subtitle or "").split()).strip()[:240]
-        clean_body = str(body or "").replace("\r\n", "\n").strip()[:24000]
+        clean_body = sanitize_legal_html(body)
         if len(clean_title) < 2:
             raise ValueError("Tiêu đề tài liệu phải có ít nhất 2 ký tự.")
         if len(clean_body) < 10:
-            raise ValueError("Nội dung tài liệu phải có ít nhất 10 ký tự.")
+            raise ValueError("Nội dung tài liệu sau khi lọc an toàn phải có ít nhất 10 ký tự.")
 
-        current_legal = self._legal_cfg()
+        meta = self._legal_meta()
+        old_doc = await self._documents.get_document(key)
         next_version = (
             validate_tos_version(active_tos_version)
             if active_tos_version is not None and str(active_tos_version).strip()
-            else current_legal["active_tos_version"]
+            else meta["active_tos_version"]
         )
-
         now_iso = datetime.now(timezone.utc).isoformat()
-        updated_docs = {
-            k: {
-                "title": current_legal["docs"][k]["title"],
-                "subtitle": current_legal["docs"][k]["subtitle"],
-                "body": current_legal["docs"][k]["body"],
-            }
-            for k in LEGAL_DOC_KEYS
-        }
-        updated_docs[key] = {
-            "title": clean_title,
-            "subtitle": clean_subtitle,
-            "body": clean_body,
-        }
 
-        version_bumped = next_version != current_legal["active_tos_version"]
-        summary = (
-            f"Cập nhật {LEGAL_DOC_LABELS[key]} và nâng phiên bản ToS {current_legal['active_tos_version']} → {next_version}"
-            if version_bumped
-            else f"Cập nhật nội dung {LEGAL_DOC_LABELS[key]} (phiên bản {next_version})"
+        # 1) Lưu nội dung Rich-Text đã làm sạch xuống collection riêng `legal_documents` (không phình bot_config RAM)
+        await self._documents.save_document(
+            doc_key=key,
+            title=clean_title,
+            subtitle=clean_subtitle,
+            body_html=clean_body,
+            updated_by=actor,
+            updated_at=now_iso,
         )
+
+        # 2) Cập nhật siêu dữ liệu gọn nhẹ `legal.active_tos_version` + `legal.tos_updated_at` trong `bot_config`
+        version_bumped = next_version != meta["active_tos_version"]
+        summary = (
+            f"Cập nhật {LEGAL_DOC_LABELS[key]} và nâng phiên bản ToS {meta['active_tos_version']} → {next_version}"
+            if version_bumped
+            else f"Cập nhật nội dung Rich-Text {LEGAL_DOC_LABELS[key]} (phiên bản {next_version})"
+        )
+
+        # Tổng hợp diff cụ thể cho Audit Log
+        audit_changes: list[dict[str, Any]] = []
+        if version_bumped:
+            audit_changes.append({
+                "field": "legal.active_tos_version",
+                "before": meta["active_tos_version"],
+                "after": next_version,
+            })
+        if old_doc.get("title") != clean_title:
+            audit_changes.append({
+                "field": f"legal.docs.{key}.title",
+                "before": old_doc.get("title"),
+                "after": clean_title,
+            })
+        if old_doc.get("subtitle") != clean_subtitle:
+            audit_changes.append({
+                "field": f"legal.docs.{key}.subtitle",
+                "before": old_doc.get("subtitle"),
+                "after": clean_subtitle,
+            })
+        if old_doc.get("body") != clean_body:
+            audit_changes.append({
+                "field": f"legal.docs.{key}.body",
+                "before": f"{len(str(old_doc.get('body') or ''))} ký tự HTML",
+                "after": f"{len(clean_body)} ký tự HTML",
+            })
 
         await self._config_service.update_config(
             {
                 "legal": {
                     "active_tos_version": next_version,
                     "tos_updated_at": now_iso,
-                    "docs": updated_docs,
                 }
             },
             updated_by=actor,
@@ -165,8 +189,24 @@ class LegalService:
             section="legal",
             summary=summary,
             client_changes=client_changes,
+            record_audit=False if self._audit is not None else True,
         )
-        return self.get_all_docs()
+
+        if self._audit is not None:
+            await self._audit.record(
+                actor=actor,
+                actor_type=actor_type,
+                actor_meta=actor_meta,
+                action="legal_cms_update",
+                section="legal",
+                summary=summary,
+                changes=audit_changes,
+                timestamp=now_iso,
+                source="Dashboard Legal CMS",
+                flush=True,
+            )
+
+        return await self.get_cms_overview(doc_key=key)
 
     async def get_user_consent_status(self, user_id: str | int) -> dict[str, Any]:
         """Kiểm tra trạng thái đồng thuận của người dùng so với `active_tos_version` hiện hành."""

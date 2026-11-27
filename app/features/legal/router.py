@@ -1,4 +1,4 @@
-"""Router API quản trị nội dung Pháp lý / ToS, danh sách chấp thuận và cổng đồng thuận Web."""
+"""Router API quản trị nội dung Pháp lý Rich-Text 5 trang (đọc theo yêu cầu), danh sách chấp thuận ToS và Web Consent Gate."""
 from __future__ import annotations
 
 from typing import Any, Optional
@@ -26,17 +26,21 @@ def create_legal_router(
     legal_service: LegalService,
     auth_deps: AuthDependencies,
 ) -> APIRouter:
-    """Tạo các endpoint `/api/legal*` phục vụ tab Điều khoản & ToS và Web Consent Gate."""
+    """Tạo các endpoint `/api/legal*` phục vụ tab Điều khoản & Pháp lý và Web Consent Gate."""
     router = APIRouter(prefix="/api/legal", tags=["legal"])
 
     @router.get("")
     async def api_get_legal(
         request: Request,
+        doc_key: str = Query(default="toslinks"),
         tz: Optional[str] = Query(default=None),
         user: dict[str, Any] = Depends(auth_deps.require_user),
     ):
         tz_name, tz_info = resolve_request_timezone(request.headers, fallback_tz=tz)
-        data = legal_service.get_all_docs(tz_info=tz_info)
+        try:
+            data = await legal_service.get_cms_overview(doc_key=doc_key, tz_info=tz_info)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return {
             **data,
             "timezone": tz_name,
@@ -53,7 +57,7 @@ def create_legal_router(
         tz_name, tz_info = resolve_request_timezone(request.headers)
         actor, actor_type = auth_deps.actor_label(admin)
         try:
-            updated = await legal_service.update_document(
+            await legal_service.update_document(
                 doc_key=payload.doc_key,
                 title=payload.title,
                 subtitle=payload.subtitle,
@@ -66,11 +70,10 @@ def create_legal_router(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        data = legal_service.get_all_docs(tz_info=tz_info)
+        data = await legal_service.get_cms_overview(doc_key=payload.doc_key, tz_info=tz_info)
         return {
             "ok": True,
             **data,
-            "active_tos_version": updated["active_tos_version"],
             "timezone": tz_name,
             "timezone_label": format_timezone_badge(tz_name, tz_info),
         }

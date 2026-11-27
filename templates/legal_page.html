@@ -78,19 +78,18 @@
         {% endif %}
       </div>
 
-      <div class="space-y-4 text-sm leading-7">
-        {% for para in paragraphs %}
-        <p class="whitespace-pre-line text-[var(--text-primary)]">{{ para }}</p>
-        {% endfor %}
+      <div class="ox-legal-prose text-sm leading-7">
+        {{ doc.body | safe }}
       </div>
     </article>
 
     <footer class="text-center text-xs text-[var(--text-secondary)] pt-2 pb-6 space-y-2">
       <div class="flex flex-wrap items-center justify-center gap-4">
+        <a href="/toslinks" class="hover:underline">Danh mục Điều khoản</a>
         <a href="/legal" class="hover:underline">Pháp lý</a>
-        <a href="/terms" class="hover:underline">Điều khoản Dịch vụ</a>
-        <a href="/policies" class="hover:underline">Chính sách Quyền riêng tư</a>
-        <a href="/guidelines" class="hover:underline">Nguyên tắc Cộng đồng</a>
+        <a href="/terms" class="hover:underline">Điều khoản sử dụng</a>
+        <a href="/policies" class="hover:underline">Chính sách bảo mật</a>
+        <a href="/guidelines" class="hover:underline">Chính sách cộng đồng</a>
       </div>
       <p>&copy; {{ bot_display_name or 'KiwiKiwi' }} Bot · Phiên bản Điều khoản {{ doc.active_tos_version }}</p>
     </footer>

@@ -100,6 +100,7 @@ class ConfigService:
         section: str = "config",
         summary: str = "Cập nhật cấu hình bot",
         client_changes: dict[str, dict[str, Any]] | None = None,
+        record_audit: bool = True,
     ) -> dict[str, Any]:
         """Lưu tạm trong RAM -> ghi Audit Log -> xả lên MongoDB Atlas -> kích hoạt callback."""
         current = await self.get_config(force=True)
@@ -119,7 +120,7 @@ class ConfigService:
 
         self._repository.stage_config(merged)
 
-        if changes:
+        if record_audit and changes:
             await self._audit.record(
                 actor=updated_by,
                 actor_type=actor_type,
