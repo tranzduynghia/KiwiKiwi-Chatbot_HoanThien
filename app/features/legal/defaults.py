@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import copy
 import re
-from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 LEGAL_DOC_KEYS = ("toslinks", "legal", "terms", "policies", "guidelines")
 DEFAULT_ACTIVE_TOS_VERSION = "v1.0"
@@ -100,16 +99,19 @@ DEFAULT_LEGAL_DOCS: dict[str, dict[str, str]] = {
 }
 
 
+DEFAULT_TOS_UPDATED_AT: Optional[str] = None
+
+
 def build_default_legal_config() -> dict[str, Any]:
-    """Khởi tạo siêu dữ liệu nhánh `legal` gọn nhẹ trong `bot_config` (chỉ giữ phiên bản & mốc cập nhật, KHÔNG đệm toàn bộ HTML trong RAM)."""
+    """Khởi tạo siêu dữ liệu nhánh `legal` gọn nhẹ trong `bot_config` (chỉ giữ phiên bản & mốc cập nhật tĩnh, KHÔNG sinh timestamp động khi đọc)."""
     return {
         "active_tos_version": DEFAULT_ACTIVE_TOS_VERSION,
-        "tos_updated_at": datetime.now(timezone.utc).isoformat(),
+        "tos_updated_at": DEFAULT_TOS_UPDATED_AT,
     }
 
 
 def build_default_legal_document(doc_key: str) -> dict[str, Any]:
-    """Trả về bản sao nội dung mặc định của một trong 5 trang pháp lý."""
+    """Trả về bản sao nội dung mặc định của một trong 5 trang pháp lý (mốc cập nhật tĩnh, chỉ đổi khi Admin lưu)."""
     key = str(doc_key or "").strip().lower()
     if key not in DEFAULT_LEGAL_DOCS:
         raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
@@ -121,7 +123,7 @@ def build_default_legal_document(doc_key: str) -> dict[str, Any]:
         "title": base["title"],
         "subtitle": base["subtitle"],
         "body": base["body"],
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": DEFAULT_TOS_UPDATED_AT,
         "updated_by": "system-default",
     }
 

@@ -354,6 +354,8 @@ def build_container(
         maintenance_gate=maintenance_gate,
     )
     config_service.set_external_sync_hook(atlas_config_watcher.poll_once)
+    config_service.on_update(atlas_config_watcher.sync_snapshot)
+    legal_service.set_atlas_watcher(atlas_config_watcher)
 
     monitoring_service = MonitoringService(
         config_repo=config_repo,

@@ -147,6 +147,14 @@ class AtlasConfigWatcher:
         """Gắn callback áp dụng nóng Presence Discord khi tài liệu `bot_config` trên Atlas đổi trường `presence.*`."""
         self._apply_presence_fn = fn
 
+    def sync_snapshot(self, config_doc: Optional[dict[str, Any]] = None) -> str:
+        """Đồng bộ ngay mã băm cấu hình trong RAM sau một lượt lưu chủ động của Admin để tránh ghi nhầm `MongoDB Atlas External Sync`."""
+        snapshot = config_doc if isinstance(config_doc, dict) else self._config_repo.current_config
+        self._last_hash = compute_config_hash(snapshot)
+        self._last_error = None
+        self._config_repo.mark_synced()
+        return self._last_hash
+
     def status_snapshot(self) -> dict[str, Any]:
         """Xuất trạng thái gọn nhẹ của bộ theo dõi đồng bộ cấu hình trực tiếp từ Atlas."""
         return {

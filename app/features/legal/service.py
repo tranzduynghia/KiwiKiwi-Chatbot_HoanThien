@@ -30,19 +30,26 @@ class LegalService:
         document_repo: LegalDocumentRepository,
         acceptance_repo: TosAcceptanceRepository,
         audit_service: Optional[AuditService] = None,
+        atlas_watcher: Optional[Any] = None,
     ) -> None:
         self._config_repo = config_repo
         self._config_service = config_service
         self._documents = document_repo
         self._acceptances = acceptance_repo
         self._audit = audit_service
+        self._atlas_watcher = atlas_watcher
 
-    def _legal_meta(self) -> dict[str, str]:
-        """Đọc siêu dữ liệu gọn nhẹ (`active_tos_version`, `tos_updated_at`) từ `bot_config` RAM."""
+    def set_atlas_watcher(self, watcher: Any) -> None:
+        """Gắn `AtlasConfigWatcher` để đồng bộ ngay ảnh chụp RAM sau mỗi lần Admin lưu tài liệu pháp lý."""
+        self._atlas_watcher = watcher
+
+    def _legal_meta(self) -> dict[str, Optional[str]]:
+        """Đọc thuần túy siêu dữ liệu (`active_tos_version`, `tos_updated_at`) từ `bot_config` RAM (không sinh timestamp động)."""
         cfg = self._config_repo.current_config
         raw_legal = cfg.get("legal") if isinstance(cfg.get("legal"), dict) else {}
         version = str(raw_legal.get("active_tos_version") or DEFAULT_ACTIVE_TOS_VERSION).strip() or DEFAULT_ACTIVE_TOS_VERSION
-        updated_at = str(raw_legal.get("tos_updated_at") or datetime.now(timezone.utc).isoformat()).strip()
+        raw_updated = raw_legal.get("tos_updated_at")
+        updated_at = str(raw_updated).strip() if raw_updated else None
         return {
             "active_tos_version": version,
             "tos_updated_at": updated_at,
@@ -51,25 +58,28 @@ class LegalService:
     @property
     def active_tos_version(self) -> str:
         """Phiên bản Điều khoản hiện hành (chuỗi ngắn lưu đệm trong RAM)."""
-        return self._legal_meta()["active_tos_version"]
+        return str(self._legal_meta()["active_tos_version"] or DEFAULT_ACTIVE_TOS_VERSION)
 
     @property
-    def tos_updated_at(self) -> str:
-        """Mốc thời gian UTC cập nhật nội dung pháp lý gần nhất."""
+    def tos_updated_at(self) -> Optional[str]:
+        """Mốc thời gian UTC cập nhật nội dung pháp lý gần nhất (chỉ đổi khi Admin lưu)."""
         return self._legal_meta()["tos_updated_at"]
 
     async def get_doc(self, doc_key: str, tz_info: Optional[ZoneInfo] = None) -> dict[str, Any]:
-        """Truy vấn theo yêu cầu 1 trang pháp lý từ MongoDB `legal_documents` (không đệm toàn bộ HTML trong RAM)."""
+        """Truy vấn theo yêu cầu 1 trang pháp lý từ MongoDB `legal_documents` (100% read-only, không đệm HTML trong RAM)."""
         meta = self._legal_meta()
         doc = await self._documents.get_document(doc_key)
         effective_updated = doc.get("updated_at") or meta["tos_updated_at"]
+        formatted_updated = (
+            (format_exact_timestamp(effective_updated, tz_info) if tz_info else effective_updated)
+            if effective_updated
+            else "—"
+        )
         return {
             **doc,
             "active_tos_version": meta["active_tos_version"],
             "tos_updated_at": effective_updated,
-            "tos_updated_at_formatted": (
-                format_exact_timestamp(effective_updated, tz_info) if tz_info else effective_updated
-            ),
+            "tos_updated_at_formatted": formatted_updated,
         }
 
     async def get_cms_overview(
@@ -86,12 +96,16 @@ class LegalService:
             {"key": k, "path": f"/{k}", "label": LEGAL_DOC_LABELS[k]}
             for k in LEGAL_DOC_KEYS
         ]
+        meta_updated = meta["tos_updated_at"]
+        formatted_meta_updated = (
+            (format_exact_timestamp(meta_updated, tz_info) if tz_info else meta_updated)
+            if meta_updated
+            else "—"
+        )
         return {
             "active_tos_version": meta["active_tos_version"],
-            "tos_updated_at": meta["tos_updated_at"],
-            "tos_updated_at_formatted": (
-                format_exact_timestamp(meta["tos_updated_at"], tz_info) if tz_info else meta["tos_updated_at"]
-            ),
+            "tos_updated_at": meta_updated,
+            "tos_updated_at_formatted": formatted_meta_updated,
             "pages": pages_meta,
             "doc": active_doc,
         }
@@ -191,6 +205,10 @@ class LegalService:
             client_changes=client_changes,
             record_audit=False if self._audit is not None else True,
         )
+
+        # Đồng bộ ngay ảnh chụp RAM của AtlasConfigWatcher để không ghi nhầm lượt lưu Admin thành External Sync
+        if self._atlas_watcher is not None:
+            self._atlas_watcher.sync_snapshot()
 
         if self._audit is not None:
             await self._audit.record(

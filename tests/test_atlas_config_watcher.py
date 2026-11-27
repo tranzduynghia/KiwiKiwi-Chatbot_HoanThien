@@ -271,3 +271,67 @@ async def test_atlas_watcher_background_loop_runs_and_stops_cleanly(fake_db, fak
             await task
         except asyncio.CancelledError:
             pass
+
+
+@pytest.mark.asyncio
+async def test_atlas_watcher_polls_never_mutate_tos_updated_at_or_log_external_sync(fake_db, fake_gemini):
+    """Nhiều chu kỳ poll `atlas_watcher` & đọc tài liệu pháp lý KHÔNG bao giờ tự sửa `tos_updated_at` hay ghi nhầm External Sync."""
+    settings = AppSettings(
+        discord_token="test-token",
+        gemini_api_key="test-key",
+        session_secret="test-secret-watcher-tos-readonly",
+    )
+    container = build_container(settings, gemini_client=fake_gemini, reserve_buffer_bytes=16 * 1024)
+
+    # 1) Mô phỏng tài liệu `bot_config` cũ trên MongoDB Atlas chưa có nhánh `legal` / `tos_updated_at`
+    await fake_db["bot_config"].replace_one(
+        {"_id": "global"},
+        {"_id": "global", "ask": {"user_cooldown": 3.0}},
+        upsert=True,
+    )
+    await container.sync_coordinator.attach_db(fake_db)
+    await container.legal_doc_repo.attach_db(fake_db)
+
+    watcher = container.atlas_config_watcher
+    before_doc = await fake_db["bot_config"].find_one({"_id": "global"})
+    assert before_doc is not None
+    assert (before_doc.get("legal") or {}).get("tos_updated_at") is None
+
+    # Chạy liên tiếp 5 chu kỳ poll + đọc các getter pháp lý -> không ghi DB, không làm bẩn sync queue, 0 External Sync
+    for _ in range(5):
+        result = await watcher.poll_once()
+        assert result["changed"] is False
+        await container.legal_service.get_doc("terms")
+        await container.legal_service.get_cms_overview(doc_key="toslinks")
+        await asyncio.sleep(0.01)
+
+    after_doc = await fake_db["bot_config"].find_one({"_id": "global"})
+    assert after_doc == before_doc
+    assert container.sync_coordinator.pending_count == 0
+    audit_logs = await container.audit_service.list_logs(limit=20)
+    assert not [entry for entry in audit_logs if entry.get("source") == ATLAS_EXTERNAL_SYNC_SOURCE]
+
+    # 2) Khi Admin lưu tường minh qua LegalService -> `tos_updated_at` mới được cập nhật và watcher đồng bộ ngay snapshot
+    await container.legal_service.update_document(
+        doc_key="terms",
+        title="Điều khoản sử dụng cập nhật",
+        subtitle="Bản mới",
+        body="<h2>Điều 1</h2><p>Nội dung điều khoản đã được quản trị viên cập nhật tường minh.</p>",
+        active_tos_version="v1.1",
+        actor="admin",
+    )
+    saved_doc = await fake_db["bot_config"].find_one({"_id": "global"})
+    saved_ts = (saved_doc.get("legal") or {}).get("tos_updated_at")
+    assert isinstance(saved_ts, str) and len(saved_ts) > 10
+
+    # Các chu kỳ poll kế tiếp sau khi Admin lưu KHÔNG được sửa `tos_updated_at` và KHÔNG ghi `MongoDB Atlas External Sync`
+    for _ in range(5):
+        result = await watcher.poll_once()
+        assert result["changed"] is False
+        await asyncio.sleep(0.01)
+
+    final_doc = await fake_db["bot_config"].find_one({"_id": "global"})
+    assert (final_doc.get("legal") or {}).get("tos_updated_at") == saved_ts
+    final_logs = await container.audit_service.list_logs(limit=20)
+    assert not [entry for entry in final_logs if entry.get("source") == ATLAS_EXTERNAL_SYNC_SOURCE]
+

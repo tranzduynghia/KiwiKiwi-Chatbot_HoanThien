@@ -29,21 +29,23 @@ class LegalDocumentRepository:
         return self.collection is not None
 
     async def attach_db(self, db: Any) -> None:
-        """Gắn collection `legal_documents` và tự động khởi tạo 5 trang tiếng Việt mặc định nếu thiếu."""
+        """Gắn collection `legal_documents` và chỉ chèn trang mặc định còn thiếu bằng `$setOnInsert` (không ghi đè bản hiện có)."""
         self.collection = db["legal_documents"]
         try:
             for key in LEGAL_DOC_KEYS:
-                existing = await self.collection.find_one({"_id": key})
-                if existing is None:
-                    default_doc = build_default_legal_document(key)
-                    await self.collection.replace_one({"_id": key}, default_doc, upsert=True)
+                default_doc = build_default_legal_document(key)
+                await self.collection.update_one(
+                    {"_id": key},
+                    {"$setOnInsert": default_doc},
+                    upsert=True,
+                )
             # Giải phóng hoàn toàn bản dự phòng RAM ngay khi đã gắn MongoDB
             self._offline_fallback.clear()
         except Exception as exc:
             log.warning("Lỗi khởi tạo collection legal_documents trên MongoDB: %s", exc)
 
     async def get_document(self, doc_key: str) -> dict[str, Any]:
-        """Đọc nội dung Rich-Text của 1 trang pháp lý theo yêu cầu trực tiếp từ MongoDB (không lưu đệm HTML trong RAM)."""
+        """Đọc thuần túy (100% read-only) nội dung Rich-Text của 1 trang pháp lý từ MongoDB `legal_documents`."""
         key = str(doc_key or "").strip().lower()
         if key not in LEGAL_DOC_KEYS:
             raise ValueError(f"Tài liệu pháp lý không hợp lệ: {doc_key}")
@@ -54,7 +56,6 @@ class LegalDocumentRepository:
             try:
                 raw = await self.collection.find_one({"_id": key})
                 if raw is None:
-                    await self.collection.replace_one({"_id": key}, default_doc, upsert=True)
                     raw = default_doc
             except Exception as exc:
                 log.warning("Lỗi đọc tài liệu pháp lý '%s' từ MongoDB: %s", key, exc)
@@ -63,13 +64,14 @@ class LegalDocumentRepository:
             raw = self._offline_fallback.get(key) or default_doc
 
         raw_body = str(raw.get("body") or default_doc["body"])
+        raw_updated = raw.get("updated_at")
         return {
             "key": key,
             "label": LEGAL_DOC_LABELS[key],
             "title": str(raw.get("title") or default_doc["title"]).strip(),
             "subtitle": str(raw.get("subtitle") if raw.get("subtitle") is not None else default_doc["subtitle"]).strip(),
             "body": sanitize_legal_html(raw_body),
-            "updated_at": str(raw.get("updated_at") or default_doc["updated_at"]),
+            "updated_at": str(raw_updated).strip() if raw_updated else None,
             "updated_by": str(raw.get("updated_by") or "system-default"),
         }
 
