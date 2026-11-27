@@ -577,7 +577,7 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     normalizeEditorDom(editor);
     saveSelection();
     updateCharCount();
-    scheduleToolbarSync();
+    updateToolbarFromSelection();
   }
 
   function applyBoldToggle() {
@@ -629,7 +629,7 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
     normalizeEditorDom(editor);
     saveSelection();
     updateCharCount();
-    scheduleToolbarSync();
+    updateToolbarFromSelection();
   }
 
   function updateToolbarFromSelection() {
@@ -1104,7 +1104,26 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
         updateCharCount();
       });
       editor.addEventListener("mouseup", scheduleToolbarSync);
-      editor.addEventListener("input", () => {
+      editor.addEventListener("input", (event) => {
+        if (!event.isComposing) {
+          const sel = window.getSelection();
+          if (sel && sel.rangeCount > 0) {
+            let cur = sel.getRangeAt(0).startContainer;
+            if (cur.nodeType === Node.TEXT_NODE) cur = cur.parentElement;
+            const heading = cur && cur.closest ? cur.closest("h1, h2, h3, h4") : null;
+            if (heading && editor.contains(heading) && !(heading.textContent || "").replace(/\u200B/g, "").trim()) {
+              const p = document.createElement("p");
+              p.appendChild(document.createElement("br"));
+              heading.replaceWith(p);
+              const nextRange = document.createRange();
+              nextRange.setStart(p, 0);
+              nextRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(nextRange);
+              saveSelection();
+            }
+          }
+        }
         updateCharCount();
         scheduleToolbarSync();
       });
@@ -1112,6 +1131,49 @@ export function createLegalCmsTabController({ isAdmin } = {}) {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
           event.preventDefault();
           applyBoldToggle();
+          return;
+        }
+        if (event.isComposing) return;
+        if (event.key === "Backspace" || event.key === "Delete") {
+          const sel = window.getSelection();
+          if (!sel || sel.rangeCount === 0) return;
+          const range = sel.getRangeAt(0);
+          let cur = range.startContainer;
+          if (cur.nodeType === Node.TEXT_NODE) cur = cur.parentElement;
+          const heading = cur && cur.closest ? cur.closest("h1, h2, h3, h4") : null;
+          if (!heading || !editor.contains(heading)) return;
+
+          const headingText = (heading.textContent || "").replace(/\u200B/g, "");
+          const isHeadingEmpty = headingText.trim().length === 0;
+          const selectsAllHeading = !range.collapsed && range.toString().length >= headingText.length;
+
+          let atStartOfHeading = false;
+          if (event.key === "Backspace" && range.collapsed) {
+            const probe = document.createRange();
+            probe.selectNodeContents(heading);
+            probe.setEnd(range.startContainer, range.startOffset);
+            atStartOfHeading = probe.toString().replace(/\u200B/g, "").length === 0;
+          }
+
+          if (isHeadingEmpty || selectsAllHeading || atStartOfHeading) {
+            event.preventDefault();
+            const p = document.createElement("p");
+            if (isHeadingEmpty || selectsAllHeading) {
+              p.appendChild(document.createElement("br"));
+            } else {
+              while (heading.firstChild) p.appendChild(heading.firstChild);
+            }
+            heading.replaceWith(p);
+            const nextRange = document.createRange();
+            nextRange.setStart(p, 0);
+            nextRange.collapse(true);
+            sel.removeAllRanges();
+            sel.addRange(nextRange);
+            normalizeEditorDom(editor);
+            saveSelection();
+            updateCharCount();
+            updateToolbarFromSelection();
+          }
         }
       });
     }
