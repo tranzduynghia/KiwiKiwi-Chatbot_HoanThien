@@ -74,6 +74,7 @@ class MaintenanceGate:
         self._monotonic = monotonic_fn
 
         self._bot_status: str = _normalize_status(config_repo.presence_cfg().get("status"))
+        self._last_config_status: str = self._bot_status
         self._last_block_audit_at: dict[str, float] = {}
         self._last_blacklist_audit_at: dict[str, float] = {}
         self._blocked_total: int = 0
@@ -100,7 +101,19 @@ class MaintenanceGate:
 
     @property
     def is_dnd(self) -> bool:
-        """Trả về `True` khi bot đang bật chế độ Không làm phiền (DND) — khóa bảo trì hệ thống."""
+        """Trả về `True` khi bot đang bật chế độ Không làm phiền (DND) — khóa bảo trì hệ thống.
+
+        Đọc trực tiếp `presence.status` hiện hành (nguồn duy nhất) rồi đồng bộ lại cờ RAM,
+        tránh cờ cũ khi cấu hình được đổi qua Dashboard, `/config` hoặc `atlas_watcher`.
+        """
+        try:
+            live = _normalize_status(self._config_repo.presence_cfg().get("status"))
+        except Exception:
+            return self._bot_status == "dnd"
+        if live != self._last_config_status:
+            # Cấu hình presence vừa đổi (Dashboard, /config, atlas_watcher) -> nhận ngay giá trị mới
+            self._last_config_status = live
+            self._bot_status = live
         return self._bot_status == "dnd"
 
     def sync_from_config(self, cfg_or_presence: Optional[dict[str, Any]] = None) -> str:
@@ -111,6 +124,7 @@ class MaintenanceGate:
             self._bot_status = _normalize_status(presence.get("status"))
         else:
             self._bot_status = _normalize_status(self._config_repo.presence_cfg().get("status"))
+        self._last_config_status = _normalize_status(self._config_repo.presence_cfg().get("status"))
         return self._bot_status
 
     def status_snapshot(self) -> dict[str, Any]:

@@ -82,7 +82,12 @@ class DndCommandTree(app_commands.CommandTree):
             if not allowed_dnd:
                 return False
         if self._tos_gate is not None:
-            return await self._tos_gate.check_interaction(interaction)
+            if not await self._tos_gate.check_interaction(interaction):
+                return False
+        try:
+            interaction.extras["gates_passed"] = True
+        except Exception:
+            pass
         return True
 
 
@@ -154,6 +159,7 @@ class AskBot(discord.Client):
             user_cooldowns=c.user_cooldowns,
             user_locks=c.user_locks,
             gemini_semaphore=c.gemini_semaphore,
+            maintenance_gate=getattr(c, "maintenance_gate", None),
         )
         sessions_mod.register_session_commands(
             self.tree,

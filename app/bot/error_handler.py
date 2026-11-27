@@ -27,7 +27,7 @@ def register_error_handler(tree: app_commands.CommandTree) -> None:
                 pass
             return
 
-        log.error("Lỗi lệnh: %r", error)
+        log.error("Lỗi lệnh: %r", error, exc_info=error)
         msg = "⚠️ Có lỗi khi xử lý lệnh, hãy thử lại."
         try:
             if interaction.response.is_done():

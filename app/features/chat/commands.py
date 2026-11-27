@@ -122,6 +122,17 @@ async def _send_reply(
         )
 
 
+async def _safe_followup(interaction: discord.Interaction, message: str) -> None:
+    """Luôn gửi thông báo lỗi ephemeral để thoát trạng thái `thinking...`; không bao giờ ném ngoại lệ."""
+    try:
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True, allowed_mentions=NO_MENTIONS)
+        else:
+            await interaction.response.send_message(message, ephemeral=True, allowed_mentions=NO_MENTIONS)
+    except Exception:
+        log.exception("Không gửi được thông báo lỗi ephemeral cho /ask")
+
+
 def register_chat_commands(
     tree: app_commands.CommandTree,
     *,
@@ -134,6 +145,7 @@ def register_chat_commands(
     user_cooldowns: UserCooldownTracker,
     user_locks: UserLockManager,
     gemini_semaphore: DynamicSemaphore,
+    maintenance_gate: Any = None,
 ) -> None:
     """Đăng ký lệnh `/ask` cùng autocomplete cho tùy chọn `model` lên cây lệnh Discord."""
 
@@ -155,7 +167,19 @@ def register_chat_commands(
         thinking_level: Optional[Literal["auto", "low", "medium", "high", "xhigh"]] = None,
         ocr: bool = False,
     ):
-        cfg = await config_repo.get_config()
+        # Cổng bảo trì: chặn người dùng thường NGAY TRƯỚC defer()/Gemini (cả phiên mới lẫn phiên đang tiếp diễn);
+        # bình thường `DndCommandTree.interaction_check` đã kiểm tra, đây là lớp phòng thủ khi cây lệnh bị nạp lại.
+        if maintenance_gate is not None and not interaction.extras.get("gates_passed"):
+            if not await maintenance_gate.check_interaction(interaction):
+                return
+
+        try:
+            cfg = await config_repo.get_config()
+        except Exception:
+            log.exception("Không đọc được cấu hình /ask")
+            return await interaction.response.send_message(
+                "⚠️ Có lỗi khi xử lý lệnh, hãy thử lại.", ephemeral=True
+            )
         acfg = cfg.get("ask", {})
         scfg = cfg.get("session", {})
 
@@ -191,7 +215,11 @@ def register_chat_commands(
             eff_thinking = None
 
         user_cooldowns.mark_used(uid)
-        await interaction.response.defer(thinking=True)
+        try:
+            await interaction.response.defer(thinking=True)
+        except Exception:
+            log.exception("Không defer được /ask")
+            return
         started = time.perf_counter()
         notes: list[str] = []
         features = ["chat"] + [
@@ -199,14 +227,22 @@ def register_chat_commands(
             for name, active in (("web", use_web), ("think", bool(eff_thinking)), ("ocr", ocr), ("file", bool(file)))
             if active
         ]
+        model_id = (model or "auto").strip() or "auto"
+        lock = None
 
-        # Chọn model hoặc chuỗi Auto
-        is_auto = not model or model.strip().lower() == "auto"
-        chain = model_registry.auto_chain() if is_auto else [model.strip()]
-        model_id = chain[0]
+        try:
+            # Chọn model hoặc chuỗi Auto
+            is_auto = not model or model.strip().lower() == "auto"
+            chain = model_registry.auto_chain() if is_auto else [model.strip()]
+            model_id = chain[0]
 
-        lock = user_locks.get(uid)
-        await lock.acquire()
+            lock = user_locks.get(uid)
+            await lock.acquire()
+        except Exception as exc:
+            log.exception("Lỗi khởi tạo /ask sau defer")
+            await _safe_followup(interaction, explain_error(exc))
+            return
+
         try:
             user_parts: list = []
             if file:
@@ -310,14 +346,22 @@ def register_chat_commands(
             usage_stats.record(model_id, True, features)
 
         except Exception as exc:
-            from app.core.security import redact_secrets
+            try:
+                from app.core.security import redact_secrets
 
-            usage_stats.record(model_id, False, features, redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200))
+                usage_stats.record(model_id, False, features, redact_secrets(f"{type(exc).__name__}: {exc}", max_len=200))
+            except Exception:
+                log.exception("Không ghi được thống kê lỗi /ask")
             if not isinstance(exc, UserError):
                 log.exception("Lỗi /ask")
-            await interaction.followup.send(explain_error(exc), allowed_mentions=NO_MENTIONS)
+            try:
+                message = explain_error(exc)
+            except Exception:
+                message = "⚠️ Có lỗi khi xử lý lệnh, hãy thử lại."
+            await _safe_followup(interaction, message)
         finally:
-            lock.release()
+            if lock is not None:
+                lock.release()
 
     @ask_command.autocomplete("model")
     async def model_autocomplete(_interaction: discord.Interaction, current: str):
