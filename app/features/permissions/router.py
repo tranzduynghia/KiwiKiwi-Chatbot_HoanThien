@@ -35,7 +35,7 @@ def create_permissions_router(
     router = APIRouter(tags=["permissions"])
 
     @router.get("/api/permissions/discord")
-    async def api_list_discord_perms(user: dict[str, Any] = Depends(auth_deps.require_step_up_auth)):
+    async def api_list_discord_perms(user: dict[str, Any] = Depends(auth_deps.require_section_unlocked("perms"))):
         return {
             "items": await permission_service.list_permissions(),
             "can_manage": bool(user.get("is_admin")),
@@ -44,7 +44,7 @@ def create_permissions_router(
     @router.post("/api/permissions/discord")
     async def api_upsert_discord_perm(
         payload: DiscordPermissionPayload,
-        admin: dict[str, Any] = Depends(auth_deps.require_admin_step_up),
+        admin: dict[str, Any] = Depends(auth_deps.require_admin_section_unlocked("perms")),
     ):
         try:
             actor, actor_type = auth_deps.actor_label(admin)
@@ -65,7 +65,7 @@ def create_permissions_router(
     @router.delete("/api/permissions/discord/{user_id}")
     async def api_delete_discord_perm(
         user_id: str,
-        admin: dict[str, Any] = Depends(auth_deps.require_admin_step_up),
+        admin: dict[str, Any] = Depends(auth_deps.require_admin_section_unlocked("perms")),
     ):
         if admin.get("auth_type") == "discord" and str(admin.get("discord_id")) == str(user_id):
             raise HTTPException(
@@ -90,7 +90,7 @@ def create_permissions_router(
         cursor: Optional[str] = Query(default=None),
         q: str = Query(default=""),
         tz: Optional[str] = Query(default=None),
-        user: dict[str, Any] = Depends(auth_deps.require_step_up_auth),
+        user: dict[str, Any] = Depends(auth_deps.require_section_unlocked("perms")),
     ):
         tz_name, tz_info = resolve_request_timezone(request.headers, fallback_tz=tz)
         if blacklist_service is None:
@@ -152,7 +152,7 @@ def create_permissions_router(
     async def api_delete_blacklist(
         discord_user_id: str,
         request: Request,
-        admin: dict[str, Any] = Depends(auth_deps.require_admin_step_up),
+        admin: dict[str, Any] = Depends(auth_deps.require_admin_section_unlocked("perms")),
     ):
         _validate_csrf_origin(request)
         if blacklist_service is None:

@@ -7,12 +7,20 @@
  */
 
 import { apiRequest, showToast } from "./api.js";
+import { closeModalAnimated, openModalAnimated } from "./modalTransition.js";
 
 const TAB_LABELS = {
   perms: "Phân quyền & Admin",
   sessions: "Tra cứu phiên chat",
   temp: "Trang nháp (/temp)",
   "temp-page": "Trang nháp (/temp)",
+  "dashboard-settings": "Cấu hình Dashboard",
+  legal: "Điều khoản & Pháp lý",
+  audit: "Nhật ký chỉnh sửa",
+  ask: "Cấu hình /ask",
+  prompt: "System Instruction",
+  models: "Model Gemini",
+  status: "Trạng thái Bot",
 };
 
 const ERROR_MESSAGES = {
@@ -29,11 +37,14 @@ const ERROR_MESSAGES = {
 export function createStepUpController({
   authType = "password",
   timeoutSeconds = 60,
+  lockedSections = ["perms", "sessions", "temp"],
   getActiveTab,
   onLockAll,
   onUnlockedTab,
 }) {
-  const idleTimeoutMs = Math.max(10, Number(timeoutSeconds) || 60) * 1000;
+  let currentTimeoutSec = Math.max(15, Math.min(300, Number(timeoutSeconds) || 60));
+  let idleTimeoutMs = currentTimeoutSec * 1000;
+  let lockedSet = new Set(Array.isArray(lockedSections) ? lockedSections.map((s) => String(s).toLowerCase()) : ["perms", "sessions", "temp"]);
   let unlocked = false;
   let lastActivityAt = 0;
   let countdownInterval = null;
@@ -45,8 +56,26 @@ export function createStepUpController({
   let modalCloseTimer = null;
   let modalCloseCleanup = null;
 
+  function isSectionLocked(tab) {
+    if (tab === "dashboard-settings" || tab === "temp-page") return true;
+    return lockedSet.has(String(tab || "").toLowerCase());
+  }
+
   function isSensitiveTab(tab) {
-    return tab === "perms" || tab === "sessions" || tab === "temp" || tab === "temp-page";
+    return isSectionLocked(tab);
+  }
+
+  function setTimeoutSeconds(sec) {
+    currentTimeoutSec = Math.max(15, Math.min(300, Number(sec) || 60));
+    idleTimeoutMs = currentTimeoutSec * 1000;
+    if (unlocked) {
+      lastActivityAt = Date.now();
+      updateCountdownBadges();
+    }
+  }
+
+  function setLockedSections(list) {
+    lockedSet = new Set(Array.isArray(list) ? list.map((s) => String(s).toLowerCase()) : ["perms", "sessions", "temp"]);
   }
 
   function getRemainingSeconds() {
@@ -63,7 +92,7 @@ export function createStepUpController({
   }
 
   function renderStepUpBars() {
-    const barIds = ["perms-stepup-bar", "sessions-stepup-bar", "temp-stepup-bar"];
+    const barIds = ["perms-stepup-bar", "sessions-stepup-bar", "temp-stepup-bar", "dashboard-settings-stepup-bar"];
     const remaining = getRemainingSeconds();
     barIds.forEach((id) => {
       const bar = document.getElementById(id);
@@ -296,7 +325,7 @@ export function createStepUpController({
     detachActivityListeners();
 
     // Xóa sạch thanh đếm ngược trên tất cả các tab nhạy cảm
-    ["perms-stepup-bar", "sessions-stepup-bar", "temp-stepup-bar"].forEach((id) => {
+    ["perms-stepup-bar", "sessions-stepup-bar", "temp-stepup-bar", "dashboard-settings-stepup-bar"].forEach((id) => {
       const bar = document.getElementById(id);
       if (bar) bar.replaceChildren();
     });
@@ -340,13 +369,13 @@ export function createStepUpController({
     }
   }
 
-  function unlock({ remainingSeconds = timeoutSeconds, targetTab = null, freshAuth = false } = {}) {
+  function unlock({ remainingSeconds = currentTimeoutSec, targetTab = null, freshAuth = false } = {}) {
     const now = Date.now();
-    const clampedRemaining = Math.max(1, Math.min(timeoutSeconds, Number(remainingSeconds) || timeoutSeconds));
+    const clampedRemaining = Math.max(1, Math.min(currentTimeoutSec, Number(remainingSeconds) || currentTimeoutSec));
     unlocked = true;
     lastActivityAt = freshAuth
       ? now
-      : now - Math.max(0, (timeoutSeconds - clampedRemaining) * 1000);
+      : now - Math.max(0, (currentTimeoutSec - clampedRemaining) * 1000);
     lastMouseMoveAt = 0;
     closeModal();
     attachActivityListeners();
@@ -472,6 +501,9 @@ export function createStepUpController({
 
   return {
     isUnlocked: () => unlocked,
+    isSectionLocked,
+    setTimeoutSeconds,
+    setLockedSections,
     openModal,
     closeModal,
     lock,

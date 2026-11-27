@@ -46,7 +46,7 @@ def create_audit_router(
         limit: Optional[str] = Query(default=str(DEFAULT_AUDIT_PAGE_LIMIT)),
         section: str = Query(default=""),
         category: str = Query(default=""),
-        _user: dict[str, Any] = Depends(auth_deps.require_user),
+        _user: dict[str, Any] = Depends(auth_deps.require_section_unlocked("audit")),
     ):
         safe_page = _parse_int_query(page, default=1, min_val=1, max_val=100_000)
         safe_limit = _parse_int_query(

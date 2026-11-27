@@ -61,3 +61,13 @@ class WarpActionPayload(BaseModel):
     warp_outbound_enabled: Optional[bool] = None
     warp_proxy_port: Optional[int] = Field(default=None, ge=1, le=65535)
     changes: Optional[dict[str, dict[str, Any]]] = None
+
+
+class DashboardSettingsPayload(BaseModel):
+    """Payload cấu hình tập trung bảo mật Step-up Auth & chu kỳ luân phiên Discord Presence."""
+
+    locked_sections: list[str] = Field(default_factory=lambda: ["perms", "sessions", "temp"])
+    step_up_cooldown_sec: int = Field(default=60, ge=15, le=300)
+    presence_interval_sec: int = Field(default=20, ge=15, le=3600)
+    presence_auto_rotate: Optional[bool] = None
+    changes: Optional[dict[str, dict[str, Any]]] = None

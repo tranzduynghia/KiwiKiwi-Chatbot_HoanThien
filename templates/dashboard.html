@@ -38,6 +38,7 @@
         {% include "partials/sessions_tab.html" %}
         {% include "partials/legal_cms_tab.html" %}
         {% include "partials/audit_tab.html" %}
+        {% include "partials/dashboard_settings_tab.html" %}
       </main>
     </div>
   </div>
@@ -62,7 +63,8 @@
       "isAdmin": (true if user.is_admin else false),
       "authType": (user.auth_type or "password"),
       "discordOauthEnabled": (true if discord_oauth_enabled else false),
-      "stepUpTimeoutSeconds": 60,
+      "stepUpTimeoutSeconds": (step_up_cooldown_sec or 60),
+      "lockedSections": (locked_sections or ["perms", "sessions", "temp"]),
       "activeTosVersion": active_tos_version or "v1.0"
     } | tojson }}
   </script>

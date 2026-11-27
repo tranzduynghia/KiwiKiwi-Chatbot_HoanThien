@@ -245,6 +245,11 @@ def build_default_config() -> dict[str, Any]:
         },
         "tunnel": build_env_tunnel_defaults(),
         "legal": _default_legal_config(),
+        "security": {
+            "locked_sections": ["perms", "sessions", "temp"],
+            "step_up_cooldown_sec": 60,
+            "presence_interval_sec": 20,
+        },
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "updated_by": "system-default",
     }

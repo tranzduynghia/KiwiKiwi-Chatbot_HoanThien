@@ -10,6 +10,7 @@ from app.core.security import sanitize_config_for_response
 from app.core.sync import WriteBehindSyncCoordinator
 from app.features.config.schemas import (
     AskConfigPayload,
+    DashboardSettingsPayload,
     PresenceConfigPayload,
     PromptConfigPayload,
     TunnelConfigPayload,
@@ -152,6 +153,81 @@ def create_config_router(
             "bot_status": clean_presence["status"],
             "maintenance_mode": clean_presence["status"] == "dnd",
             "config": _mask_config_secrets(updated),
+            "sync": sync_coordinator.sync_status(),
+        }
+
+    ALLOWED_LOCKABLE_SECTIONS = ("perms", "sessions", "temp", "legal", "audit", "ask", "prompt", "models", "status")
+
+    @router.get("/api/dashboard-settings")
+    async def api_get_dashboard_settings(
+        _user: dict[str, Any] = Depends(auth_deps.require_step_up_auth),
+    ):
+        """Đọc cấu hình bảo mật Step-up Auth & chu kỳ Presence (bắt buộc Step-up Auth cứng)."""
+        cfg = await config_service.get_config(force=False)
+        sec = cfg.get("security") if isinstance(cfg.get("security"), dict) else {}
+        pres = cfg.get("presence") if isinstance(cfg.get("presence"), dict) else {}
+        raw_locked = sec.get("locked_sections") if isinstance(sec.get("locked_sections"), list) else ["perms", "sessions", "temp"]
+        locked_sections = [s for s in raw_locked if s in ALLOWED_LOCKABLE_SECTIONS]
+        return {
+            "ok": True,
+            "locked_sections": locked_sections,
+            "step_up_cooldown_sec": max(15, min(300, int(sec.get("step_up_cooldown_sec", 60)))),
+            "presence_interval_sec": max(15, min(3600, int(sec.get("presence_interval_sec", 20)))),
+            "presence_auto_rotate": bool(pres.get("auto_rotate", False)),
+            "can_manage": bool(_user.get("is_admin")),
+        }
+
+    @router.put("/api/dashboard-settings")
+    async def api_update_dashboard_settings(
+        payload: DashboardSettingsPayload,
+        admin: dict[str, Any] = Depends(auth_deps.require_admin_step_up),
+    ):
+        """Cập nhật & áp dụng tức thì (live) danh sách mục khóa, cooldown Step-up và chu kỳ Presence."""
+        cleaned_sections = []
+        seen = set()
+        for item in payload.locked_sections:
+            key = str(item or "").strip().lower()
+            if key in ALLOWED_LOCKABLE_SECTIONS and key not in seen:
+                seen.add(key)
+                cleaned_sections.append(key)
+
+        cooldown_sec = max(15, min(300, int(payload.step_up_cooldown_sec)))
+        interval_sec = max(15, min(3600, int(payload.presence_interval_sec)))
+
+        patch: dict[str, Any] = {
+            "security": {
+                "locked_sections": cleaned_sections,
+                "step_up_cooldown_sec": cooldown_sec,
+                "presence_interval_sec": interval_sec,
+            }
+        }
+        if payload.presence_auto_rotate is not None:
+            patch["presence"] = {"auto_rotate": bool(payload.presence_auto_rotate)}
+
+        actor, actor_type = auth_deps.actor_label(admin)
+        updated = await config_service.update_config(
+            patch,
+            updated_by=actor,
+            actor_type=actor_type,
+            actor_meta=auth_deps.actor_meta(admin),
+            section="security",
+            summary="Cập nhật Cấu hình Dashboard (Step-up Auth & Presence Interval)",
+            client_changes=payload.changes,
+        )
+
+        # Áp dụng ngay lập tức cho vòng lặp Discord Presence đang chạy (không cần restart container)
+        applied_presence_live = False
+        if apply_presence_fn is not None:
+            updated_presence = updated.get("presence") if isinstance(updated.get("presence"), dict) else {}
+            applied_presence_live = bool(await apply_presence_fn(updated_presence))
+
+        return {
+            "ok": True,
+            "locked_sections": cleaned_sections,
+            "step_up_cooldown_sec": cooldown_sec,
+            "presence_interval_sec": interval_sec,
+            "presence_auto_rotate": bool((updated.get("presence") or {}).get("auto_rotate", False)),
+            "applied_presence_live": applied_presence_live,
             "sync": sync_coordinator.sync_status(),
         }
 

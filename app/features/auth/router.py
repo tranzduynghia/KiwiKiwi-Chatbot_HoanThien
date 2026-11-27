@@ -41,6 +41,13 @@ STEP_UP_TAB_MAP = {
     "session": "sessions",
     "temp": "temp",
     "temp-page": "temp-page",
+    "dashboard-settings": "dashboard-settings",
+    "legal": "legal",
+    "audit": "audit",
+    "ask": "ask",
+    "prompt": "prompt",
+    "models": "models",
+    "status": "status",
 }
 
 
@@ -479,7 +486,7 @@ def create_auth_router(
         response = JSONResponse({
             "unlocked": valid,
             "remaining_seconds": remaining if valid else 0,
-            "timeout_seconds": STEP_UP_IDLE_SECONDS,
+            "timeout_seconds": auth_deps.get_step_up_cooldown_seconds(),
         })
         if not valid and request.cookies.get(STEP_UP_COOKIE_NAME):
             auth_deps.clear_step_up_cookie(response, request)
@@ -522,7 +529,7 @@ def create_auth_router(
         now_ts = int(time.time())
         response = JSONResponse({
             "ok": True,
-            "expires_in": STEP_UP_IDLE_SECONDS,
+            "expires_in": auth_deps.get_step_up_cooldown_seconds(),
             "last_active_at": now_ts,
         })
         auth_deps.set_step_up_cookie(

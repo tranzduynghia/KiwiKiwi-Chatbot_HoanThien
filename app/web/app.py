@@ -11,8 +11,10 @@ from pathlib import Path
 from typing import Any, Callable
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.bot.presence import apply_bot_presence, stop_presence_rotation
 from app.core.security import (
@@ -103,23 +105,55 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         openapi_url=None,
         lifespan=_lifespan,
     )
+    if getattr(container, "config_repo", None) is not None and hasattr(container.auth_deps, "set_config_repo"):
+        container.auth_deps.set_config_repo(container.config_repo)
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+    def _error_code_for_status(status_code: int) -> str:
+        mapping = {
+            400: "INVALID_INPUT",
+            401: "UNAUTHORIZED",
+            403: "LOCKED",
+            404: "NOT_FOUND",
+            413: "PAYLOAD_TOO_LARGE",
+            422: "INVALID_INPUT",
+            429: "RATE_LIMITED",
+        }
+        return mapping.get(int(status_code), "SERVER_ERROR" if int(status_code) >= 500 else "REQUEST_ERROR")
 
     @app.exception_handler(StepUpRequiredError)
     async def step_up_required_exception_handler(request: Request, _exc: StepUpRequiredError):
-        """Trả HTTP 403 chuẩn STEP_UP_REQUIRED (zero data payload) và xóa sạch cookie kiwikiwi_stepup."""
-        resp = JSONResponse({"detail": STEP_UP_DETAIL}, status_code=403)
+        """Trả HTTP 403 chuẩn tối giản (`{"ok": false, "code": "LOCKED", "locked": true}`) và xóa cookie kiwikiwi_stepup."""
+        resp = JSONResponse({"ok": False, "code": "LOCKED", "locked": True}, status_code=403)
         container.auth_deps.clear_step_up_cookie(resp, request)
         return resp
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, _exc: RequestValidationError):
+        """Chuẩn hóa lỗi 422 của Pydantic/FastAPI thành `{"ok": false, "code": "INVALID_INPUT"}` (chống lộ schema nội bộ)."""
+        if request.url.path.startswith("/api/") or request.url.path.startswith("/auth/"):
+            return JSONResponse({"ok": False, "code": "INVALID_INPUT"}, status_code=422)
+        return PlainTextResponse("Yêu cầu không hợp lệ.", status_code=422)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+        """Chuẩn hóa mọi lỗi HTTP trên `/api/*` & `/auth/*` về khuôn tối giản `{"ok": false, "code": "..."}`."""
+        status_code = int(getattr(exc, "status_code", 500) or 500)
+        if request.url.path.startswith("/api/") or request.url.path.startswith("/auth/"):
+            code = _error_code_for_status(status_code)
+            payload: dict[str, Any] = {"ok": False, "code": code}
+            if status_code == 403:
+                payload["locked"] = True
+            return JSONResponse(payload, status_code=status_code)
+        return PlainTextResponse("Không thể xử lý yêu cầu.", status_code=status_code)
 
     @app.exception_handler(Exception)
     async def safe_unhandled_exception_handler(request: Request, exc: Exception):
         """Ngăn rò rỉ traceback hoặc thông tin nhạy cảm khi phát sinh lỗi 500 không mong muốn."""
         log.exception("Lỗi nội bộ chưa được bắt trên %s %s", request.method, request.url.path)
-        detail = "Đã xảy ra lỗi nội bộ máy chủ."
         if request.url.path.startswith("/api/") or request.url.path.startswith("/auth/"):
-            return JSONResponse({"detail": detail}, status_code=500)
-        return PlainTextResponse(detail, status_code=500)
+            return JSONResponse({"ok": False, "code": "SERVER_ERROR"}, status_code=500)
+        return PlainTextResponse("Đã xảy ra lỗi nội bộ máy chủ.", status_code=500)
 
     @app.middleware("http")
     async def security_and_tunnel_middleware(request: Request, call_next):
@@ -131,10 +165,13 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
 
         # 0) Chặn ngay lập tức mọi request prefetch/prerender tới trang nháp `/temp` và API `/temp`
         if is_temp_draft_path(request.url.path) and is_prefetch_request(request.headers):
-            detail = "Prefetch/prerender bị chặn đối với trang nháp /temp."
             if request.url.path.startswith("/api/"):
-                return apply_no_store_noindex_headers(JSONResponse({"detail": detail}, status_code=403))
-            return apply_no_store_noindex_headers(PlainTextResponse(detail, status_code=403))
+                return apply_no_store_noindex_headers(
+                    JSONResponse({"ok": False, "code": "LOCKED", "locked": True}, status_code=403)
+                )
+            return apply_no_store_noindex_headers(
+                PlainTextResponse("Prefetch/prerender bị chặn đối với trang nháp /temp.", status_code=403)
+            )
 
         # 1) Kiểm tra biên tin cậy Cloudflare Tunnel (`tunnel_only_inbound`), luôn giữ mở `/health`
         if request.url.path != "/health":
@@ -270,7 +307,13 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             get_models_snapshot=container.model_registry.build_snapshot,
             auth_deps=container.auth_deps,
             maintenance_gate=getattr(container, "maintenance_gate", None),
-            apply_presence_fn=lambda presence_cfg: apply_bot_presence(get_bot(), presence_cfg),
+            apply_presence_fn=lambda presence_cfg: apply_bot_presence(
+                get_bot(),
+                presence_cfg,
+                rotate_interval=float(
+                    ((container.config_repo.current_config.get("security") or {}).get("presence_interval_sec", 20))
+                ),
+            ),
             apply_tunnel_fn=container.cloudflare_tunnel.apply_config,
             schedule_tunnel_fn=container.cloudflare_tunnel.schedule_apply_config,
             apply_warp_fn=(

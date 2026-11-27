@@ -1,0 +1,16 @@
+{# Tab độc lập: Cấu hình Dashboard (Bảo mật Step-up Auth, Cooldown & Chu kỳ Discord Presence) — Zero DOM khi khóa #}
+<section id="tab-dashboard-settings" class="tab-panel hidden space-y-5">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div>
+      <h2 class="text-lg font-semibold stepup-text-primary">Cấu hình Dashboard &amp; Bảo mật</h2>
+      <p class="text-xs stepup-text-muted">
+        Quản lý khóa Step-up Auth cho từng mục, thời gian tự khóa nhàn rỗi và chu kỳ luân phiên Discord Presence (áp dụng tức thì).
+      </p>
+    </div>
+    {# Thanh đếm ngược Step-up + nút Khóa ngay (chỉ dựng bằng JS khi đã mở khóa) #}
+    <div id="dashboard-settings-stepup-bar" class="flex items-center gap-2"></div>
+  </div>
+
+  {# Vùng chứa nội dung động — bị xóa sạch hoàn toàn bằng replaceChildren() khi khóa #}
+  <div id="dashboard-settings-content-root" class="space-y-5"></div>
+</section>

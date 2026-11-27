@@ -48,11 +48,47 @@ class AuthDependencies:
         signer: SessionTokenSigner,
         permission_service: PermissionService,
         user_repo: Any = None,
+        config_repo: Any = None,
     ):
         self.signer = signer
         self.stepup_signer = signer.derive_signer("kiwikiwi-stepup-v1")
         self._permissions = permission_service
         self._users = user_repo
+        self._config_repo = config_repo
+
+    def set_config_repo(self, config_repo: Any) -> None:
+        """Gắn `ConfigRepository` để đọc động `locked_sections` và `step_up_cooldown_sec`."""
+        self._config_repo = config_repo
+
+    def get_step_up_cooldown_seconds(self) -> int:
+        """Đọc thời gian cooldown Step-up (15..300 giây, mặc định 60s) từ cấu hình động."""
+        if self._config_repo is not None:
+            cfg = getattr(self._config_repo, "current_config", None) or {}
+            sec = cfg.get("security") if isinstance(cfg.get("security"), dict) else {}
+            raw = sec.get("step_up_cooldown_sec", STEP_UP_IDLE_SECONDS)
+            try:
+                return max(15, min(300, int(raw)))
+            except (TypeError, ValueError):
+                pass
+        return STEP_UP_IDLE_SECONDS
+
+    def get_locked_sections(self) -> list[str]:
+        """Trả về danh sách các mục đang bật khóa Step-up Auth."""
+        default_locked = ["perms", "sessions", "temp"]
+        if self._config_repo is not None:
+            cfg = getattr(self._config_repo, "current_config", None) or {}
+            sec = cfg.get("security") if isinstance(cfg.get("security"), dict) else {}
+            raw_list = sec.get("locked_sections")
+            if isinstance(raw_list, list):
+                return [str(item).strip().lower() for item in raw_list if str(item).strip()]
+        return default_locked
+
+    def is_section_locked(self, section: str) -> bool:
+        """Kiểm tra mục có đang bật khóa Step-up hay không (`dashboard_settings` luôn khóa cứng)."""
+        key = str(section or "").strip().lower()
+        if key in ("dashboard_settings", "security"):
+            return True
+        return key in self.get_locked_sections()
 
     @staticmethod
     def resolve_user_id(session_data: dict[str, Any]) -> str:
@@ -175,10 +211,11 @@ class AuthDependencies:
             "last_active_at": ts,
             "method": str(method or "password"),
         }
+        cooldown = self.get_step_up_cooldown_seconds()
         response.set_cookie(
             key=STEP_UP_COOKIE_NAME,
             value=self.stepup_signer.encode(payload),
-            max_age=STEP_UP_IDLE_SECONDS,
+            max_age=cooldown,
             path="/",
             httponly=True,
             samesite="lax",
@@ -221,11 +258,12 @@ class AuthDependencies:
         raw_ts = payload.get("last_active_at")
         if not isinstance(raw_ts, (int, float)):
             return False, 0, None
+        cooldown = float(self.get_step_up_cooldown_seconds())
         now = time.time()
         elapsed = now - float(raw_ts)
-        if elapsed < -5.0 or elapsed > float(STEP_UP_IDLE_SECONDS):
+        if elapsed < -5.0 or elapsed > cooldown:
             return False, 0, None
-        remaining = max(0, int(STEP_UP_IDLE_SECONDS - max(0.0, elapsed)))
+        remaining = max(0, int(cooldown - max(0.0, elapsed)))
         return True, remaining, payload
 
     async def get_current_user(self, request: Request) -> Optional[dict[str, Any]]:
@@ -348,3 +386,44 @@ class AuthDependencies:
         if not hasattr(self, "_require_admin_step_up_dep"):
             self._require_admin_step_up_dep = self.make_require_admin_step_up()
         return self._require_admin_step_up_dep
+
+    def require_section_unlocked(self, section: str):
+        """Dependency kiểm tra Step-up động theo `locked_sections` cho từng mục trên Dashboard."""
+        async def _dep(
+            request: Request,
+            response: Response,
+            user: dict[str, Any] = Depends(self.require_user),
+        ) -> dict[str, Any]:
+            if not self.is_section_locked(section):
+                return user
+            user_id = str(getattr(request.state, "auth_user_id", "") or "")
+            session_id = str(getattr(request.state, "auth_session_id", "") or "")
+            valid, _remaining, payload = self.inspect_step_up(
+                request,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if not valid or payload is None:
+                raise StepUpRequiredError()
+            self.set_step_up_cookie(
+                response,
+                request,
+                user_id=user_id,
+                session_id=session_id,
+                method=str(payload.get("method") or "password"),
+            )
+            return user
+
+        return _dep
+
+    def require_admin_section_unlocked(self, section: str):
+        """Dependency bắt buộc Admin + kiểm tra Step-up động theo `locked_sections`."""
+        section_dep = self.require_section_unlocked(section)
+
+        async def _dep(
+            admin: dict[str, Any] = Depends(self.require_admin),
+            _unlocked: dict[str, Any] = Depends(section_dep),
+        ) -> dict[str, Any]:
+            return admin
+
+        return _dep

@@ -105,7 +105,7 @@ async def test_every_sensitive_read_and_mutation_requires_step_up_auth(app_conta
         for method, path, body in sensitive_calls:
             res = client.request(method, path, json=body)
             assert res.status_code == 403, f"{method} {path} returned {res.status_code} instead of 403"
-            assert res.json() == {"detail": STEP_UP_DETAIL}, f"Unexpected payload for {method} {path}: {res.text}"
+            assert res.json() == {"ok": False, "code": "LOCKED", "locked": True}, f"Unexpected payload for {method} {path}: {res.text}"
             set_cookie = res.headers.get("set-cookie", "").lower()
             assert STEP_UP_COOKIE_NAME in set_cookie and "max-age=0" in set_cookie
 
@@ -144,7 +144,7 @@ async def test_stateless_60s_sliding_window_no_background_refresh_and_session_bi
         other_session_client.cookies.set(STEP_UP_COOKIE_NAME, stolen_stepup_cookie)
         stolen_res = other_session_client.get("/api/permissions/users")
         assert stolen_res.status_code == 403
-        assert stolen_res.json() == {"detail": STEP_UP_DETAIL}
+        assert stolen_res.json() == {"ok": False, "code": "LOCKED", "locked": True}
 
         # Sau 40s -> gọi endpoint nhạy cảm => 200 OK và trượt last_active_at = now
         fake_now[0] += 40.0
@@ -167,7 +167,7 @@ async def test_stateless_60s_sliding_window_no_background_refresh_and_session_bi
         # Quá 60s không gọi endpoint nhạy cảm -> bị khóa 403 STEP_UP_REQUIRED và xóa cookie
         expired_res = client.get("/api/permissions/users")
         assert expired_res.status_code == 403
-        assert expired_res.json() == {"detail": STEP_UP_DETAIL}
+        assert expired_res.json() == {"ok": False, "code": "LOCKED", "locked": True}
         assert "max-age=0" in expired_res.headers.get("set-cookie", "").lower()
 
         # Mở khóa lại và khóa thủ công bằng POST /api/auth/step-up/lock

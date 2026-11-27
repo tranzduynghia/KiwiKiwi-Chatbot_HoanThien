@@ -10,6 +10,7 @@ import { createStepUpController } from "./core/stepUp.js";
 import { initThemeSwitcher } from "./core/themeSwitcher.js";
 import { createAuditTabController } from "./features/audit/auditTab.js";
 import { createAskConfigTabController } from "./features/config/askConfigTab.js";
+import { createDashboardSettingsTabController } from "./features/config/dashboardSettingsTab.js";
 import { createPresenceCardController } from "./features/config/presenceCard.js";
 import { createPromptConfigTabController } from "./features/config/promptConfigTab.js";
 import { createTunnelCardController } from "./features/config/tunnelCard.js";
@@ -36,13 +37,13 @@ function readBootstrapData() {
 
 const bootstrap = readBootstrapData();
 
-const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "legal", "audit"]);
+const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "legal", "audit", "dashboard-settings"]);
 const TAB_ALIASES = {
   admin: "perms",
   permissions: "perms",
   session: "sessions",
+  security: "dashboard-settings",
 };
-const SENSITIVE_TABS = new Set(["perms", "sessions"]);
 
 function normalizeTabName(rawTab) {
   const cleaned = String(rawTab || "").trim().toLowerCase().replace(/^#/, "");
@@ -61,6 +62,7 @@ let geminiInitialTimer = null;
 let tunnelCard;
 let permissionsTab;
 let sessionsTab;
+let dashboardSettingsTab;
 
 const statusTab = createStatusTabController({
   onTunnelTelemetry: (telemetry) => {
@@ -77,11 +79,13 @@ const auditTab = createAuditTabController();
 const stepUp = createStepUpController({
   authType: bootstrap.authType || "password",
   timeoutSeconds: Number(bootstrap.stepUpTimeoutSeconds) || 60,
+  lockedSections: Array.isArray(bootstrap.lockedSections) ? bootstrap.lockedSections : ["perms", "sessions", "temp"],
   getActiveTab: () => (activeTab === "legal" && legalCmsTab.isTempActive() ? "temp" : activeTab),
   onLockAll: () => {
     if (permissionsTab) permissionsTab.destroyAndLock();
     if (sessionsTab) sessionsTab.destroyAndLock();
     if (legalCmsTab) legalCmsTab.lockTempIfActive();
+    if (dashboardSettingsTab) dashboardSettingsTab.destroyAndLock();
   },
   onUnlockedTab: (tab, afterUnlock) => {
     if (tab === "perms") {
@@ -98,12 +102,32 @@ const stepUp = createStepUpController({
       } else {
         legalCmsTab.loadPage("temp");
       }
+    } else if (tab === "dashboard-settings") {
+      if (dashboardSettingsTab) dashboardSettingsTab.loadSettings();
+    } else if (tab === "legal") {
+      legalCmsTab.onTabActivated();
+    } else if (tab === "audit") {
+      auditTab.loadAuditLogs({ silent: false });
     }
   },
 });
 
 setStepUpRequiredHandler(() => {
   stepUp.lock({ notifyServer: false, openModalIfSensitive: true, reason: "server_403" });
+});
+
+dashboardSettingsTab = createDashboardSettingsTabController({
+  isAdmin: Boolean(bootstrap.isAdmin),
+  isStepUpUnlocked: () => stepUp.isUnlocked(),
+  onRequestUnlock: (tab) => stepUp.openModal(tab),
+  onSettingsUpdated: (res) => {
+    if (res && Array.isArray(res.locked_sections)) {
+      stepUp.setLockedSections(res.locked_sections);
+    }
+    if (res && Number(res.step_up_cooldown_sec)) {
+      stepUp.setTimeoutSeconds(Number(res.step_up_cooldown_sec));
+    }
+  },
 });
 
 permissionsTab = createPermissionsTabController({
@@ -192,7 +216,7 @@ function activateTab(
     window.history.replaceState(null, "", `#${safeTab}`);
   }
 
-  if (SENSITIVE_TABS.has(safeTab)) {
+  if (stepUp.isSectionLocked(safeTab)) {
     if (!stepUp.isUnlocked()) {
       if (!suppressModal) {
         stepUp.openModal(safeTab, { errorMessage: stepUpError, afterUnlock });
@@ -208,6 +232,12 @@ function activateTab(
       } else {
         sessionsTab.searchSessions(0);
       }
+    } else if (safeTab === "dashboard-settings") {
+      dashboardSettingsTab.loadSettings();
+    } else if (safeTab === "legal") {
+      legalCmsTab.onTabActivated();
+    } else if (safeTab === "audit") {
+      auditTab.loadAuditLogs({ silent: false });
     }
     return;
   }

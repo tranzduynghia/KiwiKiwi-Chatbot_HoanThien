@@ -82,7 +82,17 @@ export async function apiRequest(url, options = {}) {
   const contentType = response.headers.get("content-type") || "";
   const isJson = contentType.includes("application/json");
   const data = isJson ? await response.json().catch(() => ({})) : {};
-  if (response.status === 403 && data && data.detail === "STEP_UP_REQUIRED") {
+const ERROR_CODE_MESSAGES = {
+  UNAUTHORIZED: "Phiên đăng nhập không hợp lệ hoặc đã hết hạn.",
+  LOCKED: "Mục này đang được khóa. Vui lòng xác thực lại để tiếp tục.",
+  INVALID_INPUT: "Dữ liệu gửi lên không hợp lệ. Vui lòng kiểm tra lại.",
+  NOT_FOUND: "Không tìm thấy tài nguyên được yêu cầu.",
+  PAYLOAD_TOO_LARGE: "Kích thước dữ liệu vượt quá giới hạn cho phép.",
+  RATE_LIMITED: "Thao tác quá nhanh. Vui lòng thử lại sau ít giây.",
+  SERVER_ERROR: "Đã xảy ra lỗi nội bộ máy chủ. Vui lòng thử lại.",
+};
+
+  if (response.status === 403 && data && (data.detail === "STEP_UP_REQUIRED" || data.code === "LOCKED" || data.locked === true)) {
     if (_onStepUpRequired) {
       _onStepUpRequired();
     }
@@ -92,12 +102,14 @@ export async function apiRequest(url, options = {}) {
     throw err;
   }
   if (!response.ok) {
+    const codeMsg = data && data.code ? ERROR_CODE_MESSAGES[data.code] : "";
     const fallback = isJson
-      ? `Lỗi HTTP ${response.status}`
+      ? (codeMsg || `Lỗi HTTP ${response.status}`)
       : `Máy chủ trả về phản hồi không phải JSON (HTTP ${response.status}).`;
-    const errMessage = formatErrorMessage(data.detail ?? data.message, fallback);
+    const errMessage = formatErrorMessage(data.detail ?? data.message ?? codeMsg, fallback);
     const err = new Error(errMessage);
     err.status = response.status;
+    err.code = data && data.code ? data.code : undefined;
     throw err;
   }
   return data;

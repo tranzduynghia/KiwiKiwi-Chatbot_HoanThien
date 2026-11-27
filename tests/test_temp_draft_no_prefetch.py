@@ -116,7 +116,7 @@ async def test_temp_requires_step_up_auth_and_renders_shell_without_draft_html(
         ):
             res = client.request(method, url, json=payload) if payload is not None else client.request(method, url)
             assert res.status_code == 403
-            assert res.json().get("detail") == "STEP_UP_REQUIRED"
+            assert res.json() == {"ok": False, "code": "LOCKED", "locked": True}
             _assert_no_store_noindex(res)
 
     assert called["get"] == 0
@@ -237,22 +237,80 @@ async def test_temp_step_up_unlock_save_read_hidden_from_public_and_push_to_page
         assert draft_marker in terms_page.text
         assert "v1.2" in terms_page.text
 
-        # Khóa Step-up -> /api/legal/temp bị chặn 403 STEP_UP_REQUIRED ngay lập tức
+        # Khóa Step-up -> /api/legal/temp bị chặn 403 LOCKED ngay lập tức
         assert client.post("/api/auth/step-up/lock").status_code == 200
         locked_api = client.get("/api/legal/temp")
         assert locked_api.status_code == 403
-        assert locked_api.json().get("detail") == "STEP_UP_REQUIRED"
+        assert locked_api.json() == {"ok": False, "code": "LOCKED", "locked": True}
 
 
 def test_temp_templates_have_no_prefetch_links_and_only_jinja_comments():
-    """Template legal_cms_tab.html, legal_page.html và temp_draft.html không gắn rel=prefetch/prerender và không dùng comment HTML."""
+    """Template legal_cms_tab.html, legal_page.html, temp_draft.html và dashboard_settings_tab.html không gắn rel=prefetch/prerender và không dùng comment HTML."""
     root = Path(__file__).resolve().parents[1]
     for rel_path in (
         "templates/partials/legal_cms_tab.html",
         "templates/legal_page.html",
         "templates/temp_draft.html",
+        "templates/partials/dashboard_settings_tab.html",
+        "templates/partials/sidebar.html",
     ):
         text = (root / rel_path).read_text(encoding="utf-8")
         assert "<!--" not in text
         assert 'rel="prefetch"' not in text.lower()
         assert 'rel="prerender"' not in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_settings_hard_locked_and_standardized_errors(app_container, fake_db, fake_bot):
+    """Mục Cấu hình Dashboard luôn khóa cứng Step-up, validate 15..300s / 15..3600s và chuẩn hóa JSON lỗi tối giản."""
+    await app_container.sync_coordinator.attach_db(fake_db)
+    await app_container.auth_service.create_user("admin", "AdminPass123!", role="admin")
+    web_app = create_dashboard_app(app_container, get_bot=lambda: fake_bot)
+
+    with TestClient(web_app) as client:
+        # 401 chuẩn hóa
+        unauth = client.get("/api/dashboard-settings")
+        assert unauth.status_code == 401
+        assert unauth.json() == {"ok": False, "code": "UNAUTHORIZED"}
+
+        assert client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"}).status_code == 200
+
+        # 403 LOCKED khi chưa Step-up
+        locked = client.get("/api/dashboard-settings")
+        assert locked.status_code == 403
+        assert locked.json() == {"ok": False, "code": "LOCKED", "locked": True}
+
+        # Mở khóa Step-up
+        assert client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
+
+        # 422 INVALID_INPUT (không lộ mảng loc/type/ctx của Pydantic)
+        invalid = client.put(
+            "/api/dashboard-settings",
+            json={"locked_sections": ["perms"], "step_up_cooldown_sec": 5, "presence_interval_sec": 20},
+        )
+        assert invalid.status_code == 422
+        assert invalid.json() == {"ok": False, "code": "INVALID_INPUT"}
+
+        # Lưu hợp lệ: bật khóa thêm 'audit', cooldown 45s, presence interval 30s
+        ok_res = client.put(
+            "/api/dashboard-settings",
+            json={
+                "locked_sections": ["perms", "sessions", "temp", "audit"],
+                "step_up_cooldown_sec": 45,
+                "presence_interval_sec": 30,
+                "presence_auto_rotate": True,
+            },
+        )
+        assert ok_res.status_code == 200
+        body = ok_res.json()
+        assert body["ok"] is True
+        assert body["step_up_cooldown_sec"] == 45
+        assert body["presence_interval_sec"] == 30
+        assert "audit" in body["locked_sections"]
+
+        # Khóa Step-up -> /api/audit cũng bị khóa theo cấu hình mới
+        assert client.post("/api/auth/step-up/lock").status_code == 200
+        audit_locked = client.get("/api/audit")
+        assert audit_locked.status_code == 403
+        assert audit_locked.json() == {"ok": False, "code": "LOCKED", "locked": True}
+
