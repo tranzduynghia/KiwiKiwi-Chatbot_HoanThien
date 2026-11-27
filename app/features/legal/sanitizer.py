@@ -5,6 +5,7 @@ import html
 import re
 from html.parser import HTMLParser
 from typing import Optional
+from urllib.parse import quote_plus
 
 ALLOWED_TAGS = frozenset({
     "p",
@@ -48,17 +49,64 @@ SAFE_HREF_RE = re.compile(r"^(?:/(?!/)|https://)", re.IGNORECASE)
 
 # Chỉ cho phép 4 thuộc tính CSS inline an toàn
 ALLOWED_STYLE_PROPS = frozenset({"font-family", "font-size", "text-align", "color"})
-_DANGEROUS_CSS_RE = re.compile(r"(?:url\s*\(|expression\s*\(|javascript:|vbscript:|@import|<|>|behavior\s*:)", re.IGNORECASE)
-_FONT_FAMILY_RE = re.compile(r"^[A-Za-z0-9 ,\"'_-]{1,120}$")
+_DANGEROUS_CSS_RE = re.compile(r"(?:url\s*\(|expression\s*\(|javascript:|vbscript:|data:|@import|<|>|\\|[;{}]|behavior\s*:)", re.IGNORECASE)
+_SAFE_FONT_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,60}$")
 _FONT_SIZE_RE = re.compile(r"^(?:\d{1,2}(?:\.\d{1,2})?(?:px|rem|em|%))$", re.IGNORECASE)
 _TEXT_ALIGN_VALUES = frozenset({"left", "center", "right", "justify"})
 _COLOR_RE = re.compile(
     r"^(?:#[0-9a-fA-F]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*(?:0|1|0?\.\d+)\s*\)|[a-zA-Z]{3,20})$"
 )
+_EMPTY_INLINE_RE = re.compile(r"<(strong|b|em|i|u|s|span)(?:\s+[^>]*)?>\s*</\1>", re.IGNORECASE)
+_STYLE_FONT_FAMILY_RE = re.compile(r"font-family\s*:\s*([^;\"]+)", re.IGNORECASE)
+
+BUILTIN_NON_GOOGLE_FAMILIES = frozenset({
+    "inter",
+    "jetbrains mono",
+    "georgia",
+    "system-ui",
+    "-apple-system",
+    "blinkmacsystemfont",
+    "segoe ui",
+    "times new roman",
+    "times",
+    "arial",
+    "helvetica",
+    "helvetica neue",
+    "sans-serif",
+    "serif",
+    "monospace",
+    "ui-sans-serif",
+    "ui-serif",
+    "ui-monospace",
+    "menlo",
+    "consolas",
+    "courier new",
+    "sfmono-regular",
+})
+
+
+def _sanitize_font_family(val: str) -> str:
+    """Làm sạch danh sách font-family: chỉ giữ tên phông chữ hợp lệ, chặn CSS injection và ngoặc không cân xứng."""
+    cleaned = str(val or "").strip()
+    if not cleaned or len(cleaned) > 160 or _DANGEROUS_CSS_RE.search(cleaned):
+        return ""
+    if cleaned.count("'") % 2 != 0 or cleaned.count('"') % 2 != 0:
+        return ""
+    safe_parts: list[str] = []
+    for part in [p.strip() for p in cleaned.split(",") if p.strip()][:5]:
+        if (part.startswith("'") and not part.endswith("'")) or (part.endswith("'") and not part.startswith("'")):
+            return ""
+        if (part.startswith('"') and not part.endswith('"')) or (part.endswith('"') and not part.startswith('"')):
+            return ""
+        unquoted = part.strip().strip('"').strip("'").strip()
+        if not unquoted or not _SAFE_FONT_TOKEN_RE.fullmatch(unquoted):
+            continue
+        safe_parts.append(f"'{unquoted}'" if " " in unquoted else unquoted)
+    return ", ".join(safe_parts)
 
 
 def sanitize_inline_style(raw_style: Optional[str]) -> str:
-    """Lọc thuộc tính `style` inline: chỉ giữ `font-family`, `font-size`, `text-align`, `color` hợp lệ."""
+    """Lọc thuộc tính `style` inline: chỉ giữ `font-family`, `font-size` (10px–72px), `text-align`, `color` hợp lệ."""
     if not raw_style:
         return ""
     text = str(raw_style).strip()
@@ -76,16 +124,18 @@ def sanitize_inline_style(raw_style: Optional[str]) -> str:
             continue
 
         if prop == "font-family":
-            if _FONT_FAMILY_RE.fullmatch(val):
-                safe_parts.append(f"font-family: {val}")
+            clean_fam = _sanitize_font_family(val)
+            if clean_fam:
+                safe_parts.append(f"font-family: {clean_fam}")
         elif prop == "font-size":
             if _FONT_SIZE_RE.fullmatch(val):
-                # Giới hạn kích thước chữ hợp lý chống vỡ bố cục (10px - 42px)
+                # Hỗ trợ cỡ chữ tùy ý 10px - 72px
                 if val.lower().endswith("px"):
                     try:
                         px = float(val[:-2])
-                        if 10.0 <= px <= 42.0:
-                            safe_parts.append(f"font-size: {val.lower()}")
+                        if 10.0 <= px <= 72.0:
+                            fmt = f"{int(px)}px" if px.is_integer() else f"{round(px, 1)}px"
+                            safe_parts.append(f"font-size: {fmt}")
                     except ValueError:
                         pass
                 else:
@@ -133,7 +183,13 @@ class _AllowlistHTMLSanitizer(HTMLParser):
 
         style_val = sanitize_inline_style(attr_map.get("style"))
         if style_val:
-            safe_attrs.append(f'style="{html.escape(style_val, quote=True)}"')
+            escaped_style = (
+                style_val.replace("&", "&amp;")
+                .replace('"', "&quot;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+            )
+            safe_attrs.append(f'style="{escaped_style}"')
 
         if t == "a":
             href_val = sanitize_href(attr_map.get("href"))
@@ -205,4 +261,38 @@ def sanitize_legal_html(raw_html: Optional[str], *, max_length: int = 48000) -> 
     parser = _AllowlistHTMLSanitizer()
     parser.feed(text)
     parser.close()
-    return parser.finish()
+    cleaned = parser.finish()
+    for _ in range(4):
+        next_cleaned = _EMPTY_INLINE_RE.sub("", cleaned)
+        if next_cleaned == cleaned:
+            break
+        cleaned = next_cleaned
+    return cleaned.strip()
+
+
+def extract_google_font_families(sanitized_html: Optional[str]) -> list[str]:
+    """Trích xuất danh sách tên Google Font duy nhất xuất hiện trong HTML đã làm sạch."""
+    if not sanitized_html:
+        return []
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _STYLE_FONT_FAMILY_RE.finditer(html.unescape(str(sanitized_html))):
+        for part in match.group(1).split(","):
+            name = part.strip().strip('"').strip("'").strip()
+            if not name or not _SAFE_FONT_TOKEN_RE.fullmatch(name):
+                continue
+            low = name.lower()
+            if low in BUILTIN_NON_GOOGLE_FAMILIES or low in seen:
+                continue
+            seen.add(low)
+            found.append(name)
+    return found
+
+
+def build_google_fonts_stylesheet_urls(sanitized_html: Optional[str]) -> list[str]:
+    """Tạo URL `<link>` Google Fonts CSS2 nhẹ (served trực tiếp bởi Google CDN, 0 MB RAM Northflank)."""
+    families = extract_google_font_families(sanitized_html)
+    if not families:
+        return []
+    query_parts = [f"family={quote_plus(name)}:wght@400;500;600;700" for name in families[:8]]
+    return [f"https://fonts.googleapis.com/css2?{'&'.join(query_parts)}&display=swap"]

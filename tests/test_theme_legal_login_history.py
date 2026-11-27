@@ -228,7 +228,8 @@ async def test_public_legal_routes_cms_version_bump_and_zero_html_comments(
     assert 'id="tab-legal"' in dash_html
     assert 'id="legal-rte-editor"' in dash_html
     assert 'id="tos-consent-modal"' in dash_html
-    assert 'id="login-history-tbody"' in dash_html
+    assert 'id="perms-content-root"' in dash_html
+    assert 'id="stepup-modal"' in dash_html
     assert "<!--" not in dash_html
 
 
@@ -368,7 +369,8 @@ async def test_admin_login_history_records_success_and_failed_without_password_l
     assert "SuperSecretPass99!" not in serialized_db
     assert "password_hash" not in serialized_db
 
-    # 3) Truy vấn API /api/auth/login-history với lọc trạng thái và múi giờ CF-Timezone
+    # 3) Truy vấn API /api/auth/login-history với lọc trạng thái và múi giờ CF-Timezone (sau Step-up Auth)
+    assert client.post("/api/auth/step-up/password", json={"password": "SuperSecretPass99!"}).status_code == 200
     hist_all = client.get("/api/auth/login-history?limit=15&status=all", headers={"CF-Timezone": "Asia/Ho_Chi_Minh"})
     assert hist_all.status_code == 200
     body = hist_all.json()

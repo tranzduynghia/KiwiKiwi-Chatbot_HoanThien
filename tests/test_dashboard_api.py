@@ -210,7 +210,9 @@ async def test_dashboard_end_to_end_routes_and_rbac(app_container, fake_db, fake
         assert client.post("/api/models/refresh").status_code == 200
         assert client.post("/api/models/clear-cooldowns").status_code == 200
 
-        # Quản lý Discord permissions & Dashboard users
+        # Quản lý Discord permissions & Dashboard users (bắt buộc Step-up Auth)
+        assert client.get("/api/permissions/discord").status_code == 403
+        assert client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
         add_perm = client.post(
             "/api/permissions/discord",
             json={"user_id": "222333444555666777", "label": "Mod", "can_status": True},

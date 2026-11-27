@@ -1,8 +1,11 @@
 /**
- * Điểm vào điều phối toàn bộ các tab tính năng, sidebar Oxfin và thanh tìm kiếm trên Web Dashboard.
+ * Điểm vào điều phối toàn bộ các tab tính năng, sidebar Oxfin, thanh tìm kiếm và Step-up Auth trên Web Dashboard.
+ * - Zero Prefetch: KHÔNG bao giờ gọi API cho tab 'Phân quyền & Admin' hoặc 'Tra cứu phiên chat' khi chưa xác thực Step-up.
+ * - Background polling 1s chỉ cập nhật RAM/CPU/Ping/Audit (KHÔNG bao giờ chạm endpoint nhạy cảm).
  */
 
-import { apiRequest, showToast } from "./core/api.js";
+import { apiRequest, setStepUpRequiredHandler, showToast } from "./core/api.js";
+import { createStepUpController } from "./core/stepUp.js";
 import { initThemeSwitcher } from "./core/themeSwitcher.js";
 import { createAuditTabController } from "./features/audit/auditTab.js";
 import { createAskConfigTabController } from "./features/config/askConfigTab.js";
@@ -18,23 +21,89 @@ import { createSessionsTabController } from "./features/sessions/sessionsTab.js"
 function readBootstrapData() {
   const el = document.getElementById("dashboard-bootstrap");
   if (!el) {
-    return { defaultSystemPrompt: "", defaultOcrInstruction: "", isAdmin: false };
+    return {
+      defaultSystemPrompt: "",
+      defaultOcrInstruction: "",
+      isAdmin: false,
+      authType: "password",
+      discordOauthEnabled: false,
+      stepUpTimeoutSeconds: 60,
+    };
   }
   return JSON.parse(el.textContent || "{}");
 }
 
 const bootstrap = readBootstrapData();
 
+const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "legal", "audit"]);
+const TAB_ALIASES = {
+  admin: "perms",
+  permissions: "perms",
+  session: "sessions",
+};
+const SENSITIVE_TABS = new Set(["perms", "sessions"]);
+
+function normalizeTabName(rawTab) {
+  const cleaned = String(rawTab || "").trim().toLowerCase().replace(/^#/, "");
+  const mapped = TAB_ALIASES[cleaned] || cleaned;
+  return VALID_TABS.has(mapped) ? mapped : "status";
+}
+
+const SYSTEM_POLL_INTERVAL_MS = 1000;
+const GEMINI_INITIAL_DELAY_MS = 200;
+const GEMINI_POLL_INTERVAL_MS = 15000;
+let activeTab = "status";
+let systemPollTimer = null;
+let geminiPollTimer = null;
+let geminiInitialTimer = null;
+
 let tunnelCard;
+let permissionsTab;
+let sessionsTab;
+
 const statusTab = createStatusTabController({
   onTunnelTelemetry: (telemetry) => {
     if (tunnelCard) tunnelCard.renderTelemetry(telemetry);
   },
 });
-const permissionsTab = createPermissionsTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
-const sessionsTab = createSessionsTabController();
 const legalCmsTab = createLegalCmsTabController({ isAdmin: Boolean(bootstrap.isAdmin) });
 const auditTab = createAuditTabController();
+
+const stepUp = createStepUpController({
+  authType: bootstrap.authType || "password",
+  timeoutSeconds: Number(bootstrap.stepUpTimeoutSeconds) || 60,
+  getActiveTab: () => activeTab,
+  onLockAll: () => {
+    if (permissionsTab) permissionsTab.destroyAndLock();
+    if (sessionsTab) sessionsTab.destroyAndLock();
+  },
+  onUnlockedTab: (tab, afterUnlock) => {
+    if (tab === "perms") {
+      permissionsTab.loadPermissions();
+    } else if (tab === "sessions") {
+      if (typeof afterUnlock === "function") {
+        afterUnlock();
+      } else {
+        sessionsTab.searchSessions(0);
+      }
+    }
+  },
+});
+
+setStepUpRequiredHandler(() => {
+  stepUp.lock({ notifyServer: false, openModalIfSensitive: true, reason: "server_403" });
+});
+
+permissionsTab = createPermissionsTabController({
+  isAdmin: Boolean(bootstrap.isAdmin),
+  isStepUpUnlocked: () => stepUp.isUnlocked(),
+  onRequestUnlock: (tab) => stepUp.openModal(tab),
+});
+
+sessionsTab = createSessionsTabController({
+  isStepUpUnlocked: () => stepUp.isUnlocked(),
+  onRequestUnlock: (tab) => stepUp.openModal(tab),
+});
 
 let askConfigTab;
 let presenceCard;
@@ -78,18 +147,11 @@ promptConfigTab = createPromptConfigTabController({
 });
 modelsTab = createModelsTabController({ onRefreshAll: refreshAll });
 
-const VALID_TABS = new Set(["status", "ask", "prompt", "models", "perms", "sessions", "legal", "audit"]);
-const SYSTEM_POLL_INTERVAL_MS = 1000;
-const GEMINI_INITIAL_DELAY_MS = 200;
-const GEMINI_POLL_INTERVAL_MS = 15000;
-let activeTab = "status";
-let systemPollTimer = null;
-let geminiPollTimer = null;
-let geminiInitialTimer = null;
-
-// Kích hoạt tab theo mã tên, phát hiệu ứng chuyển trang mượt 200ms và đồng bộ URL hash
-function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}) {
-  const safeTab = VALID_TABS.has(targetTab) ? targetTab : "status";
+function activateTab(
+  targetTab,
+  { skipAutoLoad = false, updateHash = true, afterUnlock = null, stepUpError = "", suppressModal = false } = {}
+) {
+  const safeTab = normalizeTabName(targetTab);
   const isTabChanged = activeTab !== safeTab;
   activeTab = safeTab;
 
@@ -105,7 +167,6 @@ function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}
     const isTarget = panel.id === `tab-${safeTab}`;
     panel.classList.toggle("hidden", !isTarget);
     if (isTarget) {
-      // Khởi phát lại hiệu ứng mờ dần & trượt nhẹ lên mỗi khi chuyển tab (không chạy khi poll nền 1s)
       panel.classList.remove("ox-tab-enter");
       if (isTabChanged) {
         void panel.offsetWidth;
@@ -119,30 +180,43 @@ function activateTab(targetTab, { skipAutoLoad = false, updateHash = true } = {}
     window.history.replaceState(null, "", `#${safeTab}`);
   }
 
+  if (SENSITIVE_TABS.has(safeTab)) {
+    if (!stepUp.isUnlocked()) {
+      if (!suppressModal) {
+        stepUp.openModal(safeTab, { errorMessage: stepUpError, afterUnlock });
+      }
+      return;
+    }
+    if (skipAutoLoad) return;
+    if (safeTab === "perms") {
+      permissionsTab.loadPermissions();
+    } else if (safeTab === "sessions") {
+      if (typeof afterUnlock === "function") {
+        afterUnlock();
+      } else {
+        sessionsTab.searchSessions(0);
+      }
+    }
+    return;
+  }
+
   if (skipAutoLoad) return;
-  if (safeTab === "perms") {
-    permissionsTab.loadPermissions();
-  } else if (safeTab === "sessions") {
-    sessionsTab.searchSessions(0, { silent: false });
-  } else if (safeTab === "legal") {
+  if (safeTab === "legal") {
     legalCmsTab.onTabActivated();
   } else if (safeTab === "audit") {
     auditTab.loadAuditLogs({ silent: false });
   }
 }
 
-// Nhịp 1000ms (1s): cập nhật nền im lặng RAM, CPU, Discord Ping, Uptime, bộ đếm & nhật ký đang mở
+// Nhịp 1000ms (1s): CHỈ cập nhật RAM, CPU, Discord Ping, Uptime & Audit (TUYỆT ĐỐI không poll mục nhạy cảm)
 function runSystemPollTick() {
   if (document.hidden) return;
   statusTab.loadStatus(false, { silent: true });
   if (activeTab === "audit") {
     auditTab.loadAuditLogs({ silent: true });
-  } else if (activeTab === "sessions") {
-    sessionsTab.refreshCurrentSilently();
   }
 }
 
-// Nhịp 15000ms (15s): đo độ trễ Gemini API im lặng tránh chạm hạn mức 429 hoặc cooldown giả
 function runGeminiLatencyTick() {
   if (document.hidden) return;
   statusTab.loadStatus(true, { silent: true });
@@ -180,7 +254,6 @@ function startBackgroundPolling({ scheduleInitialGemini = false } = {}) {
   }
 }
 
-// Áp dụng hiệu ứng mờ dần & trượt nhẹ lên 1 lần duy nhất cho các thẻ khi tải trang đầu tiên
 function applyInitialCardEntrance() {
   document.querySelectorAll("#tab-status .card, #tab-status .ox-kpi-card").forEach((el, idx) => {
     el.style.animationDelay = `${Math.min(idx * 35, 240)}ms`;
@@ -197,13 +270,14 @@ function bindShellControls() {
   });
 
   window.addEventListener("hashchange", () => {
-    const fromHash = window.location.hash.replace(/^#/, "");
-    if (VALID_TABS.has(fromHash)) {
-      activateTab(fromHash, { updateHash: false });
+    const rawHash = window.location.hash.replace(/^#/, "");
+    if (!rawHash) return;
+    const normalized = normalizeTabName(rawHash);
+    if (VALID_TABS.has(normalized)) {
+      activateTab(normalized, { updateHash: normalized !== rawHash });
     }
   });
 
-  // Bật / tắt chu kỳ tự làm mới (1s hệ thống + 15s Gemini) từ công tắc trên giao diện
   const autoToggle = document.getElementById("auto-refresh-toggle");
   if (autoToggle) {
     autoToggle.addEventListener("change", () => {
@@ -215,7 +289,6 @@ function bindShellControls() {
     });
   }
 
-  // Tự động tạm dừng cả 2 chu kỳ polling khi tab trình duyệt bị ẩn và tiếp tục ngay khi quay lại
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) {
       stopBackgroundPolling();
@@ -228,7 +301,6 @@ function bindShellControls() {
     }
   });
 
-  // Nút thu gọn / mở rộng sidebar đáp ứng cả desktop và mobile
   const toggleBtn = document.getElementById("btn-toggle-sidebar");
   const backdrop = document.getElementById("sidebar-backdrop");
   if (toggleBtn) {
@@ -244,7 +316,6 @@ function bindShellControls() {
     backdrop.addEventListener("click", () => document.body.classList.remove("sidebar-mobile-open"));
   }
 
-  // Nút làm mới và nút mở nhanh Nhật ký chỉnh sửa trên Topbar
   const topRefreshBtn = document.getElementById("btn-topbar-refresh");
   if (topRefreshBtn) {
     topRefreshBtn.addEventListener("click", () => refreshAll());
@@ -254,7 +325,6 @@ function bindShellControls() {
     topAuditBtn.addEventListener("click", () => activateTab("audit"));
   }
 
-  // Ô tìm kiếm nhanh trên Topbar: nhấn Enter để nhảy tab hoặc tra cứu trực tiếp phiên chat
   const globalSearch = document.getElementById("global-search");
   if (globalSearch) {
     globalSearch.addEventListener("keydown", (event) => {
@@ -281,36 +351,52 @@ function bindShellControls() {
       } else if (q.includes("audit") || q.includes("log") || q.includes("nhật ký")) {
         activateTab("audit");
       } else {
-        // Mặc định tìm kiếm trực tiếp trong nội dung phiên chat trên MongoDB Atlas
-        activateTab("sessions", { skipAutoLoad: true });
-        sessionsTab.setQueryAndSearch(raw);
+        activateTab("sessions", {
+          afterUnlock: () => sessionsTab.setQueryAndSearch(raw),
+        });
       }
     });
   }
 }
 
-// Khởi chạy bộ chuyển 3 giao diện, trình lắng nghe sự kiện, hiệu ứng lần đầu và vòng lặp nền
-initThemeSwitcher();
-bindShellControls();
-statusTab.bindEvents();
-askConfigTab.bindEvents();
-presenceCard.bindEvents();
-tunnelCard.bindEvents();
-promptConfigTab.bindEvents();
-modelsTab.bindEvents();
-permissionsTab.bindEvents();
-sessionsTab.bindEvents();
-auditTab.bindEvents();
+async function initDashboard() {
+  initThemeSwitcher();
+  bindShellControls();
+  stepUp.bindEvents();
+  statusTab.bindEvents();
+  askConfigTab.bindEvents();
+  presenceCard.bindEvents();
+  tunnelCard.bindEvents();
+  promptConfigTab.bindEvents();
+  modelsTab.bindEvents();
+  permissionsTab.bindEvents();
+  sessionsTab.bindEvents();
+  auditTab.bindEvents();
 
-applyInitialCardEntrance();
+  applyInitialCardEntrance();
 
-// Khôi phục tab đang mở từ URL hash (tránh bị quay về trang chủ khi tải lại)
-const initialTab = window.location.hash.replace(/^#/, "");
-if (VALID_TABS.has(initialTab) && initialTab !== "status") {
-  activateTab(initialTab, { updateHash: false });
+  const callbackOutcome = stepUp.handleCallbackQueryParams();
+  const rawInitialHash = window.location.hash.replace(/^#/, "");
+  const initialTab = rawInitialHash ? normalizeTabName(rawInitialHash) : "status";
+
+  if (callbackOutcome.status === "ok" && SENSITIVE_TABS.has(initialTab)) {
+    activateTab(initialTab, { skipAutoLoad: true, suppressModal: true, updateHash: initialTab !== rawInitialHash });
+    const unlockedNow = await stepUp.syncStatusFromServer(initialTab);
+    if (!unlockedNow) {
+      stepUp.openModal(initialTab);
+    }
+  } else if (callbackOutcome.status === "error") {
+    const target = SENSITIVE_TABS.has(initialTab) ? initialTab : "perms";
+    showToast(callbackOutcome.errorMessage, false);
+    activateTab(target, { updateHash: target !== rawInitialHash, stepUpError: callbackOutcome.errorMessage });
+  } else if (initialTab !== "status") {
+    activateTab(initialTab, { updateHash: initialTab !== rawInitialHash });
+  }
+
+  statusTab.loadStatus(false, { silent: false });
+  loadConfig();
+  startBackgroundPolling({ scheduleInitialGemini: true });
+  initWebTosConsentGate();
 }
 
-statusTab.loadStatus(false, { silent: false });
-loadConfig();
-startBackgroundPolling({ scheduleInitialGemini: true });
-initWebTosConsentGate();
+initDashboard();

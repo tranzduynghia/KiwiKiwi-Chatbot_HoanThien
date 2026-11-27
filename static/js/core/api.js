@@ -46,19 +46,37 @@ export function showToast(message, isSuccess = true) {
   toastEl._timerId = setTimeout(() => toastEl.classList.add("hidden"), 3500);
 }
 
+let _onStepUpRequired = null;
+
+export function setStepUpRequiredHandler(handler) {
+  _onStepUpRequired = typeof handler === "function" ? handler : null;
+}
+
 export async function apiRequest(url, options = {}) {
+  const { redirectOn401 = true, ...fetchOptions } = options;
   const response = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-    ...options,
+    headers: { "Content-Type": "application/json", ...(fetchOptions.headers || {}) },
+    ...fetchOptions,
   });
-  if (response.status === 401) {
+  if (response.status === 401 && redirectOn401) {
     window.location.href = "/login";
     throw new Error("Phiên đăng nhập đã hết hạn.");
   }
   const data = await response.json().catch(() => ({}));
+  if (response.status === 403 && data && data.detail === "STEP_UP_REQUIRED") {
+    if (_onStepUpRequired) {
+      _onStepUpRequired();
+    }
+    const err = new Error("Vui lòng xác thực lại (Step-up Auth) để tiếp tục.");
+    err.code = "STEP_UP_REQUIRED";
+    err.status = 403;
+    throw err;
+  }
   if (!response.ok) {
     const errMessage = formatErrorMessage(data.detail ?? data.message, `Lỗi HTTP ${response.status}`);
-    throw new Error(errMessage);
+    const err = new Error(errMessage);
+    err.status = response.status;
+    throw err;
   }
   return data;
 }

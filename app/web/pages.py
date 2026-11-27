@@ -18,6 +18,7 @@ from app.core.timezone import format_timezone_badge, resolve_request_timezone
 from app.features.auth.dependencies import AuthDependencies
 from app.features.auth.oauth import DiscordOAuthService
 from app.features.legal.defaults import LEGAL_DOC_KEYS, LEGAL_DOC_LABELS
+from app.features.legal.sanitizer import build_google_fonts_stylesheet_urls
 from app.features.monitoring.stats import UsageStats
 
 
@@ -186,6 +187,7 @@ def create_pages_router(
                 "user": safe_user,
                 "default_system_prompt": DEFAULT_SYSTEM_PROMPT,
                 "default_ocr_instruction": DEFAULT_OCR_INSTRUCTION,
+                "discord_oauth_enabled": oauth_service.is_enabled(request),
                 "bot_avatar_url": bot_avatar_url,
                 "bot_display_name": bot_display_name,
                 "tunnel_origin_url": tunnel_origin_url,
@@ -232,6 +234,7 @@ def create_pages_router(
             {"key": k, "path": f"/{k}", "label": public_nav_labels.get(k, LEGAL_DOC_LABELS[k])}
             for k in LEGAL_DOC_KEYS
         ]
+        google_fonts_urls = build_google_fonts_stylesheet_urls(doc.get("body", ""))
         response = _render_template(
             templates,
             request,
@@ -242,6 +245,7 @@ def create_pages_router(
                 "active_key": doc_key,
                 "timezone_name": tz_name,
                 "timezone_label": tz_badge,
+                "google_fonts_urls": google_fonts_urls,
                 "bot_avatar_url": bot_avatar_url,
                 "bot_display_name": bot_display_name,
                 "asset_version": ASSET_VERSION,

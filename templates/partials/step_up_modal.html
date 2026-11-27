@@ -1,0 +1,104 @@
+{# Hộp thoại xác thực tăng cường (Step-up Authentication) cho các mục nhạy cảm #}
+<div
+  id="stepup-modal"
+  class="stepup-modal-backdrop fixed inset-0 z-[70] hidden items-center justify-center p-4"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="stepup-modal-title"
+>
+  <div id="stepup-modal-panel" class="stepup-modal-panel ox-modal-enter w-full max-w-md overflow-hidden shadow-2xl">
+    {# Đầu hộp thoại #}
+    <div class="stepup-modal-header px-5 py-4 flex items-start justify-between gap-3">
+      <div class="flex items-start gap-3 min-w-0">
+        <span class="stepup-shield-icon inline-flex items-center justify-center w-9 h-9 shrink-0" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </span>
+        <div class="min-w-0">
+          <h3 id="stepup-modal-title" class="text-sm font-semibold stepup-text-primary">
+            Xác thực lại để mở khóa
+          </h3>
+          <p id="stepup-modal-subtitle" class="text-xs stepup-text-muted mt-0.5 leading-relaxed">
+            Mục này yêu cầu xác nhận danh tính và sẽ tự khóa sau 60 giây không thao tác.
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        id="btn-close-stepup-modal"
+        class="ox-icon-btn stepup-btn-radius shrink-0"
+        title="Đóng (Esc)"
+        aria-label="Đóng"
+      >✕</button>
+    </div>
+
+    {# Thân hộp thoại #}
+    <div class="px-5 py-4 space-y-4">
+      <div class="stepup-callout px-3.5 py-2.5 text-xs leading-relaxed">
+        Đang mở khóa mục: <strong id="stepup-target-label" class="stepup-text-primary">Phân quyền &amp; Admin</strong>
+        · Phiên mở khóa tự hủy hoàn toàn khỏi bộ nhớ và DOM sau <strong>60 giây</strong> nhàn rỗi.
+      </div>
+
+      <div id="stepup-error" class="hidden stepup-callout-danger px-3.5 py-2.5 text-xs" role="alert"></div>
+
+      {# Nhánh xác thực bằng mật khẩu cho tài khoản Dashboard truyền thống #}
+      <form id="stepup-password-form" class="space-y-3 {{ '' if user.auth_type == 'password' else 'hidden' }}">
+        <div>
+          <label for="stepup-password-input" class="block text-xs font-medium stepup-text-muted mb-1.5">
+            Mật khẩu tài khoản <span class="font-mono stepup-text-primary">{{ user.username }}</span>
+          </label>
+          <input
+            id="stepup-password-input"
+            type="password"
+            autocomplete="current-password"
+            required
+            placeholder="Nhập lại mật khẩu để tiếp tục..."
+            class="stepup-input"
+          />
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-1">
+          <button type="button" id="btn-cancel-stepup" class="btn-ghost stepup-btn-radius text-xs">
+            Hủy bỏ
+          </button>
+          <button
+            type="submit"
+            id="btn-submit-stepup-password"
+            class="btn-primary stepup-btn-radius text-xs inline-flex items-center gap-1.5"
+          >
+            <span id="stepup-password-btn-text">Xác nhận mở khóa</span>
+          </button>
+        </div>
+      </form>
+
+      {# Nhánh xác thực lại qua Discord OAuth2 cho tài khoản đăng nhập Discord #}
+      <div id="stepup-discord-wrap" class="space-y-3 {{ '' if user.auth_type == 'discord' else 'hidden' }}">
+        {% if discord_oauth_enabled %}
+        <a
+          id="btn-stepup-discord"
+          href="/api/auth/step-up/discord?tab=perms"
+          class="stepup-discord-btn w-full py-2.5 px-4 text-sm font-medium flex items-center justify-center gap-2.5"
+        >
+          <svg class="w-5 h-5 shrink-0" viewBox="0 0 127.14 96.36" fill="currentColor" aria-hidden="true">
+            <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,46,96.12,53,91.08,65.69,84.69,65.69Z" />
+          </svg>
+          <span>Xác thực lại bằng Discord</span>
+        </a>
+        <p class="text-[11px] stepup-text-muted text-center">
+          Hệ thống chỉ mở khóa khi tài khoản Discord trả về trùng khớp hoàn toàn với phiên đang đăng nhập.
+        </p>
+        {% else %}
+        <div class="stepup-callout-danger px-3.5 py-2.5 text-xs">
+          Discord OAuth2 chưa được cấu hình (<code>DISCORD_CLIENT_ID</code> / <code>DISCORD_CLIENT_SECRET</code>).
+        </div>
+        {% endif %}
+        <div class="flex justify-end">
+          <button type="button" id="btn-cancel-stepup-discord" class="btn-ghost stepup-btn-radius text-xs">
+            Quay lại
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

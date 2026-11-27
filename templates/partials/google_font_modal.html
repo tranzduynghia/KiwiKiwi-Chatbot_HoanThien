@@ -1,0 +1,65 @@
+{# Hộp thoại Thêm Google Font (14px modal radius, không upload file .ttf/.woff2 cục bộ) #}
+<div
+  id="google-font-modal"
+  class="stepup-modal-backdrop rt-modal-backdrop fixed inset-0 z-[75] hidden items-center justify-center p-4"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="google-font-modal-title"
+>
+  <div id="google-font-modal-panel" class="rt-modal-panel w-full max-w-md overflow-hidden shadow-2xl">
+    {# Đầu hộp thoại #}
+    <div class="stepup-modal-header px-5 py-4 flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <h3 id="google-font-modal-title" class="text-sm font-semibold stepup-text-primary">
+          Thêm Google Font
+        </h3>
+        <p class="text-xs stepup-text-muted mt-0.5">
+          Dán URL Google Fonts hoặc nhập tên phông (nạp trực tiếp từ Google CDN, 0 MB RAM máy chủ)
+        </p>
+      </div>
+      <button
+        type="button"
+        id="btn-close-google-font-modal"
+        class="ox-icon-btn rt-btn shrink-0"
+        title="Đóng (Esc)"
+        aria-label="Đóng"
+      >✕</button>
+    </div>
+
+    {# Thân hộp thoại #}
+    <form id="google-font-form" class="px-5 py-4 space-y-4">
+      <div>
+        <label for="gf-input" class="block text-xs font-medium stepup-text-muted mb-1.5">
+          Tên Google Font hoặc URL <code>fonts.googleapis.com</code>
+        </label>
+        <input
+          id="gf-input"
+          type="text"
+          required
+          autocomplete="off"
+          placeholder="VD: Be Vietnam Pro hoặc https://fonts.googleapis.com/css2?family=Playfair+Display..."
+          class="rt-input"
+        />
+      </div>
+
+      <div id="gf-error" class="hidden stepup-callout-danger px-3.5 py-2.5 text-xs" role="alert"></div>
+
+      {# Khung xem trước trực tiếp phông chữ vừa nhập #}
+      <div class="rt-callout p-3.5 space-y-1.5">
+        <div class="flex items-center justify-between text-[11px] stepup-text-muted">
+          <span>Xem trước phông chữ</span>
+          <span id="gf-preview-name" class="font-mono stepup-text-primary">—</span>
+        </div>
+        <div id="gf-preview-sample" class="text-base stepup-text-primary leading-relaxed">
+          KiwiKiwi Bot · Xin chào thế giới 0123456789
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-2 pt-1">
+        <button type="button" id="btn-cancel-google-font" class="btn-ghost rt-btn text-xs">Hủy bỏ</button>
+        <button type="button" id="btn-preview-google-font" class="btn-ghost rt-btn text-xs">Xem trước</button>
+        <button type="submit" id="btn-save-google-font" class="btn-primary rt-btn text-xs">Lưu phông chữ</button>
+      </div>
+    </form>
+  </div>
+</div>

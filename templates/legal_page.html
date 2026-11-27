@@ -10,6 +10,10 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  {# Tự động nạp Google Fonts CDN khi nội dung trang có dùng Google Font (0 MB RAM máy chủ) #}
+  {% for gf_url in google_fonts_urls %}
+  <link rel="stylesheet" href="{{ gf_url }}" data-kiwikiwi-gfont="true" />
+  {% endfor %}
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/static/css/dashboard.css?v={{ asset_version }}" />
 </head>

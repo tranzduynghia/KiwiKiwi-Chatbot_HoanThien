@@ -48,12 +48,21 @@
   {# Hộp thoại đồng thuận Điều khoản toàn màn hình (Web Consent Gate) #}
   {% include "partials/tos_consent_modal.html" %}
 
+  {# Hộp thoại xác thực tăng cường Step-up Authentication (60s idle lock) #}
+  {% include "partials/step_up_modal.html" %}
+
+  {# Hộp thoại Thêm Google Font cho trình soạn thảo Rich-Text #}
+  {% include "partials/google_font_modal.html" %}
+
   {# Dữ liệu khởi tạo từ server cho các module JavaScript #}
   <script id="dashboard-bootstrap" type="application/json">
     {{ {
       "defaultSystemPrompt": default_system_prompt,
       "defaultOcrInstruction": default_ocr_instruction,
       "isAdmin": (true if user.is_admin else false),
+      "authType": (user.auth_type or "password"),
+      "discordOauthEnabled": (true if discord_oauth_enabled else false),
+      "stepUpTimeoutSeconds": 60,
       "activeTosVersion": active_tos_version or "v1.0"
     } | tojson }}
   </script>

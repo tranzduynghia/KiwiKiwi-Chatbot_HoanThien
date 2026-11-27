@@ -72,6 +72,7 @@ async def test_dynamic_discord_tos_prompt_rendering_and_save(fake_db, fake_gemin
     web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
     with TestClient(web_app) as client:
         assert client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"}).status_code == 200
+        assert client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
 
         before_cfg = await fake_db["bot_config"].find_one({"_id": "global"})
         before_tos_ts = (before_cfg.get("legal") or {}).get("tos_updated_at")
@@ -139,6 +140,7 @@ async def test_tos_consent_revocation_evicts_ram_cache_and_logs_audit(fake_db, f
     web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
     with TestClient(web_app) as client:
         assert client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"}).status_code == 200
+        assert client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
 
         # Kiểm tra CSRF Origin sai bị chặn 403
         bad_csrf = client.post(
@@ -194,6 +196,7 @@ async def test_discord_id_blacklist_blocks_bot_and_me_with_reason_and_forbids_ad
     web_app = create_dashboard_app(container, get_bot=lambda: fake_bot)
     with TestClient(web_app) as client:
         assert client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"}).status_code == 200
+        assert client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
 
         # 1) Cấm thêm Admin vào blacklist -> HTTP 400
         forbid_resp = client.post(

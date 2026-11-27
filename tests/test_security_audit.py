@@ -103,6 +103,7 @@ async def test_zero_secret_and_zero_hash_exposure_across_all_api_responses(app_c
     with TestClient(web_app) as client:
         # Operator gọi PUT /api/config/models (trước đây từng lộ plaintext cf_tunnel_token!)
         client.post("/auth/login", json={"username": "operator1", "password": "OperPass123!"})
+        assert client.post("/api/auth/step-up/password", json={"password": "OperPass123!"}).status_code == 200
         models_res = client.put(
             "/api/config/models",
             json={
@@ -168,6 +169,7 @@ async def test_session_revocation_on_password_change_and_user_deletion(app_conta
 
         # Admin đổi mật khẩu của victim -> cookie cũ lập tức bị từ chối 401
         admin_client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
+        assert admin_client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
         assert admin_client.put(
             "/api/permissions/users/victim/password",
             json={"password": "NewPass456!"},
@@ -341,6 +343,7 @@ async def test_oauth2_csrf_state_and_security_headers_and_redaction(app_containe
         # Kiểm tra NoSQL filter an toàn trên Audit Log & Sessions
         await app_container.auth_service.create_user("admin", "AdminPass123!", role="admin")
         client.post("/auth/login", json={"username": "admin", "password": "AdminPass123!"})
+        assert client.post("/api/auth/step-up/password", json={"password": "AdminPass123!"}).status_code == 200
         nosql_audit = client.get("/api/audit-logs?section=$ne")
         assert nosql_audit.status_code == 200
         assert nosql_audit.json()["items"] == []
@@ -448,6 +451,7 @@ async def test_password_pepper_hmac_prehash_and_seamless_legacy_migration(app_co
         assert after_second_doc["password_hash"] == upgraded_hash
 
         # Tạo tài khoản mới hoặc đổi mật khẩu khi PASSWORD_PEPPER đang bật -> lưu trực tiếp hash có pepper
+        assert client.post("/api/auth/step-up/password", json={"password": long_password}).status_code == 200
         assert client.post(
             "/api/permissions/users",
             json={"username": "newop", "password": "NewOpPassword123!", "role": "operator"},

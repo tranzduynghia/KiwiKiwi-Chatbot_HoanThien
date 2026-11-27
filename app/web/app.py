@@ -17,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from app.bot.presence import apply_bot_presence, stop_presence_rotation
 from app.core.security import is_trusted_proxy_ip
 from app.features.audit.router import create_audit_router
+from app.features.auth.dependencies import STEP_UP_DETAIL, StepUpRequiredError
 from app.features.auth.router import create_auth_router
 from app.features.config.router import create_config_router
 from app.features.legal.router import create_legal_router
@@ -98,6 +99,13 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
         lifespan=_lifespan,
     )
     templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+    @app.exception_handler(StepUpRequiredError)
+    async def step_up_required_exception_handler(request: Request, _exc: StepUpRequiredError):
+        """Trả HTTP 403 chuẩn STEP_UP_REQUIRED (zero data payload) và xóa sạch cookie kiwikiwi_stepup."""
+        resp = JSONResponse({"detail": STEP_UP_DETAIL}, status_code=403)
+        container.auth_deps.clear_step_up_cookie(resp, request)
+        return resp
 
     @app.exception_handler(Exception)
     async def safe_unhandled_exception_handler(request: Request, exc: Exception):

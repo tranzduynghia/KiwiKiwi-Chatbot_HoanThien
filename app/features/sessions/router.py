@@ -20,7 +20,7 @@ def create_sessions_router(
     lookup = user_lookup or DiscordUserLookupService()
 
     @router.get("/api/sessions/filters")
-    async def api_session_filters(_user: dict[str, Any] = Depends(auth_deps.require_user)):
+    async def api_session_filters(_user: dict[str, Any] = Depends(auth_deps.require_step_up_auth)):
         """Trả về danh sách vai trò server (từ bot Discord đang chạy gộp với MongoDB) cho bộ lọc."""
         bot = get_bot()
         merged_roles: dict[str, dict[str, str]] = {}
@@ -44,7 +44,7 @@ def create_sessions_router(
         role: Optional[str] = Query(default=None),
         limit: int = Query(default=50, ge=1, le=100),
         offset: int = Query(default=0, ge=0, le=1000),
-        _user: dict[str, Any] = Depends(auth_deps.require_user),
+        _user: dict[str, Any] = Depends(auth_deps.require_step_up_auth),
     ):
         bot = get_bot()
 
@@ -73,7 +73,7 @@ def create_sessions_router(
     @router.get("/api/sessions/{chat_id}")
     async def api_session_detail(
         chat_id: str,
-        _user: dict[str, Any] = Depends(auth_deps.require_user),
+        _user: dict[str, Any] = Depends(auth_deps.require_step_up_auth),
     ):
         """Trả về toàn bộ lịch sử tin nhắn và siêu dữ liệu của một phiên chat cụ thể."""
         bot = get_bot()

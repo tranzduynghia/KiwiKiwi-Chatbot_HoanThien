@@ -27,3 +27,9 @@ class ChangePasswordPayload(BaseModel):
 
     password: str = Field(..., min_length=6, max_length=128)
     changes: Optional[dict[str, dict[str, Any]]] = None
+
+
+class StepUpPasswordPayload(BaseModel):
+    """Payload xác thực lại mật khẩu cho Step-up Authentication."""
+
+    password: str = Field(..., min_length=1, max_length=256)

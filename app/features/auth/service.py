@@ -206,3 +206,17 @@ class AuthService:
             "is_admin": role == "admin",
             "session_version": str(doc.get("session_version") or ""),
         }
+
+    async def verify_user_password(self, username: str, password: str) -> bool:
+        """Kiểm tra mật khẩu hiện tại của tài khoản Dashboard (hỗ trợ Pepper) phục vụ Step-up Authentication."""
+        uname = str(username or "").strip().lower()
+        if not uname or not password:
+            return False
+        doc = await self._users.find_by_username(uname)
+        if not doc:
+            return False
+        is_valid, _needs_migration = await verify_password_with_migration_async(
+            password,
+            str(doc.get("password_hash") or ""),
+        )
+        return bool(is_valid)

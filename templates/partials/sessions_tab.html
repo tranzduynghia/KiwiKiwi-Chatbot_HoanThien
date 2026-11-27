@@ -1,123 +1,19 @@
-{# Tab Tra cứu & duyệt toàn bộ nội dung phiên chat từ MongoDB Atlas kèm Modal xem chi tiết #}
+{# Tab Tra cứu & duyệt toàn bộ nội dung phiên chat từ MongoDB Atlas (Zero DOM khi khóa) #}
 <section id="tab-sessions" class="tab-panel hidden space-y-5">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div>
-      <h2 class="text-lg font-semibold text-white">Tra cứu &amp; duyệt phiên chat</h2>
-      <p class="text-xs text-[#8b95a7]">
+      <h2 class="text-lg font-semibold stepup-text-primary">Tra cứu &amp; duyệt phiên chat</h2>
+      <p class="text-xs stepup-text-muted">
         Xem toàn bộ lịch sử hoặc lọc theo vai trò server, User ID, Username và từ khóa trực tiếp từ MongoDB Atlas
       </p>
     </div>
-    <span id="sessions-result-count" class="text-xs font-mono text-[#8b95a7] bg-[#131720] border border-[#1e232e] px-3 py-1.5 rounded-lg">
-      0 kết quả
-    </span>
+    {# Thanh trạng thái đếm ngược 60s + nút Khóa ngay (chỉ dựng bằng JS khi đã mở khóa) #}
+    <div id="sessions-stepup-bar" class="flex flex-wrap items-center gap-2"></div>
   </div>
 
-  {# Thanh bộ lọc đa điều kiện (chặn submit mặc định để không tải lại trang) #}
-  <form id="form-search-sessions" class="card p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
-    <div class="lg:col-span-3">
-      <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-q">Từ khóa nội dung / Mã chat</label>
-      <input
-        id="sessions-search-q"
-        type="text"
-        placeholder="Bỏ trống để xem tất cả..."
-        class="inp"
-      />
-    </div>
-    <div class="lg:col-span-2">
-      <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-username">Username</label>
-      <input
-        id="sessions-search-username"
-        type="text"
-        placeholder="VD: kiwikiwi"
-        class="inp"
-      />
-    </div>
-    <div class="lg:col-span-2">
-      <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-uid">Discord User ID</label>
-      <input
-        id="sessions-search-uid"
-        type="text"
-        placeholder="VD: 1240503090..."
-        class="inp font-mono"
-      />
-    </div>
-    <div class="lg:col-span-2">
-      <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-server-role">Vai trò Server</label>
-      <select id="sessions-search-server-role" class="inp">
-        <option value="">Tất cả vai trò server</option>
-      </select>
-    </div>
-    <div class="lg:col-span-1">
-      <label class="block text-[11px] text-[#8b95a7] mb-1" for="sessions-search-role">Loại tin</label>
-      <select id="sessions-search-role" class="inp">
-        <option value="">Tất cả</option>
-        <option value="user">User</option>
-        <option value="model">Bot AI</option>
-      </select>
-    </div>
-    <div class="lg:col-span-2 flex gap-2">
-      <button type="button" id="btn-search-sessions" class="btn-primary flex-1">🔍 Lọc / Xem</button>
-      <button type="button" id="btn-reset-sessions-search" class="btn-ghost px-3" title="Xem tất cả (xóa bộ lọc)">↺</button>
-    </div>
-  </form>
+  {# Vùng chứa nội dung động — bị xóa sạch hoàn toàn bằng replaceChildren() khi khóa #}
+  <div id="sessions-content-root" class="space-y-5"></div>
 
-  {# Bảng báo cáo tổng hợp: mỗi phiên chat (session_id) hiển thị đúng 1 dòng tóm tắt #}
-  <div class="card p-5 space-y-4">
-    <div class="overflow-x-auto">
-      <table class="w-full text-left text-xs border-collapse">
-        <thead>
-          <tr class="border-b border-[#1e232e] text-[#8b95a7]">
-            <th class="py-2.5 pr-4 w-72">Người dùng &amp; Mã phiên (Chat ID)</th>
-            <th class="py-2.5 pr-4">Xem trước câu hỏi đầu tiên</th>
-            <th class="py-2.5 text-right w-44 whitespace-nowrap">Thời gian phiên</th>
-          </tr>
-        </thead>
-        <tbody id="sessions-search-tbody" class="divide-y divide-[#1e232e]/80">
-          <tr>
-            <td colspan="3" class="py-6 text-center text-[#5e6778]">Đang tải danh sách phiên chat từ MongoDB Atlas...</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
-    {# Thanh phân trang duyệt toàn bộ bản ghi #}
-    <div class="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-[#1e232e] text-xs text-[#8b95a7]">
-      <div id="sessions-page-info" class="font-mono">Trang 1</div>
-      <div class="flex items-center gap-2">
-        <button type="button" id="btn-sessions-prev" class="btn-ghost text-xs px-3 py-1.5 disabled:opacity-40" disabled>← Trang trước</button>
-        <button type="button" id="btn-sessions-next" class="btn-ghost text-xs px-3 py-1.5 disabled:opacity-40" disabled>Trang sau →</button>
-      </div>
-    </div>
-  </div>
-
-  {# Modal xem chi tiết toàn bộ hội thoại của một phiên chat (phủ toàn màn hình khi mở) #}
-  <div
-    id="session-detail-modal"
-    class="ox-modal-backdrop fixed inset-0 z-50 hidden items-center justify-center p-4 bg-slate-950/55 backdrop-blur-[2px] transition-opacity duration-200 ease-out opacity-0 pointer-events-none"
-    role="dialog"
-    aria-modal="true"
-    aria-labelledby="session-detail-title"
-  >
-    <div class="ox-modal-panel ox-modal-surface card w-full max-w-3xl max-h-[86vh] flex flex-col shadow-2xl overflow-hidden border transition-all duration-200 ease-out opacity-0 scale-95 translate-y-2">
-      {# Tiêu đề Modal #}
-      <div class="ox-modal-header p-4 border-b flex items-start justify-between gap-3">
-        <div id="session-detail-header" class="flex items-center gap-3 min-w-0">
-          <h3 id="session-detail-title" class="text-sm font-semibold ox-text-primary">Chi tiết phiên chat</h3>
-        </div>
-        <button
-          type="button"
-          id="btn-close-session-detail"
-          class="ox-icon-btn shrink-0"
-          title="Đóng cửa sổ"
-          aria-label="Đóng"
-        >✕</button>
-      </div>
-
-      {# Siêu dữ liệu phiên chat #}
-      <div id="session-detail-meta" class="ox-modal-meta px-4 py-2.5 border-b flex flex-wrap items-center gap-3 text-[11px]"></div>
-
-      {# Danh sách toàn bộ tin nhắn theo thứ tự thời gian #}
-      <div id="session-detail-messages" class="ox-modal-body p-4 space-y-3 overflow-y-auto flex-1"></div>
-    </div>
-  </div>
+  {# Vùng chứa Modal xem chi tiết phiên chat — bị hủy hoàn toàn khi khóa #}
+  <div id="sessions-modal-root"></div>
 </section>

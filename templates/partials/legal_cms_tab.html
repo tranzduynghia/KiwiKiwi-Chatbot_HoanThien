@@ -101,15 +101,47 @@
 
     {# Vùng trình soạn thảo Rich-Text không phụ thuộc thư viện ngoài #}
     <div id="legal-rte-container" class="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-base)] overflow-hidden">
-      {# Thanh công cụ định dạng đầy đủ #}
+      {# Thanh công cụ định dạng đầy đủ (Custom Font Popover + Arbitrary Font Size 10-72px) #}
       <div id="legal-rte-toolbar" class="ox-rte-toolbar {{ 'opacity-60 pointer-events-none' if not user.is_admin else '' }}">
-        <select id="rte-font-family" class="ox-rte-select" title="Phông chữ" aria-label="Phông chữ">
-          <option value="">Phông chữ</option>
-          <option value="Inter, sans-serif">Sans-serif (Inter)</option>
-          <option value="'JetBrains Mono', monospace">Monospace (JetBrains Mono)</option>
-          <option value="Georgia, serif">Serif (Georgia)</option>
-          <option value="system-ui, sans-serif">System UI</option>
-        </select>
+        {# Bộ chọn Phông chữ tùy biến thay thế hoàn toàn thẻ <select> mặc định của OS #}
+        <div class="relative" id="rte-font-picker">
+          <button
+            type="button"
+            id="rte-font-family"
+            class="rt-font-trigger"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            title="Chọn phông chữ"
+          >
+            <span id="rte-font-trigger-label" class="truncate">Sans-serif (Inter)</span>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </button>
+
+          <div
+            id="rte-font-popover"
+            class="rt-popover hidden"
+            role="listbox"
+            aria-label="Danh sách phông chữ"
+          >
+            <div class="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider stepup-text-dim">Phông chữ có sẵn</div>
+            <div id="rte-builtin-fonts-list" class="space-y-0.5"></div>
+            <div id="rte-custom-fonts-section" class="hidden mt-1.5 pt-1.5 border-t border-[var(--border-subtle)]">
+              <div class="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider stepup-text-dim">Google Fonts đã thêm</div>
+              <div id="rte-custom-fonts-list" class="space-y-0.5"></div>
+            </div>
+            <div class="mt-2 pt-2 border-t border-[var(--border-subtle)]">
+              <button
+                type="button"
+                id="btn-open-google-font-modal"
+                class="btn-primary rt-btn w-full text-xs py-1.5 flex items-center justify-center gap-1.5"
+              >
+                <span>+ Thêm Google Font</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
         <select id="rte-block-format" class="ox-rte-select" title="Kiểu đoạn / Tiêu đề" aria-label="Kiểu đoạn">
           <option value="p">Đoạn văn (&lt;p&gt;)</option>
@@ -118,14 +150,23 @@
           <option value="h3">Tiêu đề H3</option>
         </select>
 
-        <select id="rte-font-size" class="ox-rte-select" title="Cỡ chữ" aria-label="Cỡ chữ">
-          <option value="">Cỡ chữ</option>
-          <option value="13px">13px</option>
-          <option value="15px">15px</option>
-          <option value="16px">16px</option>
-          <option value="18px">18px</option>
-          <option value="22px">22px</option>
-        </select>
+        {# Bộ điều khiển Cỡ chữ tùy ý (10–72px) kèm nút - / + và nhận diện vùng chọn thời gian thực #}
+        <div class="rt-fontsize-group flex items-center gap-1" title="Cỡ chữ tùy ý (10–72px)">
+          <button type="button" id="rte-fontsize-dec" class="ox-rte-btn w-7 px-0" aria-label="Giảm cỡ chữ" title="Giảm 1px">−</button>
+          <div class="rt-fontsize-input-wrap flex items-center">
+            <input
+              id="rte-font-size"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              aria-label="Cỡ chữ (px)"
+              placeholder="14"
+              class="rt-fontsize-input font-mono"
+            />
+            <span class="rt-fontsize-unit font-mono">px</span>
+          </div>
+          <button type="button" id="rte-fontsize-inc" class="ox-rte-btn w-7 px-0" aria-label="Tăng cỡ chữ" title="Tăng 1px">+</button>
+        </div>
 
         <span class="ox-rte-sep" aria-hidden="true"></span>
 

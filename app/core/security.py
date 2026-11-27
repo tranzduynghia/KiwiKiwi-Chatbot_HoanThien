@@ -357,11 +357,16 @@ class SessionTokenSigner:
                 len(cleaned_secret),
                 MIN_RECOMMENDED_SECRET_LEN,
             )
+        self._secret_key = cleaned_secret
         self._serializer = URLSafeTimedSerializer(
             cleaned_secret,
             salt=salt,
             signer_kwargs={"digest_method": hashlib.sha256},
         )
+
+    def derive_signer(self, salt: str) -> "SessionTokenSigner":
+        """Tạo bộ ký độc lập cùng khóa bí mật nhưng khác miền salt (ví dụ cho Step-up Auth)."""
+        return SessionTokenSigner(secret_key=self._secret_key, salt=salt)
 
     def encode(self, data: dict[str, Any]) -> str:
         """Ký dữ liệu từ điển thành chuỗi token an toàn cho cookie."""
