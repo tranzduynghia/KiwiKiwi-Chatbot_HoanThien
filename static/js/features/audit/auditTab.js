@@ -238,14 +238,14 @@ export function createAuditTabController() {
                   const beforeStr = formatDiffValue(ch.before, field);
                   const afterStr = formatDiffValue(ch.after, field);
                   return `
-                    <tr class="align-top hover:bg-[#131720]/70">
+                    <tr class="align-top ox-diff-row">
                       <td class="py-3 pr-3 font-mono text-slate-200 break-all">${escapeHtml(field)}</td>
                       <td class="py-3 pr-2">
-                        <div class="rounded-md bg-rose-500/10 border border-rose-500/25 px-2.5 py-1.5 font-mono text-[11px] text-rose-200 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${escapeHtml(beforeStr)}</div>
+                        <div class="ox-alert-danger rounded-md px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${escapeHtml(beforeStr)}</div>
                       </td>
                       <td class="py-3 px-1 text-center text-[#5e6778] font-bold">→</td>
                       <td class="py-3 pl-2">
-                        <div class="rounded-md bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1.5 font-mono text-[11px] text-emerald-200 whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${escapeHtml(afterStr)}</div>
+                        <div class="ox-diff-after-box rounded-md px-2.5 py-1.5 font-mono text-[11px] whitespace-pre-wrap break-words max-h-40 overflow-y-auto">${escapeHtml(afterStr)}</div>
                       </td>
                     </tr>
                   `;

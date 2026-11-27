@@ -38,10 +38,8 @@ export function showToast(message, isSuccess = true) {
   const toastEl = document.getElementById("toast");
   if (!toastEl) return;
   toastEl.textContent = formatErrorMessage(message, isSuccess ? "Thành công." : "Đã xảy ra lỗi.");
-  toastEl.className = `fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl text-sm shadow-xl border ${
-    isSuccess
-      ? "bg-emerald-950/95 border-emerald-500/40 text-emerald-200"
-      : "bg-rose-950/95 border-rose-500/40 text-rose-200"
+  toastEl.className = `fixed bottom-5 right-5 z-50 max-w-sm px-4 py-3 rounded-xl text-sm border ${
+    isSuccess ? "ox-toast-success" : "ox-toast-error"
   }`;
   toastEl.classList.remove("hidden");
   clearTimeout(toastEl._timerId);

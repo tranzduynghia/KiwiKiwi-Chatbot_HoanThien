@@ -83,7 +83,7 @@ export function createPermissionsTabController({ isAdmin }) {
               ? '<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300">OAuth2</span>'
               : "";
           const countryPart = item.country_code
-            ? ` <span class="px-1.5 py-0.5 rounded bg-slate-800/80 text-[10px] font-mono text-slate-300">${escapeHtml(item.country_code)}</span>`
+            ? ` <span class="ox-badge-neutral px-1.5 py-0.5 rounded text-[10px] font-mono">${escapeHtml(item.country_code)}</span>`
             : "";
           return `
             <tr>
@@ -149,7 +149,7 @@ export function createPermissionsTabController({ isAdmin }) {
                 <tr data-username="${escapeHtml(user.username)}">
                   <td class="py-2.5 pr-3 font-medium text-slate-100">${escapeHtml(user.username)}</td>
                   <td class="py-2.5 pr-3">
-                    <span class="px-2 py-0.5 rounded text-[11px] ${user.role === "admin" ? "bg-indigo-500/20 text-indigo-300" : "bg-slate-800 text-slate-400"}">${escapeHtml(user.role)}</span>
+                    <span class="px-2 py-0.5 rounded text-[11px] ${user.role === "admin" ? "bg-indigo-500/20 text-indigo-300" : "ox-badge-neutral"}">${escapeHtml(user.role)}</span>
                   </td>
                   <td class="py-2.5 pr-3 text-slate-400">
                     ${escapeHtml(user.last_login_at ? new Date(user.last_login_at).toLocaleString("vi-VN") : "Chưa đăng nhập")}

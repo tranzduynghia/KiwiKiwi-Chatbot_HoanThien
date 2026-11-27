@@ -85,7 +85,7 @@ export function createModelsTabController({ onRefreshAll }) {
 
     if (!autoChainState.length) {
       const effectiveChain = (currentModelsRuntime?.auto_chain || []).join(" → ");
-      listBox.innerHTML = `<div class="text-xs text-slate-400 bg-slate-950 border border-slate-800 rounded-lg p-3">
+      listBox.innerHTML = `<div class="ox-diff-before-box text-xs rounded-lg p-3">
         Đang dùng chế độ tự chọn mặc định: <span class="font-mono text-indigo-300">${escapeHtml(effectiveChain)}</span>
       </div>`;
       return;
@@ -94,7 +94,7 @@ export function createModelsTabController({ onRefreshAll }) {
     listBox.innerHTML = autoChainState
       .map(
         (mid, index) => `
-          <div class="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs">
+          <div class="ox-diff-before-box flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-xs">
             <div class="flex items-center gap-2">
               <span class="w-5 h-5 rounded-full bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-mono">${index + 1}</span>
               <span class="font-mono text-slate-100">${escapeHtml(mid)}</span>
@@ -126,7 +126,7 @@ export function createModelsTabController({ onRefreshAll }) {
         const isCustomTag = tag && !["🆓", "🧪", "💳"].includes(tag);
 
         return `
-          <tr data-model-id="${escapeHtml(item.id)}" class="hover:bg-slate-900/60">
+          <tr data-model-id="${escapeHtml(item.id)}" class="ox-diff-row">
             <td class="py-2.5 pr-3">
               <div class="font-mono text-slate-100">${escapeHtml(item.id)}</div>
               <div class="text-[11px] text-slate-500">Mặc định: ${escapeHtml(item.default_badge)} · ${escapeHtml(item.source)}</div>

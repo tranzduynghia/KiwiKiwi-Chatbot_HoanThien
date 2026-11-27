@@ -27,6 +27,18 @@ html[data-theme="normal"] {
   --alert-danger-text: #fecdd3;
   --alert-danger-strong: #ffffff;
   --alert-danger-code-bg: rgba(255, 255, 255, 0.12);
+  --alert-warning-bg: rgba(245, 158, 11, 0.12);
+  --alert-warning-border: rgba(245, 158, 11, 0.35);
+  --alert-warning-text: #fde68a;
+  --alert-warning-strong: #fcd34d;
+  --diff-row-bg: rgba(15, 23, 42, 0.55);
+  --diff-before-bg: rgba(11, 14, 20, 0.85);
+  --diff-before-border: rgba(51, 65, 85, 0.6);
+  --diff-before-text: #cbd5e1;
+  --diff-after-bg: rgba(6, 78, 59, 0.35);
+  --diff-after-border: rgba(16, 185, 129, 0.45);
+  --diff-after-text: #6ee7b7;
+  --diff-after-label: #34d399;
 
   /* Bí danh tương thích với lớp --ox-* hiện có */
   --ox-bg: var(--bg-base);
@@ -70,6 +82,18 @@ html[data-theme="dark"] {
   --alert-danger-text: #fecdd3;
   --alert-danger-strong: #ffffff;
   --alert-danger-code-bg: rgba(255, 255, 255, 0.12);
+  --alert-warning-bg: rgba(245, 158, 11, 0.12);
+  --alert-warning-border: rgba(245, 158, 11, 0.35);
+  --alert-warning-text: #fde68a;
+  --alert-warning-strong: #fcd34d;
+  --diff-row-bg: rgba(15, 23, 42, 0.55);
+  --diff-before-bg: rgba(11, 14, 20, 0.85);
+  --diff-before-border: rgba(51, 65, 85, 0.6);
+  --diff-before-text: #cbd5e1;
+  --diff-after-bg: rgba(6, 78, 59, 0.35);
+  --diff-after-border: rgba(16, 185, 129, 0.45);
+  --diff-after-text: #6ee7b7;
+  --diff-after-label: #34d399;
 }
 
 html[data-theme="light"] {
@@ -94,6 +118,18 @@ html[data-theme="light"] {
   --alert-danger-text: #9f1239;
   --alert-danger-strong: #881337;
   --alert-danger-code-bg: #ffe4e6;
+  --alert-warning-bg: #fffbeb;
+  --alert-warning-border: #fcd34d;
+  --alert-warning-text: #92400e;
+  --alert-warning-strong: #78350f;
+  --diff-row-bg: #f8fafc;
+  --diff-before-bg: #ffffff;
+  --diff-before-border: #cbd5e1;
+  --diff-before-text: #1e293b;
+  --diff-after-bg: #ecfdf5;
+  --diff-after-border: #6ee7b7;
+  --diff-after-text: #065f46;
+  --diff-after-label: #047857;
 }
 
 * {
@@ -880,20 +916,31 @@ html[data-theme="light"] .bg-\[\#0e1117\],
 html[data-theme="light"] .bg-\[\#0e1117\]\/95,
 html[data-theme="light"] .bg-\[\#10141c\],
 html[data-theme="light"] .bg-\[\#10141c\]\/95,
+html[data-theme="light"] .bg-slate-950,
 html[data-theme="light"] .bg-slate-950\/70,
 html[data-theme="light"] .bg-slate-900\/60 {
   background-color: #f1f5f9;
 }
 
 html[data-theme="light"] .bg-\[\#131720\],
-html[data-theme="light"] .bg-\[\#181d27\] {
+html[data-theme="light"] .bg-\[\#181d27\],
+html[data-theme="light"] .bg-slate-800,
+html[data-theme="light"] .bg-slate-800\/80 {
   background-color: #e9eef5;
+}
+
+html[data-theme="light"] .hover\:bg-slate-900\/60:hover,
+html[data-theme="light"] .hover\:bg-\[\#131720\]\/70:hover {
+  background-color: #f1f5f9;
 }
 
 html[data-theme="light"] .border-\[\#1e232e\],
 html[data-theme="light"] .border-\[\#252b38\],
 html[data-theme="light"] .border-\[\#2a3140\],
 html[data-theme="light"] .border-slate-800,
+html[data-theme="light"] .border-slate-800\/80,
+html[data-theme="light"] .border-slate-700,
+html[data-theme="light"] .border-slate-700\/70,
 html[data-theme="light"] .border-slate-700\/80 {
   border-color: #cbd5e1;
 }
@@ -916,23 +963,38 @@ html[data-theme="light"] .tab-btn:hover {
   background-color: rgba(15, 23, 42, 0.05);
 }
 
+html[data-theme="light"] .text-emerald-200,
 html[data-theme="light"] .text-emerald-300,
 html[data-theme="light"] .text-emerald-400 {
   color: #047857;
 }
 
+html[data-theme="light"] .text-rose-100,
+html[data-theme="light"] .text-rose-200,
 html[data-theme="light"] .text-rose-300,
 html[data-theme="light"] .text-rose-400 {
   color: #be123c;
 }
 
+html[data-theme="light"] .text-amber-100,
+html[data-theme="light"] .text-amber-100\/90,
 html[data-theme="light"] .text-amber-200,
 html[data-theme="light"] .text-amber-300 {
   color: #b45309;
 }
 
+html[data-theme="light"] .text-sky-200,
 html[data-theme="light"] .text-sky-300 {
   color: #0369a1;
+}
+
+html[data-theme="light"] .text-indigo-200,
+html[data-theme="light"] .text-indigo-300 {
+  color: #4338ca;
+}
+
+html[data-theme="light"] .text-violet-300 {
+  color: #6d28d9;
 }
 
 /* Hộp cảnh báo nguy hiểm / bảo trì DND dùng chung cho cả 3 giao diện (Normal / Dark / Light) */
@@ -962,6 +1024,107 @@ html[data-theme="light"] .text-sky-300 {
   background-color: var(--alert-danger-code-bg);
   border: 1px solid var(--alert-danger-border);
   color: var(--alert-danger-strong);
+}
+
+/* Hộp cảnh báo tác động cao (màu vàng) thích ứng 3 giao diện */
+.ox-alert-warning {
+  background-color: var(--alert-warning-bg);
+  border: 1px solid var(--alert-warning-border);
+  color: var(--alert-warning-text);
+}
+
+.ox-alert-warning .ox-alert-warning-title,
+.ox-alert-warning strong {
+  color: var(--alert-warning-strong);
+}
+
+/* Bề mặt Modal & Bảng đối chiếu Before / After ngữ nghĩa cho Normal / Dark / Light */
+.ox-modal-surface {
+  background-color: var(--bg-surface);
+  border-color: var(--border-strong);
+}
+
+.ox-modal-header,
+.ox-modal-footer {
+  background-color: var(--bg-base);
+  border-color: var(--border-subtle);
+}
+
+.ox-diff-table-wrap {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+
+.ox-diff-thead {
+  background-color: var(--bg-elevated);
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ox-diff-tbody > :not([hidden]) ~ :not([hidden]) {
+  border-color: var(--border-subtle);
+}
+
+.ox-diff-row {
+  background-color: transparent;
+  transition: background-color 140ms ease;
+}
+
+.ox-diff-row:hover {
+  background-color: var(--diff-row-bg);
+}
+
+.ox-diff-long-row {
+  background-color: var(--diff-row-bg);
+}
+
+.ox-diff-meta-pill {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.ox-diff-before-box {
+  background-color: var(--diff-before-bg);
+  border: 1px solid var(--diff-before-border);
+  color: var(--diff-before-text);
+}
+
+.ox-diff-after-box {
+  background-color: var(--diff-after-bg);
+  border: 1px solid var(--diff-after-border);
+  color: var(--diff-after-text);
+}
+
+.ox-diff-after-label {
+  color: var(--diff-after-label);
+}
+
+.ox-diff-impact-box {
+  background-color: var(--alert-warning-bg);
+  border: 1px solid var(--alert-warning-border);
+  color: var(--alert-warning-strong);
+}
+
+.ox-badge-neutral {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+}
+
+/* Thông báo Toast nổi thích ứng 3 giao diện */
+.ox-toast-success {
+  background-color: var(--bg-surface);
+  border-color: var(--diff-after-border);
+  color: var(--diff-after-text);
+  box-shadow: 0 12px 30px -10px rgba(15, 23, 42, 0.35), inset 0 0 0 999px var(--diff-after-bg);
+}
+
+.ox-toast-error {
+  background-color: var(--bg-surface);
+  border-color: var(--alert-danger-border);
+  color: var(--alert-danger-strong);
+  box-shadow: 0 12px 30px -10px rgba(15, 23, 42, 0.35), inset 0 0 0 999px var(--alert-danger-bg);
 }
 
 html[data-theme="light"] .presence-status-btn[data-selected="true"] {

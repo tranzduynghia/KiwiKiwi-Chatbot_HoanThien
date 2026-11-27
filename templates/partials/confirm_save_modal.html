@@ -8,10 +8,10 @@
 >
   <div
     id="confirm-save-panel"
-    class="ox-modal-panel card w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden border border-slate-700/80 bg-[#10141c]/95"
+    class="ox-modal-panel ox-modal-surface card w-full max-w-3xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden border"
   >
     {# Tiêu đề hộp thoại #}
-    <div class="p-4 border-b border-[#1e232e] flex items-start justify-between gap-3 bg-[#0e1117]/95">
+    <div class="ox-modal-header p-4 border-b flex items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex items-center gap-2">
           <span
@@ -44,20 +44,20 @@
       {# Biểu ngữ cảnh báo màu vàng khi phát hiện cài đặt/thao tác có tác động lớn #}
       <div
         id="confirm-save-warning"
-        class="hidden rounded-xl bg-amber-500/10 border border-amber-500/35 px-3.5 py-3 text-xs text-amber-200 space-y-1.5"
+        class="hidden ox-alert-warning rounded-xl px-3.5 py-3 text-xs space-y-1.5"
         role="alert"
       >
-        <div class="font-semibold text-amber-300 flex items-center gap-1.5">
+        <div class="ox-alert-warning-title font-semibold flex items-center gap-1.5">
           <span>⚠️</span>
           <span>Cảnh báo thay đổi có tác động vận hành cao</span>
         </div>
-        <ul id="confirm-save-warning-list" class="list-disc pl-5 space-y-1 text-[11px] text-amber-100/90 leading-relaxed"></ul>
+        <ul id="confirm-save-warning-list" class="list-disc pl-5 space-y-1 text-[11px] leading-relaxed"></ul>
       </div>
 
       {# Ô nhập liệu trong ứng dụng (thay thế hoàn toàn window.prompt cho thao tác đổi mật khẩu, v.v.) #}
       <div
         id="confirm-save-input-wrap"
-        class="hidden rounded-xl border border-[#252b38] bg-[#0a0d12] p-3.5 space-y-2"
+        class="hidden ox-diff-before-box rounded-xl p-3.5 space-y-2"
       >
         <label id="confirm-save-input-label" for="confirm-save-input" class="block text-xs font-medium text-slate-200"></label>
         <input
@@ -71,24 +71,24 @@
       </div>
 
       {# Bảng tóm tắt Giá trị cũ (Before) -> Giá trị mới (After) #}
-      <div id="confirm-save-table-wrap" class="rounded-xl border border-[#1e232e] bg-[#0a0d12] overflow-hidden">
+      <div id="confirm-save-table-wrap" class="ox-diff-table-wrap rounded-xl overflow-hidden">
         <div class="overflow-x-auto">
           <table class="w-full text-left text-xs border-collapse">
             <thead>
-              <tr class="border-b border-[#1e232e] bg-[#10141c] text-[#8b95a7]">
+              <tr class="ox-diff-thead">
                 <th class="py-2.5 px-3.5 font-medium w-[32%]">Tên cấu hình</th>
                 <th class="py-2.5 px-3.5 font-medium w-[34%]">Giá trị cũ (Before)</th>
                 <th class="py-2.5 px-3.5 font-medium w-[34%]">Giá trị mới (After)</th>
               </tr>
             </thead>
-            <tbody id="confirm-save-tbody" class="divide-y divide-[#1e232e]/80"></tbody>
+            <tbody id="confirm-save-tbody" class="ox-diff-tbody divide-y"></tbody>
           </table>
         </div>
       </div>
     </div>
 
     {# Thanh nút hành động: Hủy bỏ & Xác nhận lưu #}
-    <div class="px-4 py-3 border-t border-[#1e232e] bg-[#0e1117]/95 flex flex-wrap items-center justify-between gap-2">
+    <div class="ox-modal-footer px-4 py-3 border-t flex flex-wrap items-center justify-between gap-2">
       <span id="confirm-save-count" class="text-[11px] text-[#8b95a7] font-mono">0 thay đổi</span>
       <div class="flex items-center gap-2">
         <button type="button" id="btn-cancel-confirm-save" class="btn-ghost text-xs">

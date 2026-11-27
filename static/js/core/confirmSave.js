@@ -386,19 +386,19 @@ function renderLongTextDiffRow(row) {
   const newChars = newStr.length;
   const deltaChars = newChars - oldChars;
   const deltaSign = deltaChars > 0 ? `+${formatNumber(deltaChars)}` : formatNumber(deltaChars);
-  const deltaClass = deltaChars >= 0 ? "text-emerald-300" : "text-amber-300";
+  const deltaClass = deltaChars >= 0 ? "ox-diff-after-label" : "text-amber-300";
   const oldLines = countLines(oldStr);
   const newLines = countLines(newStr);
 
   return `
-    <tr class="align-top bg-[#0c1018]/60">
+    <tr class="align-top ox-diff-long-row">
       <td colspan="3" class="p-3.5 space-y-2.5">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <span class="font-medium text-slate-100">${escapeHtml(row.label)}</span>
             <span class="ml-2 font-mono text-[10px] text-[#5e6778]">${escapeHtml(row.key)}</span>
           </div>
-          <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#131720] border border-[#252b38] font-mono text-[11px] text-slate-300">
+          <span class="ox-diff-meta-pill inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full font-mono text-[11px]">
             <span>${formatNumber(oldChars)} ký tự (${oldLines} dòng)</span>
             <span class="text-[#5e6778]">→</span>
             <span class="${deltaClass} font-semibold">${formatNumber(newChars)} ký tự (${newLines} dòng)</span>
@@ -408,11 +408,11 @@ function renderLongTextDiffRow(row) {
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div class="space-y-1">
             <div class="text-[10px] uppercase tracking-wider text-[#8b95a7] font-medium">Bản cũ (Before)</div>
-            <pre class="max-h-40 overflow-y-auto rounded-lg bg-[#131720] border border-[#1e232e] p-2.5 font-mono text-[11px] text-[#8b95a7] whitespace-pre-wrap break-words leading-relaxed">${escapeHtml(truncatePreviewText(oldStr))}</pre>
+            <pre class="ox-diff-before-box max-h-40 overflow-y-auto rounded-lg p-2.5 font-mono text-[11px] whitespace-pre-wrap break-words leading-relaxed">${escapeHtml(truncatePreviewText(oldStr))}</pre>
           </div>
           <div class="space-y-1">
-            <div class="text-[10px] uppercase tracking-wider text-emerald-400 font-medium">Bản mới (After)</div>
-            <pre class="max-h-40 overflow-y-auto rounded-lg bg-emerald-950/20 border border-emerald-500/30 p-2.5 font-mono text-[11px] text-emerald-200 whitespace-pre-wrap break-words leading-relaxed">${escapeHtml(truncatePreviewText(newStr))}</pre>
+            <div class="ox-diff-after-label text-[10px] uppercase tracking-wider font-medium">Bản mới (After)</div>
+            <pre class="ox-diff-after-box max-h-40 overflow-y-auto rounded-lg p-2.5 font-mono text-[11px] whitespace-pre-wrap break-words leading-relaxed">${escapeHtml(truncatePreviewText(newStr))}</pre>
           </div>
         </div>
       </td>
@@ -421,26 +421,24 @@ function renderLongTextDiffRow(row) {
 }
 
 function renderStandardDiffRow(row) {
-  const afterClass = row.isHighImpact
-    ? "text-amber-300 bg-amber-500/10 border-amber-500/30"
-    : "text-emerald-300 bg-emerald-500/10 border-emerald-500/25";
+  const afterClass = row.isHighImpact ? "ox-diff-impact-box" : "ox-diff-after-box";
   const badge = row.isHighImpact
-    ? '<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">Tác động cao</span>'
+    ? '<span class="ox-diff-impact-box ml-1.5 text-[10px] px-1.5 py-0.5 rounded font-medium">Tác động cao</span>'
     : row.isSensitive
-      ? '<span class="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">Đã che</span>'
+      ? '<span class="ox-badge-neutral ml-1.5 text-[10px] px-1.5 py-0.5 rounded">Đã che</span>'
       : "";
 
   return `
-    <tr class="align-top hover:bg-[#131720]/70">
+    <tr class="align-top ox-diff-row">
       <td class="py-2.5 px-3.5">
         <div class="font-medium text-slate-100 leading-snug">${escapeHtml(row.label)}${badge}</div>
         <div class="font-mono text-[10px] text-[#5e6778] mt-0.5 break-all">${escapeHtml(row.key)}</div>
       </td>
       <td class="py-2.5 px-3.5">
-        <span class="inline-block max-w-full font-mono text-[11px] text-[#8b95a7] bg-[#131720] border border-[#1e232e] rounded px-2 py-1 break-words whitespace-pre-wrap">${escapeHtml(row.formattedBefore)}</span>
+        <span class="ox-diff-before-box inline-block max-w-full font-mono text-[11px] rounded px-2 py-1 break-words whitespace-pre-wrap">${escapeHtml(row.formattedBefore)}</span>
       </td>
       <td class="py-2.5 px-3.5">
-        <span class="inline-block max-w-full font-mono text-[11px] border rounded px-2 py-1 break-words whitespace-pre-wrap ${afterClass}">${escapeHtml(row.formattedAfter)}</span>
+        <span class="${afterClass} inline-block max-w-full font-mono text-[11px] rounded px-2 py-1 break-words whitespace-pre-wrap">${escapeHtml(row.formattedAfter)}</span>
       </td>
     </tr>
   `;
