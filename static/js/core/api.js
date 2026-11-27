@@ -54,15 +54,34 @@ export function setStepUpRequiredHandler(handler) {
 
 export async function apiRequest(url, options = {}) {
   const { redirectOn401 = true, ...fetchOptions } = options;
-  const response = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(fetchOptions.headers || {}) },
-    ...fetchOptions,
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      credentials: "same-origin",
+      redirect: "manual",
+      ...fetchOptions,
+      headers: { "Content-Type": "application/json", ...(fetchOptions.headers || {}) },
+    });
+  } catch (networkErr) {
+    const err = new Error("Không thể kết nối tới máy chủ (lỗi mạng hoặc bị chặn chuyển hướng). Vui lòng tải lại trang.");
+    err.cause = networkErr;
+    throw err;
+  }
+  if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+    if (redirectOn401) {
+      window.location.reload();
+    }
+    const err = new Error("Phiên xác thực đã hết hạn hoặc bị chuyển hướng (HTTP 302). Vui lòng tải lại trang.");
+    err.status = response.status || 302;
+    throw err;
+  }
   if (response.status === 401 && redirectOn401) {
     window.location.href = "/login";
     throw new Error("Phiên đăng nhập đã hết hạn.");
   }
-  const data = await response.json().catch(() => ({}));
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  const data = isJson ? await response.json().catch(() => ({})) : {};
   if (response.status === 403 && data && data.detail === "STEP_UP_REQUIRED") {
     if (_onStepUpRequired) {
       _onStepUpRequired();
@@ -73,7 +92,10 @@ export async function apiRequest(url, options = {}) {
     throw err;
   }
   if (!response.ok) {
-    const errMessage = formatErrorMessage(data.detail ?? data.message, `Lỗi HTTP ${response.status}`);
+    const fallback = isJson
+      ? `Lỗi HTTP ${response.status}`
+      : `Máy chủ trả về phản hồi không phải JSON (HTTP ${response.status}).`;
+    const errMessage = formatErrorMessage(data.detail ?? data.message, fallback);
     const err = new Error(errMessage);
     err.status = response.status;
     throw err;

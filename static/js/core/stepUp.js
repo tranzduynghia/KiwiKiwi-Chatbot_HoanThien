@@ -246,6 +246,7 @@ export function createStepUpController({
       fetch("/api/auth/step-up/lock", {
         method: "POST",
         credentials: "same-origin",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
       }).catch(() => {});
     }

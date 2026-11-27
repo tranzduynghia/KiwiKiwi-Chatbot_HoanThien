@@ -29,19 +29,28 @@ if (loginForm) {
     try {
       const response = await fetch("/auth/login", {
         method: "POST",
+        credentials: "same-origin",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: document.getElementById("username").value.trim(),
           password: document.getElementById("password").value,
         }),
       });
+      if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) {
+        window.location.reload();
+        throw new Error("Phiên Cloudflare Access đã hết hạn, đang tải lại trang...");
+      }
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data.detail || "Đăng nhập thất bại.");
+        throw new Error(data.detail || `Đăng nhập thất bại (HTTP ${response.status}).`);
       }
       window.location.href = "/dashboard";
     } catch (err) {
-      errorBox.textContent = err.message;
+      errorBox.textContent =
+        err instanceof TypeError
+          ? "Không thể kết nối tới máy chủ xác thực (lỗi mạng hoặc bị chặn chuyển hướng). Vui lòng tải lại trang."
+          : err.message;
       errorBox.classList.remove("hidden");
     } finally {
       submitBtn.disabled = false;

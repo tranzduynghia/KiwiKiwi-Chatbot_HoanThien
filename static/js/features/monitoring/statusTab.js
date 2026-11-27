@@ -541,7 +541,7 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
                 return;
               }
               try {
-                const probe = await fetch("/api/health", { cache: "no-store" });
+                const probe = await fetch("/api/health", { credentials: "same-origin", cache: "no-store" });
                 if (probe.ok) {
                   if (detailEl) {
                     detailEl.textContent = "✅ Container mới đã trực tuyến trở lại! Đang làm mới Dashboard...";

@@ -442,9 +442,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
         try {
           const resp = await fetch("/api/tunnel/status", {
             method: "GET",
+            credentials: "same-origin",
+            redirect: "manual",
             headers: { Accept: "application/json" },
             cache: "no-store",
           });
+          if (resp.type === "opaqueredirect" || (resp.status >= 300 && resp.status < 400)) {
+            window.location.reload();
+            return;
+          }
           if (resp.status === 401) {
             window.location.href = "/login";
             return;
@@ -658,9 +664,15 @@ export function createTunnelCardController({ isAdmin, onConfigSaved }) {
           try {
             const resp = await fetch("/api/tunnel/update", {
               method: "POST",
+              credentials: "same-origin",
+              redirect: "manual",
               headers: { "Content-Type": "application/json" },
               body: payloadBody,
             });
+            if (resp.type === "opaqueredirect" || (resp.status >= 300 && resp.status < 400)) {
+              window.location.reload();
+              throw new Error("Phiên xác thực đã hết hạn (HTTP 302). Vui lòng tải lại trang.");
+            }
             if (resp.status === 401) {
               window.location.href = "/login";
               throw new Error("Phiên đăng nhập đã hết hạn.");
