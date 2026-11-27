@@ -27,6 +27,14 @@
 
   {# Cụm trạng thái, nút thao tác nhanh và hồ sơ quản trị viên #}
   <div class="flex items-center gap-2.5 shrink-0">
+    <span
+      id="hdr-dnd-badge"
+      class="{{ 'inline-flex' if dnd_maintenance else 'hidden' }} items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/40 select-none"
+      title="Chế độ bảo trì DND đang bật — Đã tạm khóa /ask & session từ user thường"
+    >
+      <span class="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" aria-hidden="true"></span>
+      <span>⛔ DND Bảo trì</span>
+    </span>
     <span id="hdr-status-badge" class="text-[11px] font-medium px-2.5 py-1 rounded-full bg-[#181d27] text-[#8b95a7] border border-[#252b38]">
       Đang tải...
     </span>

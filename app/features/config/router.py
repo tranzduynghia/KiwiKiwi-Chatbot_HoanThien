@@ -43,6 +43,7 @@ def create_config_router(
     stop_warp_fn: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None,
     trace_warp_fn: Optional[Callable[[], Awaitable[dict[str, Any]]]] = None,
     get_tunnel_status_fn: Optional[Callable[[], dict[str, Any]]] = None,
+    maintenance_gate: Any = None,
 ) -> APIRouter:
     """Tạo router cho `/api/config*`, `/api/tunnel/update`, `/api/tunnel/status` và `/api/warp/*`."""
     router = APIRouter(tags=["config"])
@@ -112,16 +113,34 @@ def create_config_router(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        before_cfg = await config_service.get_config(force=False)
+        before_presence = before_cfg.get("presence") if isinstance(before_cfg.get("presence"), dict) else {}
+        previous_status = str(before_presence.get("status") or "online").strip().lower()
+
         actor, actor_type = auth_deps.actor_label(user)
+        actor_meta = auth_deps.actor_meta(user)
         updated = await config_service.update_config(
             {"presence": clean_presence},
             updated_by=actor,
             actor_type=actor_type,
-            actor_meta=auth_deps.actor_meta(user),
+            actor_meta=actor_meta,
             section="presence",
             summary="Cập nhật trạng thái hiển thị & hoạt động Bot",
             client_changes=payload.changes,
         )
+
+        if maintenance_gate is not None:
+            maintenance_gate.sync_from_config(clean_presence)
+            if previous_status != clean_presence["status"]:
+                await maintenance_gate.record_status_transition(
+                    from_status=previous_status,
+                    to_status=clean_presence["status"],
+                    actor=actor,
+                    actor_type=actor_type,
+                    actor_meta=actor_meta,
+                    source="Dashboard",
+                    flush=True,
+                )
 
         applied_live = False
         if apply_presence_fn is not None:
@@ -130,6 +149,8 @@ def create_config_router(
         return {
             "ok": True,
             "applied_live": applied_live,
+            "bot_status": clean_presence["status"],
+            "maintenance_mode": clean_presence["status"] == "dnd",
             "config": _mask_config_secrets(updated),
             "sync": sync_coordinator.sync_status(),
         }

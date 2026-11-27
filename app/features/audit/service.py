@@ -28,6 +28,7 @@ class AuditService:
         timestamp: Optional[str] = None,
         actor_meta: Optional[dict[str, Any]] = None,
         source: Optional[str] = None,
+        extra_fields: Optional[dict[str, Any]] = None,
         flush: bool = True,
     ) -> dict[str, Any]:
         """Ghi một bản ghi Audit Log sau khi loại bỏ/che trường nhạy cảm và kèm thông tin avatar/nguồn thao tác."""
@@ -48,8 +49,10 @@ class AuditService:
                 "after": sanitize_audit_value(change.get("after")),
             })
         meta = actor_meta or {}
-        doc = {
-            "at": timestamp or datetime.now(timezone.utc).isoformat(),
+        iso_now = timestamp or datetime.now(timezone.utc).isoformat()
+        doc: dict[str, Any] = {
+            "at": iso_now,
+            "timestamp": iso_now,
             "actor": actor,
             "actor_type": actor_type,
             "actor_display_name": str(meta.get("actor_display_name") or actor),
@@ -62,6 +65,12 @@ class AuditService:
         }
         if source:
             doc["source"] = str(source)
+        if isinstance(extra_fields, dict):
+            for key, val in extra_fields.items():
+                key_str = str(key or "").strip()
+                if not key_str or key_str in doc or is_sensitive_field(key_str):
+                    continue
+                doc[key_str] = sanitize_audit_value(val)
         self._repository.enqueue(doc)
         if flush:
             await self._sync.flush_pending()

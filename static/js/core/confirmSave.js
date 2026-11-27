@@ -272,6 +272,12 @@ function detectHighImpactWarning(key, beforeVal, afterVal) {
   if (k === "ask.max_concurrent" && Number(afterVal) >= 10) {
     return `Tăng số request song song lên ${afterVal} có thể làm tăng đột biến RAM container và dễ chạm lỗi 429 Quota.`;
   }
+  if ((k === "presence.status" || k === "status") && String(afterVal || "").toLowerCase() === "dnd") {
+    return "Chuyển sang 'Không làm phiền (DND)' sẽ KÍCH HOẠT NGAY chế độ bảo trì hệ thống: toàn bộ lệnh /ask, tương tác nút bấm và phiên AI của người dùng thường sẽ bị chặn tức thì (chỉ Admin được vượt khóa kiểm thử).";
+  }
+  if ((k === "presence.status" || k === "status") && String(beforeVal || "").toLowerCase() === "dnd" && String(afterVal || "").toLowerCase() !== "dnd") {
+    return "Tắt chế độ 'Không làm phiền (DND)' sẽ mở khóa lại toàn bộ lệnh /ask và phiên chat AI cho người dùng thường ngay lập tức.";
+  }
   if (k === "ask.gemini_timeout_seconds" && Number(afterVal) < 30) {
     return `Timeout Gemini API thấp (${afterVal}s) có thể làm ngắt sớm các câu trả lời dài hoặc bật Thinking.`;
   }

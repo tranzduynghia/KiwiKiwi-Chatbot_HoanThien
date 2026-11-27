@@ -200,6 +200,20 @@ export function createStatusTabController({ onTunnelTelemetry } = {}) {
     try {
       const data = await apiRequest(`/api/status${checkGemini ? "?check_gemini=1" : ""}`);
       const isOnline = data.bot.online;
+      const isDndMaintenance = Boolean(
+        data.bot.maintenance_mode || String(data.bot.presence_status || "").toLowerCase() === "dnd"
+      );
+
+      const dndBadge = document.getElementById("hdr-dnd-badge");
+      if (dndBadge) {
+        dndBadge.classList.toggle("hidden", !isDndMaintenance);
+        dndBadge.classList.toggle("inline-flex", isDndMaintenance);
+      }
+      const dndBanner = document.getElementById("dnd-maintenance-banner");
+      if (dndBanner) {
+        dndBanner.classList.toggle("hidden", !isDndMaintenance);
+        dndBanner.classList.toggle("flex", isDndMaintenance);
+      }
 
       const headerBadge = document.getElementById("hdr-status-badge");
       if (headerBadge) {

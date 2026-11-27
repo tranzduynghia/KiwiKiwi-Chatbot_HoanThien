@@ -95,6 +95,7 @@ def create_pages_router(
     usage_stats: Optional[UsageStats] = None,
     tunnel_origin_url: str = "http://127.0.0.1:8080",
     get_tunnel_running: Optional[Callable[[], bool]] = None,
+    get_bot_status: Optional[Callable[[], str]] = None,
 ) -> APIRouter:
     """Tạo router giao diện HTML cho trang gốc, trang đăng nhập và trang quản trị Dashboard."""
     router = APIRouter(tags=["pages"])
@@ -141,6 +142,7 @@ def create_pages_router(
         safe_user = dict(user)
         safe_user["avatar_url"] = sanitize_https_url(str(user.get("avatar_url") or ""))
         tunnel_running = bool(get_tunnel_running()) if callable(get_tunnel_running) else False
+        bot_status = str(get_bot_status() if callable(get_bot_status) else "online").strip().lower() or "online"
         return _render_template(
             templates,
             request,
@@ -153,6 +155,8 @@ def create_pages_router(
                 "bot_display_name": bot_display_name,
                 "tunnel_origin_url": tunnel_origin_url,
                 "tunnel_running": tunnel_running,
+                "bot_status": bot_status,
+                "dnd_maintenance": bot_status == "dnd",
                 "asset_version": ASSET_VERSION,
             },
         )

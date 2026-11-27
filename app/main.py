@@ -15,6 +15,7 @@ from google import genai
 from google.genai import types
 
 from app.bot.client import AskBot
+from app.bot.maintenance_gate import MaintenanceGate
 from app.core.cloudflare_tunnel import CloudflareTunnelService
 from app.core.concurrency import DynamicSemaphore, UserLockManager
 from app.core.database import MongoDatabaseManager
@@ -61,6 +62,7 @@ class AppContainer:
     config_repo: ConfigRepository
     config_service: ConfigService
     atlas_config_watcher: AtlasConfigWatcher
+    maintenance_gate: MaintenanceGate
     permission_repo: PermissionRepository
     permission_service: PermissionService
     user_repo: UserRepository
@@ -190,6 +192,15 @@ def build_container(
     gemini_semaphore = DynamicSemaphore(lambda: config_repo.ask_cfg().get("max_concurrent", 2))
     config_service.on_update(lambda _cfg: gemini_semaphore.notify_limit_changed())
 
+    # Cổng bảo trì chế độ Không làm phiền (DND) đồng bộ nóng RAM <-> MongoDB Atlas
+    maintenance_gate = MaintenanceGate(
+        config_repo=config_repo,
+        audit_service=audit_service,
+        permission_service=permission_service,
+        admin_discord_id=settings.admin_discord_id,
+    )
+    config_service.on_update(lambda cfg: maintenance_gate.sync_from_config(cfg.get("presence") if isinstance(cfg, dict) else None))
+
     # Model Gemini, phiên chat, dịch vụ hỏi đáp và giám sát
     model_cooldowns = ModelCooldownTracker()
     model_registry = ModelRegistry(gemini_client, config_repo, model_cooldowns)
@@ -229,6 +240,7 @@ def build_container(
             "discord_user_cache": user_lookup.clear_cache(),
             "user_cooldowns": user_cooldowns.purge_stale(),
             "model_cooldowns": model_cooldowns.purge_expired(),
+            "dnd_throttles": maintenance_gate.purge_stale_throttles(),
         }
 
     async def _record_memory_watchdog_audit(event: dict[str, Any]) -> None:
@@ -310,6 +322,7 @@ def build_container(
         audit_service=audit_service,
         cloudflare_tunnel=tunnel_service,
         warp_proxy=warp_service,
+        maintenance_gate=maintenance_gate,
     )
     config_service.set_external_sync_hook(atlas_config_watcher.poll_once)
 
@@ -324,6 +337,7 @@ def build_container(
         memory_watchdog=memory_watchdog,
         cloudflare_tunnel=tunnel_service,
         warp_proxy=warp_service,
+        maintenance_gate=maintenance_gate,
         start_time=start_time if start_time is not None else time.time(),
     )
 
@@ -339,6 +353,7 @@ def build_container(
         config_repo=config_repo,
         config_service=config_service,
         atlas_config_watcher=atlas_config_watcher,
+        maintenance_gate=maintenance_gate,
         permission_repo=permission_repo,
         permission_service=permission_service,
         user_repo=user_repo,

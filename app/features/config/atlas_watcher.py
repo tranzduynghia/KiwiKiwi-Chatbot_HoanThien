@@ -122,6 +122,7 @@ class AtlasConfigWatcher:
         audit_service: AuditService,
         cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
         warp_proxy: Optional[Any] = None,
+        maintenance_gate: Optional[Any] = None,
         apply_presence_fn: Optional[Callable[[dict[str, Any]], Awaitable[bool]]] = None,
         poll_interval_seconds: float = DEFAULT_ATLAS_WATCH_INTERVAL_SECONDS,
     ):
@@ -130,6 +131,7 @@ class AtlasConfigWatcher:
         self._audit = audit_service
         self._cloudflare_tunnel = cloudflare_tunnel
         self._warp_proxy = warp_proxy
+        self._maintenance_gate = maintenance_gate
         self._apply_presence_fn = apply_presence_fn
         self.poll_interval_seconds = max(0.2, float(poll_interval_seconds))
 
@@ -224,10 +226,24 @@ class AtlasConfigWatcher:
                 except Exception as exc:
                     log.warning("Lỗi hot-reload Cloudflare WARP từ thay đổi Atlas: %s", exc)
 
-            # 3) Áp dụng nóng Discord Presence nếu người dùng chỉnh nhánh `presence` trực tiếp trong Atlas
+            # 3) Áp dụng nóng Discord Presence & đồng bộ cờ bảo trì DND nếu người dùng chỉnh nhánh `presence` trực tiếp trong Atlas
             presence_reloaded = False
             old_presence = current_snapshot.get("presence") if isinstance(current_snapshot.get("presence"), dict) else {}
             new_presence = remote_normalized.get("presence") if isinstance(remote_normalized.get("presence"), dict) else {}
+            old_bot_status = str(old_presence.get("status") or "online").strip().lower()
+            new_bot_status = str(new_presence.get("status") or "online").strip().lower()
+            if self._maintenance_gate is not None:
+                self._maintenance_gate.sync_from_config(new_presence)
+                if old_bot_status != new_bot_status:
+                    await self._maintenance_gate.record_status_transition(
+                        from_status=old_bot_status,
+                        to_status=new_bot_status,
+                        actor=ATLAS_EXTERNAL_SYNC_SOURCE,
+                        actor_type="system",
+                        actor_meta={"actor_display_name": ATLAS_EXTERNAL_SYNC_SOURCE},
+                        source=ATLAS_EXTERNAL_SYNC_SOURCE,
+                        flush=True,
+                    )
             if old_presence != new_presence and self._apply_presence_fn is not None:
                 try:
                     presence_reloaded = bool(await self._apply_presence_fn(new_presence))

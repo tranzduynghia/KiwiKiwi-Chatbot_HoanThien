@@ -71,10 +71,28 @@ export function createPresenceCardController({ onConfigSaved }) {
     }
   }
 
+  function syncDndBannerAndBadge(isDnd) {
+    const active = Boolean(isDnd);
+    const dndBadge = document.getElementById("hdr-dnd-badge");
+    if (dndBadge) {
+      dndBadge.classList.toggle("hidden", !active);
+      dndBadge.classList.toggle("inline-flex", active);
+    }
+    const dndBanner = document.getElementById("dnd-maintenance-banner");
+    if (dndBanner) {
+      dndBanner.classList.toggle("hidden", !active);
+      dndBanner.classList.toggle("flex", active);
+    }
+  }
+
   function updateStatusButtons() {
     document.querySelectorAll(".presence-status-btn").forEach((btn) => {
       btn.dataset.selected = String(btn.dataset.presenceStatus === selectedStatus);
     });
+    const dndHintEl = document.getElementById("presence-dnd-hint");
+    if (dndHintEl) {
+      dndHintEl.classList.toggle("hidden", selectedStatus !== "dnd");
+    }
   }
 
   function setCustomBubble(customWrapEl, customTextEl, text) {
@@ -208,6 +226,7 @@ export function createPresenceCardController({ onConfigSaved }) {
     previewRotateStep = 0;
     updateStatusButtons();
     renderPreview();
+    syncDndBannerAndBadge(selectedStatus === "dnd");
     initialState = readFormState();
   }
 
@@ -248,11 +267,30 @@ export function createPresenceCardController({ onConfigSaved }) {
     if (saveBtn) {
       saveBtn.addEventListener("click", async () => {
         const nextState = readFormState();
+        const prevStatus = String(initialState?.presence?.status || "online").toLowerCase();
+        const nextStatus = String(nextState.presence.status || "online").toLowerCase();
+        const isEnteringDnd = prevStatus !== "dnd" && nextStatus === "dnd";
+        const isLeavingDnd = prevStatus === "dnd" && nextStatus !== "dnd";
+
         await confirmSaveChanges({
-          title: "Xác nhận cập nhật trạng thái Discord Bot",
-          subtitle: "Trạng thái và hoạt động mới sẽ áp dụng trực tiếp lên hồ sơ Discord của bot",
+          title: isEnteringDnd
+            ? "Xác nhận bật chế độ bảo trì DND"
+            : isLeavingDnd
+              ? "Xác nhận tắt chế độ bảo trì DND"
+              : "Xác nhận cập nhật trạng thái Discord Bot",
+          subtitle: isEnteringDnd
+            ? "Bot sẽ chuyển sang Do Not Disturb trên Discord và tạm khóa mọi lệnh /ask & phiên AI của user thường"
+            : isLeavingDnd
+              ? "Bot sẽ rời chế độ bảo trì DND và mở khóa lại toàn bộ lệnh /ask & phiên AI cho người dùng"
+              : "Trạng thái và hoạt động mới sẽ áp dụng trực tiếp lên hồ sơ Discord của bot",
           before: initialState || {},
           after: nextState,
+          confirmLabel: isEnteringDnd
+            ? "Xác nhận bật DND bảo trì"
+            : isLeavingDnd
+              ? "Xác nhận mở khóa bot"
+              : "Xác nhận lưu",
+          confirmTone: isEnteringDnd ? "danger" : "primary",
           onConfirm: async (changes) => {
             const p = nextState.presence;
             const res = await apiRequest("/api/config/presence", {
@@ -266,11 +304,50 @@ export function createPresenceCardController({ onConfigSaved }) {
                 changes,
               }),
             });
+            syncDndBannerAndBadge(Boolean(res.maintenance_mode ?? p.status === "dnd"));
             showToast(
               res.applied_live
-                ? "✅ Đã cập nhật trạng thái Discord tức thì và lưu MongoDB Atlas!"
+                ? p.status === "dnd"
+                  ? "⛔ Đã bật chế độ bảo trì DND tức thì và ghi Audit Log!"
+                  : "✅ Đã cập nhật trạng thái Discord tức thì và lưu MongoDB Atlas!"
                 : "✅ Đã lưu cấu hình trạng thái vào MongoDB Atlas (sẽ tự áp dụng khi bot Online)."
             );
+            if (onConfigSaved) await onConfigSaved();
+          },
+        });
+      });
+    }
+
+    const disableDndBtn = document.getElementById("btn-disable-dnd-maintenance");
+    if (disableDndBtn) {
+      disableDndBtn.addEventListener("click", async () => {
+        const current = readFormState();
+        const prevStatus = String(initialState?.presence?.status || current.presence.status || "dnd").toLowerCase();
+        const nextPresence = { ...current.presence, status: "online" };
+        await confirmSaveChanges({
+          title: "Xác nhận tắt chế độ bảo trì DND",
+          subtitle: "Bot sẽ chuyển về Trực tuyến (online) trên Discord và mở khóa ngay toàn bộ lệnh /ask & phiên AI",
+          before: { presence: { ...current.presence, status: prevStatus } },
+          after: { presence: nextPresence },
+          confirmLabel: "Xác nhận mở khóa bot",
+          confirmTone: "primary",
+          onConfirm: async (changes) => {
+            const res = await apiRequest("/api/config/presence", {
+              method: "PUT",
+              body: JSON.stringify({
+                status: "online",
+                custom_status: nextPresence.custom_status,
+                activity_type: nextPresence.activity_type,
+                activity_text: nextPresence.activity_text,
+                auto_rotate: nextPresence.auto_rotate,
+                changes,
+              }),
+            });
+            selectedStatus = "online";
+            updateStatusButtons();
+            renderPreview();
+            syncDndBannerAndBadge(Boolean(res.maintenance_mode ?? false));
+            showToast("✅ Đã tắt chế độ bảo trì DND và mở khóa bot về Trực tuyến!");
             if (onConfigSaved) await onConfigSaved();
           },
         });

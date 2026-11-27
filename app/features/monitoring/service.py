@@ -39,6 +39,7 @@ class MonitoringService:
         memory_watchdog: Optional[MemoryWatchdog] = None,
         cloudflare_tunnel: Optional[CloudflareTunnelService] = None,
         warp_proxy: Optional[WarpProxyService] = None,
+        maintenance_gate: Optional[Any] = None,
         start_time: Optional[float] = None,
     ):
         self._config = config_repo
@@ -51,6 +52,7 @@ class MonitoringService:
         self._memory_watchdog = memory_watchdog
         self._cloudflare_tunnel = cloudflare_tunnel
         self._warp_proxy = warp_proxy
+        self._maintenance_gate = maintenance_gate
         self.start_time = start_time if start_time is not None else time.time()
 
     def uptime_seconds(self) -> float:
@@ -127,10 +129,24 @@ class MonitoringService:
             if self._cloudflare_tunnel is not None
             else None
         )
+        if self._maintenance_gate is not None:
+            presence_status = self._maintenance_gate.bot_status
+            maintenance_mode = bool(self._maintenance_gate.is_dnd)
+            maintenance_snapshot = self._maintenance_gate.status_snapshot()
+        else:
+            presence_status = str(self._config.presence_cfg().get("status", "online") or "online").strip().lower()
+            maintenance_mode = presence_status == "dnd"
+            maintenance_snapshot = {
+                "bot_status": presence_status,
+                "maintenance_mode": maintenance_mode,
+            }
 
         return {
             "bot": {
                 "online": bot_ready,
+                "presence_status": presence_status,
+                "maintenance_mode": maintenance_mode,
+                "maintenance_gate": maintenance_snapshot,
                 "username": str(bot_user) if bot_user else "Đang khởi động...",
                 "display_name": bot_display_name,
                 "avatar_url": bot_avatar_url,

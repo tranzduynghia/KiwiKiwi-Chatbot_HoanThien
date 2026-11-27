@@ -119,6 +119,7 @@ class AppSettings:
     discord_client_id: str = ""
     discord_client_secret: str = ""
     discord_redirect_uri: str = ""
+    admin_discord_id: str = ""
     outbound_proxy_url: str = ""
     warp_proxy_port: int = 40000
     warp_outbound_enabled: bool = True
@@ -143,6 +144,7 @@ class AppSettings:
             discord_client_id=(os.getenv("DISCORD_CLIENT_ID") or "").strip(),
             discord_client_secret=(os.getenv("DISCORD_CLIENT_SECRET") or "").strip(),
             discord_redirect_uri=(os.getenv("DISCORD_REDIRECT_URI") or "").strip(),
+            admin_discord_id=(os.getenv("ADMIN_DISCORD_ID") or "").strip(),
             outbound_proxy_url=(os.getenv("OUTBOUND_PROXY_URL") or "").strip(),
             warp_proxy_port=warp_port,
             warp_outbound_enabled=warp_default,

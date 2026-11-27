@@ -67,6 +67,20 @@ def _build_discord_proxy_kwargs(proxy_url: Optional[str]) -> dict[str, Any]:
     return result
 
 
+class DndCommandTree(app_commands.CommandTree):
+    """Cây lệnh Discord gắn cổng kiểm soát toàn cục (`interaction_check`) chặn người dùng thường khi bot đang ở chế độ bảo trì DND."""
+
+    def __init__(self, client: discord.Client, *, maintenance_gate: Any = None):
+        super().__init__(client)
+        self._maintenance_gate = maintenance_gate
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """Chặn ngay lập tức mọi slash command từ non-admin khi `bot_status == 'dnd'`, cho phép Admin vượt khóa kiểm thử."""
+        if self._maintenance_gate is not None:
+            return await self._maintenance_gate.check_interaction(interaction)
+        return True
+
+
 class AskBot(discord.Client):
     """Tiến trình bot Discord kiêm máy chủ Web Dashboard FastAPI chạy chung vòng lặp asyncio."""
 
@@ -79,7 +93,7 @@ class AskBot(discord.Client):
         self._active_outbound_proxy: Optional[str] = proxy_url
         super().__init__(intents=discord.Intents.default(), **_build_discord_proxy_kwargs(proxy_url))
         self.container = container
-        self.tree = app_commands.CommandTree(self)
+        self.tree = DndCommandTree(self, maintenance_gate=getattr(container, "maintenance_gate", None))
         self.ready_at: Optional[float] = None
         self._cleaned_guild_cmds = False
         self._web_server: Optional[uvicorn.Server] = None
@@ -228,7 +242,43 @@ class AskBot(discord.Client):
         self.container.usage_stats.attach_db(db)
         await self.container.session_repo.attach_db(db)
         await self.container.sync_coordinator.attach_db(db)
+        if getattr(self.container, "maintenance_gate", None) is not None:
+            self.container.maintenance_gate.sync_from_config()
         await self.container.session_repo.archive_expired()
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        """Chặn các tương tác nút bấm / thành phần (component) từ người dùng thường khi đang bật chế độ bảo trì DND."""
+        gate = getattr(self.container, "maintenance_gate", None)
+        if gate is None or not gate.is_dnd:
+            return
+        if getattr(interaction, "type", None) == discord.InteractionType.component:
+            await gate.check_interaction(interaction)
+
+    async def on_message(self, message: discord.Message) -> None:
+        """Chặn nhắc tên bot, trả lời tin nhắn bot hoặc nhắn tin trực tiếp khi đang bật chế độ bảo trì DND."""
+        author = getattr(message, "author", None)
+        if author is None or getattr(author, "bot", False):
+            return
+        gate = getattr(self.container, "maintenance_gate", None)
+        if gate is None or not gate.is_dnd:
+            return
+
+        is_dm = getattr(message, "guild", None) is None
+        bot_user = getattr(self, "user", None)
+        bot_id = getattr(bot_user, "id", None)
+        mentions = getattr(message, "mentions", None) or []
+        is_mentioned = bool(bot_id and any(getattr(m, "id", None) == bot_id for m in mentions))
+
+        is_reply_to_bot = False
+        ref = getattr(message, "reference", None)
+        resolved = getattr(ref, "resolved", None) if ref is not None else None
+        if resolved is not None and bot_id and getattr(getattr(resolved, "author", None), "id", None) == bot_id:
+            is_reply_to_bot = True
+
+        if not (is_dm or is_mentioned or is_reply_to_bot):
+            return
+
+        await gate.check_message(message)
 
     async def model_refresher(self) -> None:
         """Tác vụ nền định kỳ tải lại danh sách model từ Gemini API theo `model_refresh_hours`."""
@@ -294,7 +344,10 @@ class AskBot(discord.Client):
             )
             await self.container.usage_stats.save_bot_branding(avatar_url, bot_name)
 
-        await apply_bot_presence(self, self.container.config_repo.presence_cfg())
+        presence_cfg = self.container.config_repo.presence_cfg()
+        if getattr(self.container, "maintenance_gate", None) is not None:
+            self.container.maintenance_gate.sync_from_config(presence_cfg)
+        await apply_bot_presence(self, presence_cfg)
         log.info("Đăng nhập: %s (%d server)", self.user, len(self.guilds))
 
     async def close(self) -> None:

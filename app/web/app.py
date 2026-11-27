@@ -203,6 +203,11 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             usage_stats=container.usage_stats,
             tunnel_origin_url=container.cloudflare_tunnel.origin_url,
             get_tunnel_running=lambda: bool(container.cloudflare_tunnel.is_running),
+            get_bot_status=lambda: (
+                container.maintenance_gate.bot_status
+                if getattr(container, "maintenance_gate", None) is not None
+                else str(container.config_repo.presence_cfg().get("status", "online"))
+            ),
         )
     )
     app.include_router(
@@ -229,6 +234,7 @@ def create_dashboard_app(container: Any, get_bot: Callable[[], Any]) -> FastAPI:
             sync_coordinator=container.sync_coordinator,
             get_models_snapshot=container.model_registry.build_snapshot,
             auth_deps=container.auth_deps,
+            maintenance_gate=getattr(container, "maintenance_gate", None),
             apply_presence_fn=lambda presence_cfg: apply_bot_presence(get_bot(), presence_cfg),
             apply_tunnel_fn=container.cloudflare_tunnel.apply_config,
             schedule_tunnel_fn=container.cloudflare_tunnel.schedule_apply_config,
